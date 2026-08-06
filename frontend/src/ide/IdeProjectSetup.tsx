@@ -1,5 +1,7 @@
+import {ChevronRight} from 'lucide-react';
 import {Link, useParams} from 'react-router-dom';
 import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {ICON_STROKE} from '@/ide/IdeIcons';
 
 export function IdeProjectSetup() {
   const {projectId = ''} = useParams();
@@ -7,27 +9,27 @@ export function IdeProjectSetup() {
     {
       to: `/projects/${projectId}/members`,
       label: 'Members and sharing',
-      sub: 'Invite external collaborators, add org members, manage share links',
+      sub: 'Collaborators, org members, share links',
     },
     {
       to: `/projects/${projectId}/repos`,
       label: 'Repositories',
-      sub: 'Connect source repos and review workspace health',
+      sub: 'Connected source repos and workspace health',
     },
     {
       to: `/projects/${projectId}/settings`,
       label: 'Project settings',
-      sub: 'Name, description, default branch, and project lifecycle',
+      sub: 'Name, description, default branch, lifecycle',
     },
     {
       to: `/projects/${projectId}/system-map`,
       label: 'System map',
-      sub: 'Architecture, codemaps, and generated project documentation',
+      sub: 'Architecture, codemaps, generated docs',
     },
     {
       to: `/projects/${projectId}/activity`,
       label: 'Activity',
-      sub: 'Recent project changes and operational events',
+      sub: 'Recent project and operational events',
     },
   ];
 
@@ -35,9 +37,7 @@ export function IdeProjectSetup() {
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
       <h1 className='ide-h1'>Project setup</h1>
-      <div className='ide-sub'>
-        Configure access, repositories, and project context for this workspace.
-      </div>
+      <div className='ide-sub'>Access, repositories, and project context.</div>
       <div className='ide-card' style={{padding: 0}}>
         {rows.map((row, i) => (
           <Link
@@ -52,7 +52,12 @@ export function IdeProjectSetup() {
               <span className='ide-work-title'>{row.label}</span>
               <span className='ide-work-meta'>{row.sub}</span>
             </span>
-            <span className='ide-work-provider'>Open</span>
+            {/* "Open" was a word doing an affordance's job, and it read as a
+                control that was not one. The chevron says the same thing and
+                tracks the type ramp. The row itself is the link. */}
+            <span className='gf-rowchevron' aria-hidden='true'>
+              <ChevronRight size='1.15em' strokeWidth={ICON_STROKE} />
+            </span>
           </Link>
         ))}
       </div>

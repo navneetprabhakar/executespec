@@ -190,6 +190,25 @@ describe('billingUtils', () => {
     expect(cards.every((card) => card.monthly == null || card.monthly === 0)).toBe(true);
     expect(cards.some((card) => (card.monthly ?? 0) > 0)).toBe(false);
   });
+
+  // Presentation order only. BYOK and PRO+ are real V253 rows, and before this
+  // they fell through the unknown-tier branch and rendered AFTER Enterprise.
+  it('orders the V253 ladder instead of dumping BYOK and PRO+ after ENTERPRISE', () => {
+    const cards = planCardsFrom([
+      plan({tier: 'TEAM', period: 'MONTHLY', perSeatUsd: 5000}),
+      plan({tier: 'BYOK', period: 'MONTHLY', baseAmountUsd: 5000}),
+      plan({tier: 'PRO_PLUS', period: 'MONTHLY', baseAmountUsd: 10000}),
+      plan({tier: 'PRO', period: 'MONTHLY', baseAmountUsd: 2000}),
+    ]);
+    expect(cards.map((card) => card.tier)).toEqual([
+      'FREE',
+      'PRO',
+      'PRO_PLUS',
+      'BYOK',
+      'TEAM',
+      'ENTERPRISE',
+    ]);
+  });
 });
 
 function plan(overrides: Partial<BillingPlan>): BillingPlan {

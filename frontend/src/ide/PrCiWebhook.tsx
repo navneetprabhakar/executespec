@@ -45,7 +45,7 @@ export function PrCiWebhookNotice({
   }
 
   return (
-    <div style={{marginTop: 8, fontSize: 12}}>
+    <div style={{marginTop: 8, fontSize: 'var(--ide-t-caption)'}}>
       <div style={{color: 'var(--ide-fg-muted)'}}>{notice.message}</div>
       {notice.repoId && phase !== 'done' && (
         <button
@@ -110,7 +110,7 @@ export function RunPrCiPanel({runId}: {runId: string}) {
             }}
           >
             <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
-              <span className='ide-mono' style={{fontSize: 12}}>
+              <span className='ide-mono' style={{fontSize: 'var(--ide-t-caption)'}}>
                 {pr.repoFullName}#{pr.prNumber}
               </span>
               <IdeBadge

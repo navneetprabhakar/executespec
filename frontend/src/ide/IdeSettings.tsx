@@ -298,11 +298,7 @@ export function IdeIntegrations() {
       ) : (
         // RR-772 — a connected integration must be revocable from the surface where
         // it was connected. The server exposes DELETE /integrations/slack/disconnect.
-        <button
-          className='ide-btn ghost'
-          style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
-          onClick={() => setDisconnectSlack(true)}
-        >
+        <button className='ide-btn danger' style={INT_BTN} onClick={() => setDisconnectSlack(true)}>
           Disconnect
         </button>
       ),
@@ -348,15 +344,7 @@ export function IdeIntegrations() {
       <div className='ide-sub'>Connect GitHub, Slack, and your issue trackers.</div>
 
       {(err || msg) && (
-        <div
-          className='ide-card'
-          style={{
-            marginBottom: 12,
-            fontSize: 13,
-            color: err ? 'var(--ide-red)' : 'var(--ide-green)',
-            borderColor: err ? 'var(--ide-red)' : 'var(--ide-green)',
-          }}
-        >
+        <div className={`ide-note ${err ? 'bad' : 'ok'}`} style={{marginBottom: 12}} role='status'>
           {err || msg}
         </div>
       )}
@@ -367,36 +355,31 @@ export function IdeIntegrations() {
         <IdeLoader label='Loading integrations…' />
       ) : (
         <div className='ide-card' style={{padding: 0}}>
-          {rows.map((r, i) => (
-            <div
-              key={r.name}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '13px 16px',
-                borderBottom: i < rows.length - 1 ? '1px solid var(--ide-border)' : 'none',
-              }}
-            >
-              <div style={{flex: 1, minWidth: 0}}>
-                <div style={{fontWeight: 500}}>
+          {rows.map((r) => (
+            <div key={r.name} className='ob-row'>
+              <div className='ob-row-main'>
+                <div className='ob-row-title'>
                   {r.name}
                   {r.sub && (
                     <span style={{color: 'var(--ide-fg-muted)', fontWeight: 400}}> · {r.sub}</span>
                   )}
                 </div>
-                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
-                  {r.desc}
-                </div>
+                <div className='ob-row-meta'>{r.desc}</div>
               </div>
-              <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
-                {r.connected
-                  ? 'Connected'
-                  : r.statusUnknown
-                    ? 'Status unavailable'
-                    : 'Not connected'}
-              </IdeBadge>
-              {r.actions}
+              {/* ALIGNMENT IS A COLUMN — "Connected", "Not connected" and
+                  "Status unavailable" are three different widths, so a
+                  shrink-to-fit badge started every row's action button at a
+                  different x. */}
+              <div className='ob-status ob-status-wide'>
+                <IdeBadge kind={r.connected ? 'ok' : 'warn'}>
+                  {r.connected
+                    ? 'Connected'
+                    : r.statusUnknown
+                      ? 'Status unavailable'
+                      : 'Not connected'}
+                </IdeBadge>
+              </div>
+              <div className='ob-actions ob-actions-fixed'>{r.actions}</div>
             </div>
           ))}
         </div>
@@ -417,38 +400,38 @@ export function IdeIntegrations() {
         <div className='ide-empty'>No personal access tokens.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
-          {pats.map((token, i) => (
-            <div
-              key={token.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '12px 16px',
-                borderBottom: i < pats.length - 1 ? '1px solid var(--ide-border)' : 'none',
-              }}
-            >
-              <div style={{flex: 1, minWidth: 0}}>
-                <div style={{fontWeight: 500}}>{token.name}</div>
-                <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
-                  {token.tokenPrefix}… · created {new Date(token.createdAt).toLocaleDateString()}
-                  {token.lastUsedAt
-                    ? ` · last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
-                    : ' · never used'}
+          {pats.map((token) => (
+            <div key={token.id} className='ob-row'>
+              <div className='ob-row-main'>
+                <div className='ob-row-title ob-truncate'>{token.name}</div>
+                <div className='ob-row-meta'>
+                  <span className='ide-mono'>{token.tokenPrefix}…</span>
+                  <span>·</span>
+                  <span>created {new Date(token.createdAt).toLocaleDateString()}</span>
+                  <span>·</span>
+                  <span>
+                    {token.lastUsedAt
+                      ? `last used ${new Date(token.lastUsedAt).toLocaleDateString()}`
+                      : 'never used'}
+                  </span>
                 </div>
               </div>
-              <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
-                {token.revoked ? 'Revoked' : 'Active'}
-              </IdeBadge>
-              {!token.revoked && (
-                <button
-                  className='ide-btn ghost'
-                  style={{...INT_BTN, color: 'var(--ide-red)', borderColor: 'var(--ide-red)'}}
-                  onClick={() => setRevokePat(token)}
-                >
-                  Revoke
-                </button>
-              )}
+              <div className='ob-status'>
+                <IdeBadge kind={token.revoked ? 'warn' : 'ok'}>
+                  {token.revoked ? 'Revoked' : 'Active'}
+                </IdeBadge>
+              </div>
+              <div className='ob-actions'>
+                {!token.revoked && (
+                  <button
+                    className='ide-btn danger'
+                    style={INT_BTN}
+                    onClick={() => setRevokePat(token)}
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

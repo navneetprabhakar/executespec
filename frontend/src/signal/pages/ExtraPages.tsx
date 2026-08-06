@@ -16,12 +16,7 @@ export function TrustPage() {
             <div key={b.label} className={`signal-quick-card ${b.tone}`}>
               <div className='icon-bg'>✓</div>
               <h4>{b.label}</h4>
-              <div
-                className='count'
-                style={{color: 'var(--signal-ink)', fontSize: 14, fontWeight: 600}}
-              >
-                {b.v}
-              </div>
+              <div className='count signal-trust-count'>{b.v}</div>
             </div>
           ))}
         </div>
@@ -41,7 +36,7 @@ export function TrustPage() {
 
         <SectionHeader>What we never do</SectionHeader>
         <Card>
-          <ul style={{padding: '0 0 0 18px', margin: 0, fontSize: 14, lineHeight: 1.7}}>
+          <ul className='signal-trust-list'>
             <li>Train any model on your source code</li>
             <li>Retain your code outside the run workspace</li>
             <li>Share your data with third parties beyond the LLM provider you picked</li>
@@ -51,7 +46,7 @@ export function TrustPage() {
 
         <SectionHeader>How execution is constrained</SectionHeader>
         <Card>
-          <ul style={{padding: '0 0 0 18px', margin: 0, fontSize: 14, lineHeight: 1.7}}>
+          <ul className='signal-trust-list'>
             <li>Every run gets its own workspace directory, retained for run evidence</li>
             <li>Shell commands and file access are restricted by an enforced policy</li>
             <li>Generated code is scanned for abuse patterns before execution</li>
@@ -62,7 +57,7 @@ export function TrustPage() {
 
         <SectionHeader>Where we are on certifications</SectionHeader>
         <Card>
-          <div style={{fontSize: 14, lineHeight: 1.7, color: 'var(--signal-text-dim)'}}>
+          <div className='signal-trust-note'>
             We're an early-stage company and we only publish what's true today. SOC 2 Type II is on
             our roadmap, not yet certified — happy to walk through our current controls or complete
             your security questionnaire:{' '}
@@ -112,10 +107,12 @@ export function PublicPricingPage() {
     <>
       <TopBar title='Pricing' sub='Start free · upgrade when you need to' back backTo='/login' />
       <Feed>
-        <Card style={{fontSize: 13, color: 'var(--signal-text-dim)', lineHeight: 1.6}}>
-          Managed AI is metered in <b>AI credits</b> — $1.25 = 100 credits, charged from real model
-          cost as your run works. Frontier models step down automatically near your monthly cap; use
-          BYOK to remove it. Pro bills monthly; Team is monthly, per seat.
+        {/* Seven lines of mono at 375px before the first price. Same facts,
+            fewer restated clauses — the per-tier cards carry the rest. */}
+        <Card className='signal-price-note'>
+          Managed AI is metered in <b>AI credits</b>: $1.25 = 100 credits, charged from real model
+          cost as the run works. Near your monthly cap, frontier models step down automatically —
+          BYOK removes the cap.
         </Card>
 
         <div className='signal-grid cols-2 cols-4-xl'>
@@ -188,84 +185,49 @@ export function PublicPricingPage() {
               ],
             },
           ].map((p) => (
-            <Card
-              key={p.tier}
-              style={{position: 'relative', borderColor: p.best ? 'var(--signal-ink)' : undefined}}
-            >
-              {p.best && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: -10,
-                    right: 16,
-                    background: 'var(--signal-y)',
-                    color: 'var(--signal-y-text)',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: '3px 9px',
-                    borderRadius: 999,
-                  }}
-                >
-                  RECOMMENDED
-                </div>
-              )}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'baseline',
-                  marginBottom: 6,
-                }}
-              >
-                <div style={{fontSize: 16, fontWeight: 700}}>{p.tier}</div>
-                <div>
-                  <span style={{fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em'}}>
-                    {p.price}
-                  </span>
-                  {p.unit && (
-                    <span style={{fontSize: 13, color: 'var(--signal-text-dim)', fontWeight: 400}}>
-                      {p.unit}
-                    </span>
-                  )}
+            // Recommended is a leading stripe (`.is-best`), not a swapped card
+            // border — a repainted edge read as a selected/error state and gave
+            // the row two competing edge treatments.
+            <Card key={p.tier} className={`signal-price-card${p.best ? ' is-best' : ''}`}>
+              {p.best && <div className='signal-price-flag'>RECOMMENDED</div>}
+              <div className='signal-price-head'>
+                <div className='signal-price-tier'>{p.tier}</div>
+                <div className='signal-price-amount'>
+                  {p.price}
+                  {p.unit && <span className='signal-price-unit'>{p.unit}</span>}
                 </div>
               </div>
-              <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginBottom: 14}}>
-                {p.sub}
-              </div>
-              <ul
-                style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: 0,
-                  display: 'grid',
-                  gap: 8,
-                  fontSize: 13,
-                }}
-              >
+              <div className='signal-price-sub'>{p.sub}</div>
+              <ul className='signal-price-features'>
                 {p.features.map((f) => (
-                  <li key={f}>✓ {f}</li>
+                  <li key={f}>
+                    <span>{f}</span>
+                  </li>
                 ))}
               </ul>
-              <Button
-                kind={p.best ? 'primary' : 'secondary'}
-                block
-                style={{marginTop: 14}}
-                to={p.tier === 'ENTERPRISE' ? undefined : '/register'}
-                onClick={
-                  p.tier === 'ENTERPRISE'
-                    ? () => {
-                        window.location.href =
-                          'mailto:sales@executespec.ai?subject=Enterprise%20plan';
-                      }
-                    : undefined
-                }
-              >
-                {p.tier === 'ENTERPRISE'
-                  ? 'Talk to sales'
-                  : p.tier === 'FREE'
-                    ? 'Start free'
-                    : 'Get started'}
-              </Button>
+              {/* Pushed to the card's bottom edge so all five CTAs land on one
+                  baseline regardless of how long that tier's feature list is. */}
+              <div className='signal-price-cta'>
+                <Button
+                  kind={p.best ? 'primary' : 'secondary'}
+                  block
+                  to={p.tier === 'ENTERPRISE' ? undefined : '/register'}
+                  onClick={
+                    p.tier === 'ENTERPRISE'
+                      ? () => {
+                          window.location.href =
+                            'mailto:sales@executespec.ai?subject=Enterprise%20plan';
+                        }
+                      : undefined
+                  }
+                >
+                  {p.tier === 'ENTERPRISE'
+                    ? 'Talk to sales'
+                    : p.tier === 'FREE'
+                      ? 'Start free'
+                      : 'Get started'}
+                </Button>
+              </div>
             </Card>
           ))}
         </div>

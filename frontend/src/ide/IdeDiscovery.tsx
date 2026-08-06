@@ -3,20 +3,18 @@
 import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {insightCards, outcomePercent, providerRows, topUserLabel} from './discoveryUtils';
+import './surfaces/systemdiscovery.css';
 
-// Inline error banner — red-bordered ide-card. Mirrors the Banner in IdeProjectMore.
+// Version B: type comes from the `--ide-t-*` ramp via `.sysd-*` classes in
+// surfaces/systemdiscovery.css, never a px literal in a style prop — the phone
+// step-down at <=600px is attached to the tokens.
+
+// Inline error note. Rule 2 — a failure is a 3px leading edge on a tinted
+// note, not a card whose whole border is repainted red.
 function ErrBanner({msg}: {msg?: string}) {
   if (!msg) return null;
   return (
-    <div
-      className='ide-card'
-      style={{
-        marginBottom: 12,
-        fontSize: 13,
-        color: 'var(--ide-red)',
-        borderColor: 'var(--ide-red)',
-      }}
-    >
+    <div className='ide-note bad' style={{marginBottom: 12}}>
       {msg}
     </div>
   );
@@ -88,19 +86,24 @@ export function IdeInsights() {
       label: 'Runs completed',
       value: (
         <>
-          {insights.shipped}{' '}
-          <span style={{color: 'var(--ide-fg-muted)', fontSize: 13}}>of {insights.total}</span>
+          {insights.shipped} <small>of {insights.total}</small>
         </>
       ),
     },
   ];
+
+  // A zero-run range used to collapse all three `flex: <count>` children to
+  // zero width, painting an unexplained 18px void. Say "no runs" instead.
+  const hasOutcomes = insights.shipped + insights.needs + insights.failed > 0;
 
   return (
     <div className='ide-pane'>
       <h1 className='ide-h1'>Insights</h1>
       <div className='ide-sub'>Last {days} days · all projects</div>
 
-      <div className='ide-rtabs' style={{marginBottom: 12}}>
+      {/* A three-control range switch must not stretch into a rule across the
+          whole pane; `.sysd-range` sizes it to its content. */}
+      <div className='ide-rtabs sysd-range'>
         {RANGES.map((r) => (
           <button
             key={r.n}
@@ -115,24 +118,11 @@ export function IdeInsights() {
 
       <ErrBanner msg={err} />
 
-      <div className='ide-grid' style={{marginBottom: 4}}>
+      <div className='sysd-metrics'>
         {cards.map((c) => (
           <div key={c.label} className='ide-card'>
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: 'var(--ide-fg-muted)',
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                marginBottom: 6,
-              }}
-            >
-              {c.label}
-            </div>
-            <div style={{fontSize: 18, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-              {c.value}
-            </div>
+            <div className='sysd-metric-label'>{c.label}</div>
+            <div className='sysd-metric-value'>{c.value}</div>
           </div>
         ))}
       </div>
@@ -140,9 +130,7 @@ export function IdeInsights() {
       <SectionLabel>Cost by provider</SectionLabel>
       <div className='ide-card'>
         {providers.length === 0 ? (
-          <p style={{fontSize: 13, color: 'var(--ide-fg-muted)', margin: 0}}>
-            No provider data yet for this range.
-          </p>
+          <p className='sysd-note'>No provider data yet for this range.</p>
         ) : (
           <KvRows
             pairs={providers.map((p) => ({
@@ -155,32 +143,45 @@ export function IdeInsights() {
 
       <SectionLabel>Run outcomes · {days}d</SectionLabel>
       <div className='ide-card'>
-        <div
-          style={{
-            display: 'flex',
-            gap: 4,
-            height: 18,
-            borderRadius: 999,
-            overflow: 'hidden',
-            marginBottom: 14,
-          }}
-        >
-          <div style={{flex: insights.shipped, background: 'var(--ide-green)'}} />
-          <div style={{flex: insights.needs, background: 'var(--ide-yellow)'}} />
-          <div style={{flex: insights.failed, background: 'var(--ide-red)'}} />
-        </div>
+        {hasOutcomes ? (
+          <div className='sysd-outcome'>
+            <div style={{flex: insights.shipped, background: 'var(--ide-green)'}} />
+            <div style={{flex: insights.needs, background: 'var(--ide-yellow)'}} />
+            <div style={{flex: insights.failed, background: 'var(--ide-red)'}} />
+          </div>
+        ) : (
+          <>
+            <div className='sysd-outcome-empty' />
+            <div className='sysd-outcome-none'>No runs in this range.</div>
+          </>
+        )}
         <KvRows
           pairs={[
             {
-              k: <span style={{color: 'var(--ide-green)'}}>● Shipped</span>,
+              k: (
+                <>
+                  <span className='sysd-swatch' style={{background: 'var(--ide-green)'}} />
+                  Shipped
+                </>
+              ),
               v: `${insights.shipped} (${outcomePercent(insights.shipped, insights.total)}%)`,
             },
             {
-              k: <span style={{color: 'var(--ide-yellow)'}}>● Needs review</span>,
+              k: (
+                <>
+                  <span className='sysd-swatch' style={{background: 'var(--ide-yellow)'}} />
+                  Needs review
+                </>
+              ),
               v: `${insights.needs} (${outcomePercent(insights.needs, insights.total)}%)`,
             },
             {
-              k: <span style={{color: 'var(--ide-red)'}}>● Failed / cancelled</span>,
+              k: (
+                <>
+                  <span className='sysd-swatch' style={{background: 'var(--ide-red)'}} />
+                  Failed / cancelled
+                </>
+              ),
               v: `${insights.failed} (${outcomePercent(insights.failed, insights.total)}%)`,
             },
           ]}
@@ -191,10 +192,8 @@ export function IdeInsights() {
         <>
           <SectionLabel>Most active user</SectionLabel>
           <div className='ide-card'>
-            <div style={{fontSize: 13, fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-              {topUser.name}
-            </div>
-            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+            <div className='sysd-top-user'>{topUser.name}</div>
+            <div className='sysd-top-user-meta'>
               {topUser.runCount} runs
               {topUser.successRate != null
                 ? ` · ${Math.round(topUser.successRate * 100)}% success`

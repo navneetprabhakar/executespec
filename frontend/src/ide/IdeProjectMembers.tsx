@@ -23,6 +23,46 @@ const INVITE_ROLES: api.ProjectInviteRole[] = [
   'PROJECT_ADMIN',
 ];
 
+/** `PROJECT_DEVELOPER` → `Developer`. The exact enum stays on the title attribute. */
+function roleLabel(role: string): string {
+  const bare = role.replace('PROJECT_', '').toLowerCase();
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+}
+
+/**
+ * Role choice as one segmented control.
+ *
+ * Was three ghost buttons whose selected state was an inline `borderColor` +
+ * `color` override, so "chosen" was communicated by a control changing its own
+ * metric. Every segment keeps `--ide-control-h`; these are the project member
+ * invite targets the a11y script pins at 32px.
+ */
+function RolePicker({
+  legend,
+  value,
+  onChange,
+}: {
+  legend: string;
+  value: api.ProjectInviteRole;
+  onChange: (role: api.ProjectInviteRole) => void;
+}) {
+  return (
+    <div className='gf-seg' role='group' aria-label={legend}>
+      {INVITE_ROLES.map((r) => (
+        <button
+          key={r}
+          type='button'
+          aria-pressed={r === value}
+          style={{minHeight: 32}}
+          onClick={() => onChange(r)}
+        >
+          {roleLabel(r)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function IdeProjectMembers() {
   const {projectId = ''} = useParams();
   const user = useAuthStore((s) => s.user);
@@ -252,55 +292,54 @@ export function IdeProjectMembers() {
         <div className='ide-empty'>No members.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
-          {members.map((m, i) => {
+          {members.map((m) => {
             const isExternal = isExternalProjectMember(
               m as api.ProjectMemberDto & {external?: boolean},
             );
             const isMe = m.userId === user?.id;
             const role = m.projectRole || 'PROJECT_DEVELOPER';
             return (
-              <div
-                key={m.userId}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '11px 16px',
-                  borderBottom: i < members.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                }}
-              >
-                <span style={{flex: 1, fontWeight: 500}}>
-                  {memberDisplayName(m)}
-                  {isMe && <span style={{color: 'var(--ide-fg-muted)'}}> · you</span>}
-                  {isExternal && (
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        marginLeft: 6,
-                        padding: '1px 6px',
-                        background: 'var(--ide-bg-input)',
-                        color: 'var(--ide-blue)',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        borderRadius: 'var(--ide-r-control)',
-                      }}
-                    >
-                      EXT
+              <div key={m.userId} className='ide-project-row'>
+                <div className='ide-project-row-body'>
+                  {/* The chip sits OUTSIDE the truncating text, not inside it: at
+                      375px a long name's ellipsis ate the whole `External` chip,
+                      losing the one fact it exists to carry. */}
+                  <span className='ide-project-row-title gf-titleline'>
+                    <span className='gf-titletext'>
+                      {memberDisplayName(m)}
+                      {isMe && <span className='gf-hint'> · you</span>}
                     </span>
+                    {/* Identity, not state. This was a tracked-out uppercase `EXT`
+                        painted in the accent blue, which made "this person is
+                        outside your org" — an always-true fact — shout as loudly
+                        as a measured warning. */}
+                    {isExternal && (
+                      <span className='ide-badge gf-idchip' title='External collaborator'>
+                        External
+                      </span>
+                    )}
+                  </span>
+                  {/* The email was a middle flex item, so at 375px it crushed the
+                      name it belongs to. It is the row's sub-line and truncates. */}
+                  <span className='ide-project-row-sub'>{m.email}</span>
+                </div>
+                {/* A role is an identity too: neutral, and in a fixed cell so the
+                    Remove control does not dance left and right down the list. */}
+                <span className='gf-rolecol'>
+                  <span className='ide-badge' title={role}>
+                    {roleLabel(role)}
+                  </span>
+                </span>
+                {/* The cell is reserved even when there is no action, so a row
+                    that cannot be removed ("you") does not shift the role column
+                    88px right of every other row. */}
+                <span className='gf-actioncol'>
+                  {canManageMembers && !isMe && (
+                    <button className='ide-btn danger' onClick={() => setRemoveFor(m.userId)}>
+                      Remove
+                    </button>
                   )}
                 </span>
-                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{m.email}</span>
-                <IdeBadge kind='ok'>{role}</IdeBadge>
-                {canManageMembers && !isMe && (
-                  <button
-                    className='ide-btn ghost'
-                    style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                    onClick={() => setRemoveFor(m.userId)}
-                  >
-                    Remove
-                  </button>
-                )}
               </div>
             );
           })}
@@ -310,17 +349,16 @@ export function IdeProjectMembers() {
       {canManageMembers && selectableOrgMembers.length > 0 && (
         <>
           <div className='ide-h2'>Add org member</div>
-          <div className='ide-card'>
-            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
-              Grant this project to someone who is already in your organization. This does not send
-              an invite or change their org role.
+          <div className='ide-card gf-form'>
+            <div className='gf-hint'>
+              Grants project access to someone already in your org. No invite email; org role
+              unchanged.
             </div>
             <select
               className='ide-select'
               aria-label='Organization member to add'
               value={orgMemberUserId}
               onChange={(e) => setOrgMemberUserId(e.target.value)}
-              style={{marginBottom: 8}}
             >
               <option value=''>Select org member…</option>
               {selectableOrgMembers.map((member) => (
@@ -329,24 +367,11 @@ export function IdeProjectMembers() {
                 </option>
               ))}
             </select>
-            <div style={{display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap'}}>
-              {INVITE_ROLES.map((r) => (
-                <button
-                  key={r}
-                  type='button'
-                  className='ide-btn ghost'
-                  style={{
-                    minHeight: 32,
-                    padding: '5px 10px',
-                    borderColor: r === orgMemberRole ? 'var(--ide-accent)' : undefined,
-                    color: r === orgMemberRole ? 'var(--ide-accent)' : undefined,
-                  }}
-                  onClick={() => setOrgMemberRole(r)}
-                >
-                  {r.replace('PROJECT_', '').toLowerCase()}
-                </button>
-              ))}
-            </div>
+            <RolePicker
+              legend='Project role for the org member'
+              value={orgMemberRole}
+              onChange={setOrgMemberRole}
+            />
             <button
               className='ide-btn'
               disabled={busy === 'add-member' || !orgMemberUserId}
@@ -362,10 +387,10 @@ export function IdeProjectMembers() {
         (canInviteExternals ? (
           <>
             <div className='ide-h2'>Invite external collaborator</div>
-            <div className='ide-card'>
-              <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 10}}>
-                Invite by email to this project only. Gmail, Outlook, contractors, and partner
-                domains are allowed here when project external collaborators are enabled.
+            <div className='ide-card gf-form'>
+              <div className='gf-hint'>
+                Email invite scoped to this project only. Any domain — Gmail, Outlook, contractor,
+                partner — while external collaborators are enabled.
               </div>
               <input
                 className='ide-input'
@@ -374,26 +399,12 @@ export function IdeProjectMembers() {
                 placeholder='teammate@company.com'
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                style={{marginBottom: 8}}
               />
-              <div style={{display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap'}}>
-                {INVITE_ROLES.map((r) => (
-                  <button
-                    key={r}
-                    type='button'
-                    className='ide-btn ghost'
-                    style={{
-                      minHeight: 32,
-                      padding: '5px 10px',
-                      borderColor: r === inviteRole ? 'var(--ide-accent)' : undefined,
-                      color: r === inviteRole ? 'var(--ide-accent)' : undefined,
-                    }}
-                    onClick={() => setInviteRole(r)}
-                  >
-                    {r.replace('PROJECT_', '').toLowerCase()}
-                  </button>
-                ))}
-              </div>
+              <RolePicker
+                legend='Project role for the invited collaborator'
+                value={inviteRole}
+                onChange={setInviteRole}
+              />
               <button
                 className='ide-btn'
                 disabled={busy === 'invite' || !inviteEmail.trim()}
@@ -406,49 +417,24 @@ export function IdeProjectMembers() {
         ) : (
           <>
             <div className='ide-h2'>Invite external collaborator</div>
-            <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: 'var(--ide-blue)',
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  marginBottom: 6,
-                }}
-              >
-                Project external collaborators are off
-              </div>
-              <div style={{fontSize: 13, lineHeight: 1.55}}>
-                Project-only external collaborators are disabled for your org, so people outside it
-                can&apos;t be invited to this project. Enable it in{' '}
-                <a href='/org/settings' style={{color: 'var(--ide-accent)'}}>
-                  Org settings → Project external collaborators
-                </a>
-                .
-              </div>
+            {/* Was a whole card repainted blue under a tracked-out uppercase
+                micro-label. State is a 3px leading edge; emphasis is weight. */}
+            <div className='ide-note info'>
+              <span className='gf-note-title'>External collaborators are off for your org</span>
+              People outside your org can&apos;t be invited to this project. Enable it in{' '}
+              <a className='gf-note-link' href='/org/settings'>
+                Org settings → Project external collaborators
+              </a>
+              .
             </div>
           </>
         ))}
 
       {!canManageMembers && (
-        <div className='ide-card' style={{borderColor: 'var(--ide-blue)', marginTop: 12}}>
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: 'var(--ide-blue)',
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              marginBottom: 6,
-            }}
-          >
-            Invite access is admin-only
-          </div>
-          <div style={{fontSize: 13, lineHeight: 1.55}}>
-            Ask an org admin to invite project collaborators or change your role. You can still view
-            current members. Share links are managed by project writers and org admins.
-          </div>
+        <div className='ide-note info' style={{marginTop: 'var(--ide-s3)'}}>
+          <span className='gf-note-title'>Invites are admin-only</span>
+          Ask an org admin to invite collaborators or change your role. You can still view current
+          members. Share links are managed by project writers and org admins.
         </div>
       )}
 
@@ -467,48 +453,29 @@ export function IdeProjectMembers() {
             <div className='ide-empty'>No pending invites.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
-              {invites.map((iv, i) => (
-                <div
-                  key={iv.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '11px 16px',
-                    borderBottom: i < invites.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                  }}
-                >
-                  <div style={{minWidth: 0, flex: 1}}>
-                    <div style={{fontWeight: 600}}>{iv.email}</div>
-                    <div
-                      className='ide-mono'
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--ide-fg-muted)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {iv.projectRole.replace('PROJECT_', '').toLowerCase()} · {iv.status}
+              {invites.map((iv) => (
+                <div key={iv.id} className='ide-project-row'>
+                  <div className='ide-project-row-body'>
+                    <span className='ide-project-row-title'>{iv.email}</span>
+                    <span className='ide-project-row-sub'>
+                      {roleLabel(iv.projectRole)} · {iv.status}
                       {iv.expiresAt && ` · expires ${new Date(iv.expiresAt).toLocaleDateString()}`}
-                    </div>
+                    </span>
                   </div>
-                  <button
-                    className='ide-btn ghost'
-                    style={{minHeight: 32, padding: '5px 8px'}}
-                    disabled={busy === `invite-${iv.id}`}
-                    onClick={() => void resendInvite(iv)}
-                  >
-                    {busy === `invite-${iv.id}` ? 'Sending…' : 'Resend'}
-                  </button>
-                  <button
-                    className='ide-btn ghost'
-                    style={{minHeight: 32, padding: '5px 8px', color: 'var(--ide-red)'}}
-                    onClick={() => setRevokeInviteFor(iv.id)}
-                  >
-                    Revoke
-                  </button>
+                  <div className='gf-actions'>
+                    <button
+                      className='ide-btn ghost'
+                      disabled={busy === `invite-${iv.id}`}
+                      onClick={() => void resendInvite(iv)}
+                    >
+                      {busy === `invite-${iv.id}` ? 'Sending…' : 'Resend'}
+                    </button>
+                    {/* Destruction is quiet until aimed at: `.danger` is a ghost
+                        that reddens on hover, not a permanently red control. */}
+                    <button className='ide-btn danger' onClick={() => setRevokeInviteFor(iv.id)}>
+                      Revoke
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -523,12 +490,12 @@ export function IdeProjectMembers() {
           : ''}
       </div>
       {newShareUrl && (
-        <div className='ide-card' style={{marginBottom: 10}} role='status'>
-          <div style={{fontWeight: 650, marginBottom: 6}}>New link — shown once</div>
-          <div className='ide-mono' style={{fontSize: 12, overflowWrap: 'anywhere'}}>
+        <div className='ide-note warn' style={{marginBottom: 'var(--ide-s3)'}} role='status'>
+          <span className='gf-note-title'>New link — shown once</span>
+          <div className='ide-mono' style={{overflowWrap: 'anywhere'}}>
             {newShareUrl}
           </div>
-          <div style={{display: 'flex', gap: 8, marginTop: 10}}>
+          <div className='gf-actions' style={{marginTop: 'var(--ide-s3)'}}>
             <button
               className='ide-btn'
               onClick={() =>
@@ -555,42 +522,21 @@ export function IdeProjectMembers() {
         <div className='ide-empty'>No share links yet.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
-          {shareLinks.map((s, i) => {
+          {shareLinks.map((s) => {
+            // RR-1511 — an explicit per-row state so a revoked/expired link is not
+            // shown as if it still grants access. This IS measured state, so it
+            // keeps its colour and leads the row in a fixed cell.
+            const st = shareLinkStatus(s);
             return (
-              <div
-                key={s.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '11px 16px',
-                  borderBottom: i < shareLinks.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                }}
-              >
-                <div style={{flex: 1, minWidth: 0}}>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                    <span style={{fontWeight: 600}}>{s.surface}</span>
-                    {/* RR-1511 — an explicit per-row state so a revoked/expired link is not shown
-                        as if it still grants access. */}
-                    {(() => {
-                      const st = shareLinkStatus(s);
-                      return (
-                        <IdeBadge kind={st === 'Active' ? 'ok' : st === 'Revoked' ? 'bad' : 'warn'}>
-                          {st}
-                        </IdeBadge>
-                      );
-                    })()}
-                  </div>
-                  <div
-                    className='ide-mono'
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--ide-fg-muted)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+              <div key={s.id} className='ide-project-row'>
+                <span className='ide-project-statuscol'>
+                  <IdeBadge kind={st === 'Active' ? 'ok' : st === 'Revoked' ? 'bad' : 'warn'}>
+                    {st}
+                  </IdeBadge>
+                </span>
+                <div className='ide-project-row-body'>
+                  <span className='ide-project-row-title'>{s.surface}</span>
+                  <span className='ide-project-row-sub ide-mono'>
                     {canManageShares
                       ? `Credential ${s.tokenPrefix}… · URL hidden after creation`
                       : 'Share link details are managed by project writers.'}
@@ -598,28 +544,20 @@ export function IdeProjectMembers() {
                     {` · ${s.views} view${s.views === 1 ? '' : 's'}`}
                     {s.lastViewedAt &&
                       ` · last viewed ${new Date(s.lastViewedAt).toLocaleDateString()}`}
-                  </div>
+                  </span>
                 </div>
                 {canManageShares && (
-                  <>
-                    <button
-                      className='ide-btn ghost'
-                      style={{padding: '3px 8px'}}
-                      onClick={() => void showShareAudit(s.id)}
-                    >
+                  <div className='gf-actions'>
+                    <button className='ide-btn ghost' onClick={() => void showShareAudit(s.id)}>
                       {shareAuditLinkId === s.id ? 'Hide audit' : 'Audit'}
                     </button>
                     {/* RR-1511 — Revoke only makes sense on a still-active link. */}
-                    {shareLinkStatus(s) === 'Active' && (
-                      <button
-                        className='ide-btn ghost'
-                        style={{padding: '3px 8px', color: 'var(--ide-red)'}}
-                        onClick={() => setRevokeFor(s.id)}
-                      >
+                    {st === 'Active' && (
+                      <button className='ide-btn danger' onClick={() => setRevokeFor(s.id)}>
                         Revoke
                       </button>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             );
@@ -627,27 +565,18 @@ export function IdeProjectMembers() {
         </div>
       )}
       {shareAuditLinkId && (
-        <div className='ide-card' style={{marginTop: 10}} aria-live='polite'>
-          <div style={{fontWeight: 650, marginBottom: 8}}>Latest share-link activity</div>
+        <div className='ide-card' style={{marginTop: 'var(--ide-s3)'}} aria-live='polite'>
+          <span className='gf-note-title'>Latest share-link activity</span>
           {shareAudit === null ? (
             <IdeLoader label='Loading audit…' />
           ) : shareAudit.length === 0 ? (
             <div className='ide-empty'>No activity recorded.</div>
           ) : (
             shareAudit.map((event) => (
-              <div
-                key={event.id}
-                style={{
-                  display: 'flex',
-                  gap: 10,
-                  padding: '7px 0',
-                  borderBottom: '1px solid var(--ide-border)',
-                  fontSize: 12,
-                }}
-              >
-                <span style={{fontWeight: 650}}>{event.eventType}</span>
+              <div key={event.id} className='gf-evidence-row'>
+                <span className='gf-evidence-kind'>{event.eventType}</span>
                 <span>{event.outcome}</span>
-                <span style={{marginLeft: 'auto', color: 'var(--ide-fg-muted)'}}>
+                <span className='gf-evidence-time'>
                   {new Date(event.occurredAt).toLocaleString()}
                 </span>
               </div>
@@ -658,7 +587,7 @@ export function IdeProjectMembers() {
       {canManageShares && (
         <button
           className='ide-btn ghost'
-          style={{marginTop: 10}}
+          style={{marginTop: 'var(--ide-s3)'}}
           onClick={makeShareLink}
           disabled={busy === 'share'}
         >

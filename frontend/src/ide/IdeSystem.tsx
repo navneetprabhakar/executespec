@@ -16,48 +16,44 @@ import {
   auditAction,
   auditActor,
   auditCsvText,
+  auditRowState,
   auditTarget,
   auditTimestamp,
   buildSearchHits,
   customerSafeNotificationText,
+  exactTime,
   filterAuditLogs,
   filterNotifications,
   isNotificationUnread,
   markAllNotificationsReadLocal,
   markNotificationReadLocal,
   notificationDotColor,
+  notificationRowState,
   notificationTarget,
   SEARCH_QUICK_ACTIONS,
   setupAccountRows,
   setupEssentialRows,
   setupOperationRows,
   setupWorkspaceRows,
+  shortAge,
   unreadNotificationCount,
   type AuditFilter,
   type MoreRow,
   type NotifFilter,
   type SearchHit,
 } from './systemUtils';
+import './surfaces/systemdiscovery.css';
 
 // IDE-native system surfaces (notifications, search, audit, empty-project, more
 // menu). The old Signal exports were retired; this file owns the route behavior.
-// Conventions follow IdeMore.tsx + IdeProjectMore.tsx (.ide-pane / .ide-h1 /
-// .ide-sub / .ide-card / .ide-h2 / .ide-empty / .ide-rtabs / .ide-btn + IdeKit
-// IdeLoader/IdeBadge).
-
-// Shared row-link style used by the notification + audit + search lists. Matches
-// the IdeRuns list-row treatment (flex row, 11px/16px padding, bottom border).
-function rowStyle(last: boolean): React.CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '11px 16px',
-    textDecoration: 'none',
-    color: 'var(--ide-fg)',
-    borderBottom: last ? 'none' : '1px solid var(--ide-border)',
-  };
-}
+//
+// Version B row grammar (`.sysd-*` in surfaces/systemdiscovery.css): every list
+// row is a GRID with a fixed leading track, so a severity dot, a category
+// stripe or nothing at all still leaves every title on the same x. Row state is
+// a 3px leading edge — the card body is never repainted. Do not reintroduce the
+// per-row inline `React.CSSProperties` this file used to carry: the px
+// font-size literals in it bypassed the `--ide-t-*` ramp and the phone step-down
+// that comes with it.
 
 // Shared inline error card (red foreground) — same shape IdeRuns uses. C7:
 // pass `onRetry` to render a ghost Retry button next to the message.
@@ -74,6 +70,37 @@ function ErrCard({msg, onRetry}: {msg: string; onRetry?: () => void}) {
           Retry
         </button>
       )}
+    </div>
+  );
+}
+
+/** Filter tabs plus at most one trailing ghost action. */
+function Toolbar<T extends string>({
+  tabs,
+  value,
+  onChange,
+  action,
+}: {
+  tabs: Array<{key: T; label: string; n?: number}>;
+  value: T;
+  onChange: (next: T) => void;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className='sysd-toolbar'>
+      <div className='ide-rtabs'>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            className={`ide-rtab${value === t.key ? ' active' : ''}`}
+            onClick={() => onChange(t.key)}
+          >
+            {t.label}
+            {t.n != null && <span className='ide-rtab-badge'>{t.n}</span>}
+          </button>
+        ))}
+      </div>
+      {action}
     </div>
   );
 }
@@ -138,31 +165,23 @@ export default function IdeNotifications() {
     <div className='ide-pane' style={{maxWidth: 760}}>
       <h1 className='ide-h1'>Notifications</h1>
       <div className='ide-sub'>
-        {items === null ? 'Work, team, billing, and system events.' : `${unreadCount} unread`}
+        {items === null ? 'Work, team, billing, system.' : `${unreadCount} unread`}
       </div>
 
-      <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12}}>
-        <div className='ide-rtabs' style={{flex: 1, marginBottom: 0}}>
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              className={`ide-rtab${filter === t.key ? ' active' : ''}`}
-              onClick={() => setFilter(t.key)}
-            >
-              {t.label}
-              {t.n != null && <span className='ide-rtab-badge'>{t.n}</span>}
-            </button>
-          ))}
-        </div>
-        <button
-          className='ide-btn ghost'
-          style={{flexShrink: 0}}
-          disabled={unreadCount === 0 || markBusy}
-          onClick={readAll}
-        >
-          {markBusy ? 'Marking…' : 'Mark all read'}
-        </button>
-      </div>
+      <Toolbar
+        tabs={TABS}
+        value={filter}
+        onChange={setFilter}
+        action={
+          <button
+            className='ide-btn ghost'
+            disabled={unreadCount === 0 || markBusy}
+            onClick={readAll}
+          >
+            {markBusy ? 'Marking…' : 'Mark all read'}
+          </button>
+        }
+      />
 
       {err && <ErrCard msg={err} onRetry={() => void refresh()} />}
 
@@ -171,7 +190,7 @@ export default function IdeNotifications() {
       ) : filtered.length === 0 ? (
         <div className='ide-empty'>No notifications yet.</div>
       ) : (
-        <div className='ide-card' style={{padding: 0}}>
+        <div className='ide-card sysd-list'>
           {filtered.map((n, i) => {
             const nAny = n as unknown as {
               id?: string;
@@ -187,72 +206,50 @@ export default function IdeNotifications() {
               severity?: string;
             };
             const unread = isNotificationUnread(n);
-            const dot = notificationDotColor(n);
             const linkTarget = notificationTarget(n);
-            const ts = nAny.createdAt ? new Date(nAny.createdAt).toLocaleString() : '';
+            const open = () => {
+              if (nAny.id) void readOne(nAny.id);
+              // C11 — absolute backend links open in a new tab; in-app targets
+              // go through the router (was a hand-rolled pushState +
+              // PopStateEvent that broke on malformed targets).
+              if (linkTarget.startsWith('http')) {
+                window.open(linkTarget, '_blank', 'noopener,noreferrer');
+              } else {
+                navigate(linkTarget);
+              }
+            };
             return (
-              <div
+              // A row that navigates has always been an activatable control;
+              // it used to be a plain <div onClick>, unreachable by keyboard.
+              <button
+                type='button'
                 key={nAny.id || i}
-                onClick={() => {
-                  if (nAny.id) void readOne(nAny.id);
-                  // C11 — absolute backend links open in a new tab; in-app
-                  // targets go through the router (was a hand-rolled
-                  // pushState + PopStateEvent that broke on malformed targets).
-                  if (linkTarget.startsWith('http')) {
-                    window.open(linkTarget, '_blank', 'noopener,noreferrer');
-                  } else {
-                    navigate(linkTarget);
-                  }
-                }}
-                style={{...rowStyle(i >= filtered.length - 1), cursor: 'pointer'}}
+                className={`sysd-row is-${notificationRowState(n)}`}
+                onClick={open}
               >
                 <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    flexShrink: 0,
-                    background: unread ? dot : 'var(--ide-border)',
-                  }}
+                  className={`sysd-row-lead sysd-dot${unread ? '' : ' is-read'}`}
+                  style={unread ? {color: notificationDotColor(n)} : undefined}
+                  aria-hidden
                 />
-                <span style={{flex: 1, minWidth: 0}}>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontWeight: unread ? 600 : 500,
-                      color: 'var(--ide-fg-bright)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                <span className='sysd-row-main'>
+                  <span className={`sysd-row-title${unread ? ' is-unread' : ''}`}>
                     {nAny.title || nAny.category || 'Notification'}
                   </span>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontSize: 12,
-                      color: 'var(--ide-fg-muted)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                  <span className='sysd-row-sub'>
                     {customerSafeNotificationText(
                       nAny.description || nAny.body || '',
                       Boolean(isSuperAdmin),
                     )}
                   </span>
                 </span>
-                {ts && (
-                  <span
-                    className='ide-mono'
-                    style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}
-                  >
-                    {ts}
-                  </span>
-                )}
-              </div>
+                <span className='sysd-row-time' title={exactTime(nAny.createdAt)}>
+                  {shortAge(nAny.createdAt)}
+                </span>
+                <span className='sysd-row-end sysd-row-chev' aria-hidden>
+                  ›
+                </span>
+              </button>
             );
           })}
         </div>
@@ -297,24 +294,14 @@ export function IdeSearch() {
       <h1 className='ide-h1'>Search</h1>
       <div className='ide-sub'>Work, projects, files.</div>
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          background: 'var(--ide-bg-input, var(--ide-bg-tab-inactive))',
-          border: '1px solid var(--ide-border)',
-          borderRadius: 'var(--ide-r-control)',
-          padding: '8px 12px',
-          marginBottom: 16,
-        }}
-      >
+      <div className='sysd-search'>
         <svg
+          className='sysd-search-icon'
           viewBox='0 0 24 24'
-          style={{width: 16, height: 16, flexShrink: 0, color: 'var(--ide-fg-muted)'}}
           fill='none'
           stroke='currentColor'
-          strokeWidth={2}
+          strokeWidth={1.75}
+          aria-hidden
         >
           <circle cx='11' cy='11' r='7' />
           <path d='M21 21l-4.3-4.3' />
@@ -329,29 +316,9 @@ export function IdeSearch() {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && hits.length > 0) navigate(hits[0].to);
           }}
-          style={{
-            flex: 1,
-            background: 'transparent',
-            border: 0,
-            outline: 0,
-            fontSize: 14,
-            minHeight: 32,
-            color: 'var(--ide-fg-bright)',
-          }}
+          style={{minHeight: 32}}
         />
-        <span
-          className='ide-mono'
-          style={{
-            fontSize: 12,
-            color: 'var(--ide-fg-muted)',
-            background: 'var(--ide-bg-tab-inactive)',
-            padding: '3px 7px',
-            borderRadius: 'var(--ide-r-control)',
-            flexShrink: 0,
-          }}
-        >
-          ⌘K
-        </span>
+        <span className='ide-mono sysd-search-kbd'>⌘K</span>
       </div>
 
       {err && <ErrCard msg={err} />}
@@ -361,16 +328,23 @@ export function IdeSearch() {
           <div className='ide-h2' style={{marginTop: 0}}>
             Quick actions
           </div>
-          <div className='ide-card' style={{padding: 0}}>
-            {SEARCH_QUICK_ACTIONS.map((row, i, arr) => (
-              <Link key={row.to} to={row.to} style={rowStyle(i >= arr.length - 1)}>
-                <span style={{flex: 1, minWidth: 0}}>
-                  <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                    {row.label}
-                  </span>
-                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{row.sub}</span>
+          <div className='ide-card sysd-list'>
+            {SEARCH_QUICK_ACTIONS.map((row) => (
+              <Link
+                key={row.to}
+                to={row.to}
+                className='sysd-row'
+                style={{['--sysd-lead' as string]: '0px'}}
+              >
+                <span className='sysd-row-lead' aria-hidden />
+                <span className='sysd-row-main'>
+                  <span className='sysd-row-title'>{row.label}</span>
+                  <span className='sysd-row-sub'>{row.sub}</span>
                 </span>
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>›</span>
+                <span className='sysd-row-time' />
+                <span className='sysd-row-end sysd-row-chev' aria-hidden>
+                  ›
+                </span>
               </Link>
             ))}
           </div>
@@ -381,31 +355,23 @@ export function IdeSearch() {
           ) : recent.length === 0 ? (
             <div className='ide-empty'>No work yet.</div>
           ) : (
-            <div className='ide-card' style={{padding: 0}}>
-              {recent.map((r, i) => (
+            <div className='ide-card sysd-list'>
+              {recent.map((r) => (
                 <Link
                   key={r.runId}
                   to={`/result/${r.runId}`}
-                  style={rowStyle(i >= recent.length - 1)}
+                  className='sysd-row'
+                  style={{['--sysd-lead' as string]: '0px'}}
                 >
-                  <span style={{flex: 1, minWidth: 0}}>
-                    <span
-                      style={{
-                        display: 'block',
-                        fontWeight: 500,
-                        color: 'var(--ide-fg-bright)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {runTitleFor(r)}
-                    </span>
-                    <span className='ide-mono' style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                      R-{r.runId.slice(0, 6)}
-                    </span>
+                  <span className='sysd-row-lead' aria-hidden />
+                  <span className='sysd-row-main'>
+                    <span className='sysd-row-title'>{runTitleFor(r)}</span>
+                    <span className='ide-mono sysd-row-sub'>R-{r.runId.slice(0, 6)}</span>
                   </span>
-                  <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
+                  <span className='sysd-row-time' />
+                  <span className='sysd-row-end'>
+                    <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
+                  </span>
                 </Link>
               ))}
             </div>
@@ -421,25 +387,23 @@ export function IdeSearch() {
               No matches for “{q.trim()}”. Try a run id (R-abc123), a project name, or a page name.
             </div>
           ) : (
-            <div className='ide-card' style={{padding: 0}}>
-              {hits.map((h, i) => (
-                <Link key={`${h.kind}-${h.id}`} to={h.to} style={rowStyle(i >= hits.length - 1)}>
-                  <span style={{flex: 1, minWidth: 0}}>
-                    <span
-                      style={{
-                        display: 'block',
-                        fontWeight: 500,
-                        color: 'var(--ide-fg-bright)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {h.title}
-                    </span>
-                    <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{h.subtitle}</span>
+            <div className='ide-card sysd-list'>
+              {hits.map((h) => (
+                <Link
+                  key={`${h.kind}-${h.id}`}
+                  to={h.to}
+                  className='sysd-row'
+                  style={{['--sysd-lead' as string]: '0px'}}
+                >
+                  <span className='sysd-row-lead' aria-hidden />
+                  <span className='sysd-row-main'>
+                    <span className='sysd-row-title'>{h.title}</span>
+                    <span className='sysd-row-sub'>{h.subtitle}</span>
                   </span>
-                  <span className='ide-badge'>{h.kind.toUpperCase()}</span>
+                  <span className='sysd-row-time' />
+                  {/* Fixed-width kind column: `RUN` and `PROJECT` must not
+                      shift the row's right edge relative to one another. */}
+                  <span className='ide-badge sysd-row-end sysd-kind'>{h.kind.toUpperCase()}</span>
                 </Link>
               ))}
             </div>
@@ -522,28 +486,16 @@ export function IdeAudit() {
       <h1 className='ide-h1'>Audit log</h1>
       <div className='ide-sub'>{logs === null ? 'Compliance trail.' : `${logs.length} events`}</div>
 
-      <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12}}>
-        <div className='ide-rtabs' style={{flex: 1, marginBottom: 0}}>
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              className={`ide-rtab${filter === t.key ? ' active' : ''}`}
-              onClick={() => setFilter(t.key)}
-            >
-              {t.label}
-              {t.n != null && <span className='ide-rtab-badge'>{t.n}</span>}
-            </button>
-          ))}
-        </div>
-        <button
-          className='ide-btn ghost'
-          style={{flexShrink: 0}}
-          disabled={filtered.length === 0}
-          onClick={exportCsv}
-        >
-          Export CSV
-        </button>
-      </div>
+      <Toolbar
+        tabs={TABS}
+        value={filter}
+        onChange={setFilter}
+        action={
+          <button className='ide-btn ghost' disabled={filtered.length === 0} onClick={exportCsv}>
+            Export CSV
+          </button>
+        }
+      />
 
       {err && <ErrCard msg={err} />}
 
@@ -552,7 +504,7 @@ export function IdeAudit() {
       ) : filtered.length === 0 ? (
         <div className='ide-empty'>No audit events for this filter.</div>
       ) : (
-        <div className='ide-card' style={{padding: 0}}>
+        <div className='ide-card sysd-list'>
           {filtered.map((l, i) => {
             const lAny = l as unknown as {id?: string};
             const action = auditAction(l);
@@ -560,32 +512,24 @@ export function IdeAudit() {
             const actor = auditActor(l);
             const target = auditTarget(l);
             return (
-              <div key={lAny.id || `${i}-${ts}`} style={rowStyle(i >= filtered.length - 1)}>
-                <span style={{flex: 1, minWidth: 0}}>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontWeight: 500,
-                      color: 'var(--ide-fg-bright)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {action}
-                  </span>
-                  <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                    {actor && <span className='ide-mono'>{actor}</span>}
+              <div
+                key={lAny.id || `${i}-${ts}`}
+                className={`sysd-row is-${auditRowState(l)}`}
+                style={{['--sysd-lead' as string]: '0px'}}
+              >
+                <span className='sysd-row-lead' aria-hidden />
+                <span className='sysd-row-main'>
+                  <span className='sysd-row-title'>{action}</span>
+                  <span className='ide-mono sysd-row-sub'>
+                    {actor}
                     {actor && target ? ' · ' : ''}
                     {target}
                   </span>
                 </span>
-                <span
-                  className='ide-mono'
-                  style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}
-                >
-                  {ts ? new Date(ts).toLocaleString() : '—'}
+                <span className='sysd-row-time' title={exactTime(ts)}>
+                  {shortAge(ts) || '—'}
                 </span>
+                <span className='sysd-row-end' aria-hidden />
               </div>
             );
           })}
@@ -600,30 +544,24 @@ export function IdeEmptyProject() {
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
       <h1 className='ide-h1'>Get started</h1>
-      <div className='ide-sub'>Let’s get your first PR shipped.</div>
+      <div className='ide-sub'>Two paths to your first verified PR.</div>
 
-      <div className='ide-card' style={{borderColor: 'var(--ide-green)'}}>
-        <div
-          style={{fontSize: 14, fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 6}}
-        >
-          You don’t have any projects yet
-        </div>
-        <div style={{fontSize: 13, color: 'var(--ide-fg-muted)', lineHeight: 1.5}}>
-          Link a repo or pick a sandbox to see ExecuteSpec in action. ~3 minutes to your first
-          verified PR.
-        </div>
+      {/* Rule 2 — a tinted note with a leading edge. This used to be a card
+          whose entire border turned green, which read as an error state. */}
+      <div className='sysd-onboard-note'>
+        <strong>No projects yet</strong>
+        <span>Link a repo or start in a sandbox. About 3 minutes to a verified PR.</span>
       </div>
 
-      <div className='ide-h2'>Path 1 · Link a GitHub repo</div>
+      <div className='ide-h2'>Link a GitHub repo</div>
       <div className='ide-card'>
-        <div
-          style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 12, lineHeight: 1.5}}
-        >
-          Bring an existing codebase. We’ll install a webhook, snapshot the architecture, and you
-          can start work against it immediately.
+        <div className='sysd-onboard-body'>
+          Your existing codebase. We install a webhook, snapshot the architecture, and work runs
+          against it.
         </div>
+        {/* Rule 1 — the single accent-filled commit action on this surface. */}
         <Link className='ide-btn' to='/integrations' style={{display: 'inline-flex', gap: 8}}>
-          <svg viewBox='0 0 24 24' style={{width: 15, height: 15}} aria-hidden>
+          <svg viewBox='0 0 24 24' className='sysd-onboard-icon' aria-hidden>
             <path
               fill='currentColor'
               d='M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.3 9.4 7.88 10.92.58.1.78-.25.78-.55 0-.27-.01-1-.02-1.96-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.09-.12-.3-.52-1.46.1-3.04 0 0 .97-.31 3.18 1.18A11.07 11.07 0 0 1 12 6.8c.98 0 1.98.13 2.91.38 2.2-1.5 3.18-1.18 3.18-1.18.63 1.58.23 2.74.11 3.04.74.8 1.19 1.83 1.19 3.09 0 4.42-2.7 5.4-5.26 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .3.2.66.79.55C20.2 21.4 23.5 17.1 23.5 12 23.5 5.65 18.35.5 12 .5z'
@@ -633,13 +571,11 @@ export function IdeEmptyProject() {
         </Link>
       </div>
 
-      <div className='ide-h2'>Path 2 · Try a sandbox</div>
+      <div className='ide-h2'>Try a sandbox</div>
       <div className='ide-card'>
-        <div
-          style={{fontSize: 13, color: 'var(--ide-fg-muted)', marginBottom: 12, lineHeight: 1.5}}
-        >
-          We’ll spin up a brand-new repo with one of three preset work requests. Free, no commits to
-          your repos.
+        <div className='sysd-onboard-body'>
+          A fresh repo and one of three preset requests. Free, and nothing is committed to your
+          repos.
         </div>
         <Link className='ide-btn ghost' to='/welcome'>
           Pick a starter →
@@ -653,16 +589,23 @@ function MoreSection({title, rows}: {title: string; rows: MoreRow[]}) {
   return (
     <>
       <div className='ide-h2'>{title}</div>
-      <div className='ide-card' style={{padding: 0}}>
-        {rows.map((row, i) => (
-          <Link key={row.to} to={row.to} style={rowStyle(i >= rows.length - 1)}>
-            <span style={{flex: 1, minWidth: 0}}>
-              <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                {row.label}
-              </span>
-              <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{row.sub}</span>
+      <div className='ide-card sysd-list'>
+        {rows.map((row) => (
+          <Link
+            key={row.to}
+            to={row.to}
+            className='sysd-row'
+            style={{['--sysd-lead' as string]: '0px'}}
+          >
+            <span className='sysd-row-lead' aria-hidden />
+            <span className='sysd-row-main'>
+              <span className='sysd-row-title'>{row.label}</span>
+              <span className='sysd-row-sub'>{row.sub}</span>
             </span>
-            <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>›</span>
+            <span className='sysd-row-time' />
+            <span className='sysd-row-end sysd-row-chev' aria-hidden>
+              ›
+            </span>
           </Link>
         ))}
       </div>
@@ -704,10 +647,7 @@ export function IdeMoreMenu() {
   return (
     <div className='ide-pane' style={{maxWidth: 760}}>
       <h1 className='ide-h1'>Setup</h1>
-      <div className='ide-sub'>
-        Connect the things needed for work to run: teammates, repositories, provider defaults, and
-        billing.
-      </div>
+      <div className='ide-sub'>Everything work needs before it can run.</div>
 
       <MoreSection title='Essentials' rows={setupEssentialRows(tier)} />
 
@@ -736,41 +676,46 @@ export function IdeMoreMenu() {
       {isSuperAdmin && (
         <>
           <div className='ide-h2'>Operator controls</div>
-          <div className='ide-card' style={{padding: 0}}>
-            <Link to='/admin' style={rowStyle(false)}>
-              <span style={{flex: 1, minWidth: 0}}>
-                <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                  Admin · SUPER_ADMIN
-                </span>
-                <span style={{fontSize: 12, color: 'var(--ide-red)'}}>Platform-wide controls</span>
+          <div className='ide-card sysd-list'>
+            {/* Operator reach is the row state, so it is the leading stripe —
+                not red body text competing with the row title. */}
+            <Link
+              to='/admin'
+              className='sysd-row is-bad'
+              style={{['--sysd-lead' as string]: '0px'}}
+            >
+              <span className='sysd-row-lead' aria-hidden />
+              <span className='sysd-row-main'>
+                <span className='sysd-row-title'>Admin · SUPER_ADMIN</span>
+                <span className='sysd-row-sub'>Platform-wide controls</span>
               </span>
-              <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>›</span>
+              <span className='sysd-row-time' />
+              <span className='sysd-row-end sysd-row-chev' aria-hidden>
+                ›
+              </span>
             </Link>
-            <Link to='/benchmark' style={rowStyle(true)}>
-              <span style={{flex: 1, minWidth: 0}}>
-                <span style={{display: 'block', fontWeight: 500, color: 'var(--ide-fg-bright)'}}>
-                  Benchmarks
-                </span>
-                <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
-                  Operator telemetry, not a customer workflow
-                </span>
+            <Link
+              to='/benchmark'
+              className='sysd-row is-info'
+              style={{['--sysd-lead' as string]: '0px'}}
+            >
+              <span className='sysd-row-lead' aria-hidden />
+              <span className='sysd-row-main'>
+                <span className='sysd-row-title'>Benchmarks</span>
+                {/* Load-bearing: this surface tracks external harness events, it
+                    does not orchestrate them. Do not compress this away. */}
+                <span className='sysd-row-sub'>Operator telemetry, not a customer workflow</span>
               </span>
-              <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>›</span>
+              <span className='sysd-row-time' />
+              <span className='sysd-row-end sysd-row-chev' aria-hidden>
+                ›
+              </span>
             </Link>
           </div>
         </>
       )}
 
-      <p
-        style={{
-          textAlign: 'center',
-          fontSize: 12,
-          color: 'var(--ide-fg-muted)',
-          marginTop: 28,
-        }}
-      >
-        ExecuteSpec · v2.0.0
-      </p>
+      <p className='sysd-version'>ExecuteSpec · v2.0.0</p>
     </div>
   );
 }

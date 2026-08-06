@@ -4,7 +4,7 @@ import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
-import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {ProjectTabs, runStatusLabel} from '@/ide/IdeProjectTabs';
 import {LoadError} from '@/ide/LoadError';
 import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {isActiveRunStatus} from '@/lib/runStatus';
@@ -309,7 +309,9 @@ export default function IdeProject() {
           <div className='ide-kv' style={{borderBottom: 'none'}}>
             <span>Latest</span>
             <span>
-              {lastRun ? `${lastRun.status} · ${fmtWhen(lastRun.startedAt)}` : 'No work yet'}
+              {lastRun
+                ? `${runStatusLabel(lastRun.status)} · ${fmtWhen(lastRun.startedAt)}`
+                : 'No work yet'}
             </span>
           </div>
         </div>
@@ -503,7 +505,7 @@ export default function IdeProject() {
                 {(r.runTitle || r.userRequest || r.runId).slice(0, 70)}
               </div>
               <div className='ide-run-meta'>
-                <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
+                <IdeBadge kind={statusKind(r.status)}>{runStatusLabel(r.status)}</IdeBadge>
                 <span>{fmtWhen(r.startedAt)}</span>
               </div>
             </Link>

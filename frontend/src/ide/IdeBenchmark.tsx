@@ -4,6 +4,7 @@ import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
+import './surfaces/systemdiscovery.css';
 
 // Operator `/benchmark` dashboard (RL-2026-06) — the visual surface for the
 // common, suite-agnostic in-app benchmark TRACKING layer. ExecuteSpec ingests
@@ -95,39 +96,20 @@ const MUTED = 'var(--ide-fg-muted)';
 // ── small components ────────────────────────────────────────────────────────
 
 function ErrCard({msg}: {msg: string}) {
+  // Rule 2 — failure is a leading edge on a tinted note, not a red card body.
   return (
-    <div className='ide-card' style={{marginBottom: 12, color: 'var(--ide-red)'}}>
+    <div className='ide-note bad' style={{marginBottom: 12}}>
       {msg}
     </div>
   );
 }
 
 function EmptyCard({children}: {children: React.ReactNode}) {
-  return (
-    <div className='ide-card' style={{color: MUTED, fontSize: 13}}>
-      {children}
-    </div>
-  );
+  return <div className='ide-card sysd-empty-card'>{children}</div>;
 }
 
 function SuiteChip({suite}: {suite: string}) {
-  return (
-    <span
-      style={{
-        fontSize: 12,
-        fontWeight: 600,
-        letterSpacing: 0.3,
-        padding: '2px 7px',
-        borderRadius: 'var(--ide-r-control)',
-        background: 'var(--ide-bg-input)',
-        border: '1px solid var(--ide-border)',
-        color: 'var(--ide-fg-bright)',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {suite}
-    </span>
-  );
+  return <span className='sysd-chip'>{suite}</span>;
 }
 
 function SubChip({status, url}: {status: string; url?: string | null}) {
@@ -139,21 +121,14 @@ function SubChip({status, url}: {status: string; url?: string | null}) {
         ? 'var(--ide-red)'
         : 'var(--ide-yellow)';
   const label = `submission: ${status.toLowerCase()}`;
-  const style: React.CSSProperties = {
-    fontSize: 12,
-    padding: '2px 7px',
-    borderRadius: 'var(--ide-r-control)',
-    border: `1px solid ${color}`,
-    color,
-    whiteSpace: 'nowrap',
-    textDecoration: 'none',
-  };
   return url ? (
-    <a href={url} target='_blank' rel='noreferrer' style={style}>
+    <a href={url} target='_blank' rel='noreferrer' className='sysd-sub-chip' style={{color}}>
       {label} ↗
     </a>
   ) : (
-    <span style={style}>{label}</span>
+    <span className='sysd-sub-chip' style={{color}}>
+      {label}
+    </span>
   );
 }
 
@@ -179,10 +154,8 @@ function ResolvedBar({resolved, total}: {resolved: number; total: number}) {
 function KV({k, children}: {k: string; children: React.ReactNode}) {
   return (
     <div style={{display: 'flex', flexDirection: 'column', gap: 3}}>
-      <span style={{fontSize: 12, color: MUTED, textTransform: 'uppercase', letterSpacing: 0.4}}>
-        {k}
-      </span>
-      <span style={{fontSize: 13}}>{children}</span>
+      <span className='sysd-kv-label'>{k}</span>
+      <span className='sysd-kv-value'>{children}</span>
     </div>
   );
 }
@@ -239,17 +212,17 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
       }}
       tabIndex={0}
     >
-      <td style={TD} className='ide-benchmark-name-cell'>
+      <td className={`${TD} ide-benchmark-name-cell`}>
         <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
           <SuiteChip suite={r.suite} />
           <span className='ide-benchmark-model' title={r.model}>
             {r.model}
           </span>
         </div>
-        <div style={{marginTop: 4, color: MUTED, fontSize: 12}}>{r.provider}</div>
+        <div className='sysd-sub'>{r.provider}</div>
       </td>
-      <td style={TD}>{shortDataset(r.dataset)}</td>
-      <td style={TD}>
+      <td className={TD}>{shortDataset(r.dataset)}</td>
+      <td className={TD}>
         <IdeBadge kind={benchKind(status)}>{status}</IdeBadge>
         {r.submissionStatus && (
           <div style={{marginTop: 6}}>
@@ -257,7 +230,7 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
           </div>
         )}
       </td>
-      <td style={TD}>
+      <td className={TD}>
         <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 160}}>
           <ResolvedBar resolved={r.resolvedTasks} total={r.totalTasks} />
           <span style={{whiteSpace: 'nowrap'}}>
@@ -265,15 +238,15 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
           </span>
         </div>
       </td>
-      <td style={TD}>k={r.k}</td>
-      <td style={TD}>{fmtCost(r.costUsd)}</td>
-      <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
+      <td className={TD}>k={r.k}</td>
+      <td className={TD}>{fmtCost(r.costUsd)}</td>
+      <td className={TD} style={{color: MUTED, whiteSpace: 'nowrap'}}>
         {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
       </td>
-      <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
+      <td className={TD} style={{color: MUTED, whiteSpace: 'nowrap'}}>
         {r.activeAttemptCount ? `${r.activeAttemptCount} active · ` : ''}
         {duration(r.elapsedSeconds)} elapsed
-        <div style={{fontSize: 12}}>
+        <div className='sysd-kv-label'>
           {r.finishedAt
             ? `done ${dateTime(r.finishedAt)}`
             : r.etaSeconds != null
@@ -281,7 +254,7 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
               : relTime(r.createdAt)}
         </div>
       </td>
-      <td style={{...TD, width: 36}}>
+      <td className={TD} style={{width: 36}}>
         <ExternalLink size={15} aria-hidden='true' />
       </td>
     </tr>
@@ -359,7 +332,7 @@ function RunTable({runs, empty}: {runs: api.BenchmarkRun[]; empty: string}) {
           <tr>
             {['Benchmark', 'Dataset', 'Status', 'Resolved', 'K', 'Cost', 'Tokens', 'Time', ''].map(
               (h) => (
-                <th key={h} style={TH}>
+                <th key={h} className={TH}>
                   {h}
                 </th>
               ),
@@ -408,16 +381,12 @@ function BenchmarkSection({
 
 // ── detail ──────────────────────────────────────────────────────────────────
 
-const TH: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '8px 12px',
-  fontSize: 12,
-  textTransform: 'uppercase',
-  letterSpacing: 0.4,
-  color: MUTED,
-  whiteSpace: 'nowrap',
-};
-const TD: React.CSSProperties = {padding: '8px 12px', fontSize: 13, verticalAlign: 'top'};
+// Table cell metrics/type live in `.sysd-th` / `.sysd-td`
+// (surfaces/systemdiscovery.css) so they ride the `--ide-t-*` ramp and its
+// <=600px step-down. These aliases keep the existing `style={TH}` call sites
+// honest about carrying only per-cell overrides.
+const TH = 'sysd-th';
+const TD = 'sysd-td';
 
 /** One task with its up-to-k attempts folded together. Harbor runs k attempts per
  *  task (and interleaves them across tasks), so the raw event rows list each task
@@ -468,7 +437,7 @@ function groupTasks(tasks: api.BenchmarkTaskResult[]): TaskGroup[] {
 function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: number}) {
   const slots = Math.max(k, attempts.length);
   return (
-    <span style={{display: 'inline-flex', gap: 5, fontFamily: 'monospace'}}>
+    <span className='ide-mono sysd-attempts'>
       {Array.from({length: slots}).map((_, i) => {
         const a = attempts[i];
         if (!a)
@@ -503,12 +472,12 @@ function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: num
 function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDone: boolean}) {
   if (!groups.length) return <EmptyCard>No task scores yet.</EmptyCard>;
   return (
-    <div className='ide-card' style={{padding: 0, overflowX: 'auto'}}>
-      <table style={{width: '100%', borderCollapse: 'collapse'}}>
+    <div className='ide-card sysd-scroll'>
+      <table>
         <thead>
           <tr>
             {['Task', 'Result', `Attempts (k=${k})`, 'Cost', 'Tokens', 'Work'].map((h) => (
-              <th key={h} style={TH}>
+              <th key={h} className={TH}>
                 {h}
               </th>
             ))}
@@ -516,9 +485,12 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
         </thead>
         <tbody>
           {groups.map((g) => (
-            <tr key={g.taskName} style={{borderTop: '1px solid var(--ide-border)'}}>
-              <td style={{...TD, fontFamily: 'monospace'}}>{g.taskName}</td>
-              <td style={TD}>
+            <tr
+              key={g.taskName}
+              className={`sysd-tr is-${g.passed ? 'ok' : g.done >= k || runDone ? 'bad' : 'warn'}`}
+            >
+              <td className={`${TD} ide-mono`}>{g.taskName}</td>
+              <td className={TD}>
                 {g.passed ? (
                   <span style={{color: 'var(--ide-green)'}}>✓ resolved</span>
                 ) : g.done >= k || runDone ? (
@@ -529,24 +501,24 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                   </span>
                 )}
                 {!g.passed && (g.outcome || g.reason) && (
-                  <div style={{marginTop: 3, color: MUTED, fontSize: 12}}>
+                  <div className='sysd-sub'>
                     {[g.outcome, g.reason].filter(Boolean).join(' · ')}
                   </div>
                 )}
                 {!g.passed && g.attempts[g.attempts.length - 1]?.failureClassification && (
-                  <div style={{marginTop: 3, color: MUTED, fontSize: 12}}>
+                  <div className='sysd-sub'>
                     {g.attempts[g.attempts.length - 1]?.failureClassification}
                   </div>
                 )}
               </td>
-              <td style={TD}>
+              <td className={TD}>
                 <AttemptPips attempts={g.attempts} k={k} />
               </td>
-              <td style={TD}>{fmtCost(g.cost)}</td>
-              <td style={{...TD, color: MUTED, whiteSpace: 'nowrap'}}>
+              <td className={TD}>{fmtCost(g.cost)}</td>
+              <td className={TD} style={{color: MUTED, whiteSpace: 'nowrap'}}>
                 {fmtTok(g.inTok)}↑ {fmtTok(g.outTok)}↓
               </td>
-              <td style={TD}>
+              <td className={TD}>
                 {g.runId ? (
                   <Link to={`/result/${g.runId}`} style={{color: 'var(--ide-blue)'}}>
                     {g.runId.slice(0, 8)}
@@ -559,7 +531,8 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
                   .map((a) => (
                     <div
                       key={`trajectory-${a.attempt}`}
-                      style={{marginTop: 3, color: MUTED, fontSize: 12, maxWidth: 220}}
+                      className='sysd-sub'
+                      style={{maxWidth: 220}}
                       title={`${a.trajectoryLocation}\nsha256:${a.trajectorySha256}`}
                     >
                       a{a.attempt} trajectory · {a.trajectorySha256?.slice(0, 10)}…
@@ -577,12 +550,12 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
 function ActiveAttempts({attempts}: {attempts: api.BenchmarkActiveAttempt[]}) {
   if (!attempts.length) return null;
   return (
-    <div className='ide-card' style={{padding: 0, overflowX: 'auto'}}>
-      <table style={{width: '100%', borderCollapse: 'collapse'}}>
+    <div className='ide-card sysd-scroll'>
+      <table>
         <thead>
           <tr>
             {['Task', 'Attempt', 'Elapsed', 'ETA', 'Last heartbeat'].map((h) => (
-              <th key={h} style={TH}>
+              <th key={h} className={TH}>
                 {h}
               </th>
             ))}
@@ -590,15 +563,15 @@ function ActiveAttempts({attempts}: {attempts: api.BenchmarkActiveAttempt[]}) {
         </thead>
         <tbody>
           {attempts.map((a) => (
-            <tr key={a.id} style={{borderTop: '1px solid var(--ide-border)'}}>
-              <td style={{...TD, fontFamily: 'monospace'}}>{a.taskName}</td>
-              <td style={TD}>
+            <tr key={a.id} className='sysd-tr'>
+              <td className={`${TD} ide-mono`}>{a.taskName}</td>
+              <td className={TD}>
                 #{a.attempt}{' '}
                 {a.stale && <span style={{color: 'var(--ide-red)'}}>· stale heartbeat</span>}
               </td>
-              <td style={TD}>{duration((Date.now() - Date.parse(a.startedAt)) / 1000)}</td>
-              <td style={TD}>{a.etaSeconds == null ? '—' : duration(a.etaSeconds)}</td>
-              <td style={TD}>{relTime(a.lastProgressAt)}</td>
+              <td className={TD}>{duration((Date.now() - Date.parse(a.startedAt)) / 1000)}</td>
+              <td className={TD}>{a.etaSeconds == null ? '—' : duration(a.etaSeconds)}</td>
+              <td className={TD}>{relTime(a.lastProgressAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -611,23 +584,14 @@ function EventLog({events}: {events: api.BenchmarkEvent[]}) {
   if (!events.length) return <EmptyCard>No events yet.</EmptyCard>;
   const rev = [...events].sort((a, b) => b.seq - a.seq);
   return (
-    <div className='ide-card' style={{padding: 0, maxHeight: 340, overflowY: 'auto'}}>
-      {rev.map((e, i) => (
-        <div
-          key={e.id}
-          style={{
-            display: 'flex',
-            gap: 10,
-            padding: '8px 12px',
-            borderTop: i ? '1px solid var(--ide-border)' : 'none',
-            fontSize: 12,
-          }}
-        >
-          <span style={{fontFamily: 'monospace', color: evColor(e.type), minWidth: 140}}>
+    <div className='ide-card sysd-eventlog'>
+      {rev.map((e) => (
+        <div key={e.id} className='sysd-event'>
+          <span className='ide-mono sysd-event-type' style={{color: evColor(e.type)}}>
             {e.type}
           </span>
-          <span style={{flex: 1, wordBreak: 'break-word'}}>{e.message || ''}</span>
-          <span style={{color: MUTED, whiteSpace: 'nowrap'}}>{relTime(e.createdAt)}</span>
+          <span className='sysd-event-msg'>{e.message || ''}</span>
+          <span className='sysd-event-time'>{relTime(e.createdAt)}</span>
         </div>
       ))}
     </div>
@@ -645,9 +609,9 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
   const pending = groups.length - resolved - failed;
   return (
     <div>
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10}}>
-        <Link to='/benchmark' className='ide-btn ghost' style={{fontSize: 12}}>
-          <ArrowLeft size={15} />
+      <div className='sysd-detail-head'>
+        <Link to='/benchmark' className='ide-btn ghost'>
+          <ArrowLeft size={15} aria-hidden='true' />
           Back
         </Link>
         <div className='ide-h2' style={{margin: 0}}>
@@ -655,14 +619,7 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         </div>
       </div>
 
-      <div
-        className='ide-card'
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: 14,
-        }}
-      >
+      <div className='ide-card sysd-kv-grid'>
         <KV k='Status'>
           <IdeBadge kind={benchKind(status)}>{status}</IdeBadge>
         </KV>
@@ -677,7 +634,7 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
         <KV k='Readiness'>
           {r.submissionReadiness || 'NOT_REQUIRED'}
           {r.submissionReadinessReason && (
-            <div style={{fontSize: 12, color: MUTED}}>{r.submissionReadinessReason}</div>
+            <div className='sysd-sub'>{r.submissionReadinessReason}</div>
           )}
         </KV>
         <KV k='Elapsed / ETA'>
@@ -716,7 +673,7 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
 
       <div className='ide-h2' style={{marginTop: 18}}>
         Tasks ({groups.length})
-        <span style={{fontSize: 12, fontWeight: 400, color: MUTED, marginLeft: 8}}>
+        <span className='sysd-kv-label' style={{fontWeight: 400, marginLeft: 8}}>
           {d.tasks.length} attempts ·{' '}
           <span style={{color: 'var(--ide-green)'}}>{resolved} resolved</span>
           {failed > 0 && (
@@ -864,11 +821,7 @@ export default function IdeBenchmark() {
     <div
       data-testid='benchmark-sync-status'
       aria-live='polite'
-      style={{
-        color: err || isStale ? 'var(--ide-yellow)' : 'var(--ide-muted)',
-        fontSize: 12,
-        marginBottom: 10,
-      }}
+      className={`sysd-sync${err || isStale ? ' is-warn' : ''}`}
     >
       {refreshing && lastSuccessfulRefresh ? 'Refreshing · ' : ''}
       {syncLabel}
@@ -914,7 +867,7 @@ export default function IdeBenchmark() {
         <button
           onClick={() => void loadList()}
           className='ide-btn ghost'
-          style={{marginLeft: 'auto', fontSize: 12}}
+          style={{marginLeft: 'auto'}}
           title='Refresh now'
         >
           <RefreshCw size={15} />

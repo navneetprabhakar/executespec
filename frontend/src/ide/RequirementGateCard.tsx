@@ -22,9 +22,9 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
 
   return (
     <div
-      className='ide-card'
+      className={`ide-card${blocked ? ' rl-note is-failed' : ''}`}
       data-testid='requirement-gate'
-      style={{borderColor: blocked ? 'var(--ide-red)' : 'var(--ide-border)', marginTop: 12}}
+      style={{marginTop: 12}}
     >
       <div style={{display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
         <strong style={{color: 'var(--ide-fg-bright)'}}>Requirement coverage</strong>
@@ -36,7 +36,14 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
         {evidence.bindingMode === 'SHADOW' && <IdeBadge kind='warn'>Diagnostic only</IdeBadge>}
       </div>
 
-      <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', lineHeight: 1.6, marginTop: 8}}>
+      <div
+        style={{
+          fontSize: 'var(--ide-t-caption)',
+          color: 'var(--ide-fg-muted)',
+          lineHeight: 1.6,
+          marginTop: 8,
+        }}
+      >
         {evidence.requirementCount} requirement{evidence.requirementCount === 1 ? '' : 's'} ·{' '}
         {evidence.acceptanceCriterionCount} acceptance check
         {evidence.acceptanceCriterionCount === 1 ? '' : 's'} · {evidence.taskBindingCount} task
@@ -45,8 +52,17 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
 
       {blockingIssues.length > 0 && (
         <div style={{marginTop: 10}}>
-          <strong style={{fontSize: 12, color: 'var(--ide-red)'}}>Resolve before approval</strong>
-          <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12, lineHeight: 1.6}}>
+          <strong style={{fontSize: 'var(--ide-t-caption)', color: 'var(--ide-red)'}}>
+            Resolve before approval
+          </strong>
+          <ul
+            style={{
+              margin: '6px 0 0 18px',
+              padding: 0,
+              fontSize: 'var(--ide-t-caption)',
+              lineHeight: 1.6,
+            }}
+          >
             {blockingIssues.map((issue, index) => (
               <li key={`${issue.code}-${index}`}>
                 <span className='ide-mono'>{humanize(issue.code)}</span>: {issue.message}
@@ -58,8 +74,15 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
 
       {clarification.length > 0 && (
         <div style={{marginTop: 10}}>
-          <strong style={{fontSize: 12}}>Needs clarification</strong>
-          <ul style={{margin: '6px 0 0 18px', padding: 0, fontSize: 12, lineHeight: 1.6}}>
+          <strong style={{fontSize: 'var(--ide-t-caption)'}}>Needs clarification</strong>
+          <ul
+            style={{
+              margin: '6px 0 0 18px',
+              padding: 0,
+              fontSize: 'var(--ide-t-caption)',
+              lineHeight: 1.6,
+            }}
+          >
             {clarification.map((requirement) => (
               <li key={requirement.id}>
                 <span className='ide-mono'>{requirement.id}</span>: {requirement.text}
@@ -71,12 +94,18 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
 
       {evidence.requirements.length > 0 && (
         <details style={{marginTop: 10}}>
-          <summary style={{cursor: 'pointer', fontSize: 12}}>Review requirement mapping</summary>
+          <summary style={{cursor: 'pointer', fontSize: 'var(--ide-t-caption)'}}>
+            Review requirement mapping
+          </summary>
           <div style={{marginTop: 8, display: 'grid', gap: 8}}>
             {evidence.requirements.map((requirement) => (
               <div
                 key={requirement.id}
-                style={{borderTop: '1px solid var(--ide-border)', paddingTop: 8, fontSize: 12}}
+                style={{
+                  borderTop: '1px solid var(--ide-border)',
+                  paddingTop: 8,
+                  fontSize: 'var(--ide-t-caption)',
+                }}
               >
                 <div>
                   <span className='ide-mono'>{requirement.id}</span> · {humanize(requirement.kind)}{' '}
@@ -102,7 +131,11 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
             {evidence.acceptanceCriteria.map((criterion) => (
               <div
                 key={criterion.id}
-                style={{borderTop: '1px solid var(--ide-border)', paddingTop: 8, fontSize: 12}}
+                style={{
+                  borderTop: '1px solid var(--ide-border)',
+                  paddingTop: 8,
+                  fontSize: 'var(--ide-t-caption)',
+                }}
               >
                 <div>
                   <span className='ide-mono'>{criterion.id}</span> · {humanize(criterion.kind)} ·{' '}
@@ -124,7 +157,7 @@ export function RequirementGateCard({evidence}: {evidence: RequirementGateEviden
         <div
           className='ide-mono'
           style={{
-            fontSize: 12,
+            fontSize: 'var(--ide-t-caption)',
             color: 'var(--ide-fg-muted)',
             marginTop: 10,
             wordBreak: 'break-all',

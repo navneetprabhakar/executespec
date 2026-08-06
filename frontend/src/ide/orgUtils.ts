@@ -164,3 +164,23 @@ export function matrixProviderRows(
 export function matrixModelLabel(matrix: api.ModelMatrixView, model: string): string {
   return matrix.modelLabels?.[model] || model;
 }
+
+/**
+ * Display name for a matrix provider key. CSS `text-transform: capitalize` on
+ * the raw key rendered "Openai", "Deepseek" and "Openrouter" — none of which is
+ * how those products spell their own names. Unknown providers fall back to
+ * first-letter capitalisation so a newly registered route still reads sanely.
+ */
+const MATRIX_PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+  deepseek: 'DeepSeek',
+  openrouter: 'OpenRouter',
+  fireworks: 'Fireworks',
+};
+
+export function matrixProviderLabel(provider: string): string {
+  const key = provider.trim().toLowerCase();
+  return MATRIX_PROVIDER_LABELS[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}

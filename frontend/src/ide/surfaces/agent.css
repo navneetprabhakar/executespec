@@ -1,2 +1,230 @@
 /* Version B — agent surfaces. Scoped rules for this lane only.
-   Shared grammar lives in ide.css; do not duplicate it here. */
+   Shared grammar lives in ide.css; do not duplicate it here.
+
+   NOTE ON CASCADE: ide.css `@import`s this file at the TOP, so every rule here
+   is DECLARED BEFORE the ide.css agent block. Equal-specificity rules would
+   therefore lose. Every override below is deliberately raised one class
+   (`.ide-root …`) so it wins on specificity rather than on source order. */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   1. ONE MEASURE FOR THE AGENT SIDE.
+
+   `.agent-msg` and the gate card already stop at 820px, but the run card, the
+   proposal/action cards and the tool-activity row spanned the whole 1080px
+   column — so agent-authored content had two different right edges stacked on
+   top of each other. The asymmetry is supposed to be user-vs-agent, not
+   card-vs-card: everything the AGENT produces shares one measure, and the
+   user's bubble is the only thing that reaches the far edge of the column.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-chat-col {
+  --agent-measure: 820px;
+}
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-activity,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-gates-inline,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-runcard,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-card,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-route-decision,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-operator-intro,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-empty,
+.ide-root .agent-chat-scroll .agent-chat-col > .agent-typing {
+  width: 100%;
+  max-width: var(--agent-measure);
+}
+
+/* 2. (removed) The composer's 76px min-height is now DELETED at source in
+   ide.css, so this file no longer needs to override it. */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   3. THE PRE-RUN CONTRACT IS FACTS, NOT FOUR BOXES.
+
+   Every word is preserved — these are the load-bearing claims about where the
+   run executes and when a PR appears — but four bordered tiles above the input
+   read as another card stack. As quiet fragments on the page they cost one line
+   on desktop instead of four boxes, and a short wrapped run on a phone instead
+   of ~300px of stacked full-width panels.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-composer-contract {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 2px var(--ide-s3);
+  margin-bottom: var(--ide-s2);
+}
+.ide-root .agent-composer-contract span {
+  border: 0;
+  background: none;
+  padding: 0;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.45;
+}
+.ide-root .agent-composer-contract span + span::before {
+  content: '·';
+  margin-inline-end: var(--ide-s3);
+  color: var(--ide-border);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   4. AMBIENT, NOT A TINTED CARD.
+
+   `--ide-ambient` was declared and never used. The transcript is the surface
+   that should carry it: one very low-opacity accent wash behind the whole
+   conversation, fixed so it does not slide with the scroll. The operator intro
+   then drops its own blue box — the greeting is the page, not a card sitting on
+   it — while its suggestion chips stay the only bordered objects in the empty
+   state. The wash is below every accent, so the one accent-filled commit action
+   (send / create plan) still reads as the only saturated thing on screen.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-chat-scroll {
+  background-image: var(--ide-ambient);
+  background-repeat: no-repeat;
+  /* `scroll` (not `local`) on a scroll container anchors the wash to the
+     element's own box, so it stays put instead of sliding away up the
+     transcript on a long conversation. */
+  background-attachment: scroll;
+}
+.ide-root .agent-operator-intro {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.ide-root .agent-operator-intro.compact {
+  padding: 0;
+}
+
+/* Empty conversation: centre the greeting in the space it actually has instead
+   of pinning it to the top with a few hundred pixels of void underneath.
+   `:has()` keeps this progressive — a browser without it keeps today's
+   top-anchored layout rather than getting a broken one. */
+.ide-root .agent-chat-scroll:has(.agent-operator-intro):not(:has(.agent-msg)) .agent-chat-col,
+.ide-root .agent-chat-scroll:has(.agent-empty):not(:has(.agent-msg)) .agent-chat-col {
+  min-height: 100%;
+  justify-content: center;
+}
+
+/* 5. (removed) The scope chip's block/ellipsis form now lives in ide.css,
+   scoped to the breakpoint that actually sets its max-width. */
+
+/* ──────────────────────────────────────────────────────────────────────────
+   6. PHONE LAYOUT (<=600px).
+
+   The complaint was space, and it was measurable: a 375x667 phone spent 90px on
+   a two-row top bar, 49px on the project bar and 92px on the composer, leaving
+   the conversation 312px — under half the screen. Type is already stepped by
+   the shared phone ramp, so nothing here touches font-size, and control heights
+   stay at the pinned 32px touch target.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  /* The bar's scope chip repeats the project the select immediately below it
+     already names. Drop the duplicate ONLY when that select is present, so a
+     run-scoped conversation (which has no project bar) keeps its only scope
+     indicator. That is what returns the bar to a single row. */
+  .ide-root .agent-chat-page:has(> .agent-project-context) .agent-bar-scope {
+    display: none;
+  }
+  .ide-root .agent-bar {
+    padding: 7px 10px;
+    gap: 6px;
+  }
+  .ide-root .agent-bar-status {
+    min-width: 0;
+    max-width: 42vw;
+  }
+  .ide-root .agent-approval-pill {
+    max-width: 30vw;
+  }
+
+  /* Gutters: the transcript and the composer must share one edge, and 12px of
+     the 375 is enough. */
+  .ide-root .agent-composer-contract {
+    justify-content: flex-start;
+    gap: 0 var(--ide-s2);
+  }
+  .ide-root .agent-composer-contract span + span::before {
+    margin-inline-end: var(--ide-s2);
+  }
+
+  /* A run title, a phase pill and a cost string cannot share one nowrap row at
+     375px — the title was wrapping to four lines beside a three-line cost. The
+     title takes the first row; the status and the money share the second. */
+  .ide-root .agent-runcard-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  /* The basis is "the row minus the leading glyph", so the icon stays with the
+     title instead of being orphaned on a row of its own by the wrap. */
+  .ide-root .agent-runcard-head > svg {
+    flex: 0 0 auto;
+  }
+  .ide-root .agent-runcard-title {
+    flex: 1 1 calc(100% - 26px);
+    min-width: 0;
+  }
+  .ide-root .agent-runcard-pill {
+    flex: 0 0 auto;
+  }
+  .ide-root .agent-runcard-cost {
+    margin-left: auto;
+    text-align: right;
+  }
+
+  /* The drawer is the whole task on a phone; 300px of 375 left the header
+     wrapping its own button. */
+  .ide-root .agent-drawer {
+    width: min(92vw, 360px);
+    max-width: 92vw;
+  }
+  .ide-root .agent-drawer-head {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ide-root .agent-drawer-head > .ide-btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   7. LONG PATHS TRUNCATE; THE PAGE NEVER SCROLLS SIDEWAYS.
+
+   A generated file chip, an inline `code` span in an assistant reply and a KPI
+   value are all attacker-length-ish strings the transcript does not control.
+   The chip already truncates; the prose and the KV rows are given the same
+   guarantee so a single unbroken identifier cannot widen the column.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-msg-body,
+.ide-root .agent-kv-row code,
+.ide-root .agent-card-sub {
+  overflow-wrap: anywhere;
+}
+.ide-root .agent-tool-file {
+  max-width: min(46ch, 100%);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   8. HOVER CHANGES COLOUR, NOT POSITION.
+
+   One curve, entrances only. The chips and rows on this surface transition
+   their own colour so a pointer sweep across the transcript stays calm; nothing
+   here animates geometry, and reduced motion drops the transition entirely.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-tool-pill,
+.ide-root .agent-empty-chips button,
+.ide-root .agent-bar-btn,
+.ide-root .agent-bar-icon,
+.ide-root .agent-approval-pill {
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease),
+    color 120ms var(--ide-ease);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ide-root .agent-tool-pill,
+  .ide-root .agent-empty-chips button,
+  .ide-root .agent-bar-btn,
+  .ide-root .agent-bar-icon,
+  .ide-root .agent-approval-pill {
+    transition: none;
+  }
+}

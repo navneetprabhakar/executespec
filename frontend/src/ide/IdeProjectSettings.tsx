@@ -432,11 +432,9 @@ export function IdeProjectSettings() {
                     Archive
                   </button>
                 )}
-                <button
-                  className='ide-btn ghost'
-                  style={{color: 'var(--ide-red)'}}
-                  onClick={() => setProjectAction('delete')}
-                >
+                {/* Ghost that reddens on hover only — a permanently red label in a
+                    calm action row reads as an error state rather than a choice. */}
+                <button className='ide-btn danger' onClick={() => setProjectAction('delete')}>
                   Delete
                 </button>
               </div>
@@ -529,7 +527,6 @@ export function IdeProjectSettings() {
                         <button
                           className='ide-btn ghost'
                           aria-label={`Delete ${display.label}`}
-                          style={{padding: '3px 8px', color: 'var(--ide-red)'}}
                           onClick={() => setDeleteDocFor({docId: d.id, label: display.label})}
                         >
                           ×
@@ -669,9 +666,11 @@ export function IdeProjectSettings() {
                         </div>
                       )}
                       <div style={{display: 'flex', gap: 6, marginTop: 9}}>
+                        {/* "Create export" above is this surface's one accent commit
+                            action; a per-row retrieval is a ghost. */}
                         {job.downloadable && (
                           <button
-                            className='ide-btn'
+                            className='ide-btn ghost'
                             disabled={busy === `download-export-${job.id}`}
                             onClick={() => downloadExport(job)}
                           >

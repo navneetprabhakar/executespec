@@ -24,6 +24,7 @@ import {
   SunIcon,
   MoonIcon,
   MonitorIcon,
+  SettingsIcon,
   StatusDot,
   PlusIcon,
   type IconProps,
@@ -43,7 +44,9 @@ const NAV: NavItem[] = [
   {path: '/runs', Icon: RunsIcon, label: 'Work'},
   {path: '/projects', Icon: ProjectsIcon, label: 'Projects'},
   {path: '/org-members', Icon: AccountIcon, label: 'Team'},
-  {path: '/setup', Icon: WorkspaceIcon, label: 'Setup'},
+  // Setup used to reuse WorkspaceIcon, so Home and Setup — two different
+  // destinations — were the same glyph in the nav, the drawer and the tab bar.
+  {path: '/setup', Icon: SettingsIcon, label: 'Setup'},
 ];
 
 function runLabel(r: api.RunSummary): string {
@@ -316,9 +319,11 @@ export default function ConsoleShell() {
   };
 
   const commands: PaletteCmd[] = [
-    {id: 'start', label: 'Go: Start', hint: 'Start', run: () => navigate('/compose')},
+    // One entry per destination. `start` and `compose` both went to /compose,
+    // and `decisions` duplicated `agent-approvals` — the palette listed the same
+    // two destinations twice under different names.
     {id: 'compose', label: 'Start work', hint: '＋', run: () => navigate('/compose')},
-    {id: 'agent', label: 'Open agent', hint: 'chat', run: () => navigate('/agent')},
+    {id: 'agent', label: 'Go: Agent', hint: 'chat', run: () => navigate('/agent')},
     {
       id: 'agent-new-sandbox',
       label: `Agent: New remote ${remoteSandboxEnabled ? 'sandbox' : 'workspace'}`,
@@ -327,7 +332,7 @@ export default function ConsoleShell() {
     },
     {
       id: 'agent-approvals',
-      label: 'Agent: Waiting approvals',
+      label: 'Go: Awaiting approvals',
       hint: 'gate',
       run: () => navigate('/decisions'),
     },
@@ -672,6 +677,23 @@ export default function ConsoleShell() {
               </NavLink>
             </>
           )}
+
+          {/* Below 480px the top bar drops the bell and the account menu for
+              space (see console.css). Without these rows they would be
+              unreachable on a phone, so the drawer carries them. */}
+          <div className='con-side-section con-only-mobile'>
+            <AccountIcon size={12} />
+            You
+          </div>
+          <NavLink to='/notifications' className='con-runitem con-only-mobile'>
+            <BellIcon size={14} />
+            <span className='con-runitem-label'>Notifications</span>
+            {unread > 0 && <span className='con-side-count'>{unread > 9 ? '9+' : unread}</span>}
+          </NavLink>
+          <NavLink to='/account' className='con-runitem con-only-mobile'>
+            <AccountIcon size={14} />
+            <span className='con-runitem-label'>Account</span>
+          </NavLink>
 
           <span className='con-side-grow' />
           <div className='con-side-tier' title={`Plan: ${tier}`}>

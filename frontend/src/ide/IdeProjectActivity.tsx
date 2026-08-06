@@ -35,25 +35,18 @@ export function IdeProjectActivity() {
         <div className='ide-empty'>No recent activity.</div>
       ) : (
         <div className='ide-card' style={{padding: 0}}>
+          {/* The event kind is an identity, not a verdict. It used to be painted
+              in the accent, which made every routine row compete with the one
+              thing on the page that is actually actionable. It keeps its fixed
+              leading column so summaries align, and the raw server value is
+              rendered verbatim — relabelling it here would be inventing meaning. */}
           {feed.map((e, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 10,
-                padding: '10px 16px',
-                borderBottom: i < feed.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                fontSize: 13,
-              }}
-            >
-              <span style={{color: 'var(--ide-accent)', fontSize: 12, width: 110, flexShrink: 0}}>
-                {String(e.eventType || e.type || 'event')}
-              </span>
-              <span style={{flex: 1, minWidth: 180}}>
+            <div key={i} className='gf-feed-row'>
+              <span className='gf-kindcol'>{String(e.eventType || e.type || 'event')}</span>
+              <span className='gf-feed-summary'>
                 {String(e.summary || e.description || e.message || '')}
               </span>
-              <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{actorLabel(e)}</span>
+              <span className='gf-feed-actor'>{actorLabel(e)}</span>
             </div>
           ))}
         </div>

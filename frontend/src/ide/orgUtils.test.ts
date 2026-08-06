@@ -6,6 +6,7 @@ import {
   isTeamWorkspaceSetupPending,
   isSamlConfigOnly,
   matrixModelLabel,
+  matrixProviderLabel,
   matrixProviderRows,
   normalizedOrgTier,
   orgDisplayName,
@@ -122,6 +123,25 @@ describe('orgUtils', () => {
     expect(isSamlConfigOnly('GOOGLE_OIDC')).toBe(false);
     expect(isSamlConfigOnly('OKTA_SAML')).toBe(true);
     expect(isSamlConfigOnly('AZURE_AD_SAML')).toBe(true);
+  });
+});
+
+describe('model-matrix provider labels', () => {
+  it('spells each provider the way the provider does, not CSS-capitalized', () => {
+    // `text-transform: capitalize` on the raw matrix key produced "Openai",
+    // "Deepseek" and "Openrouter" in the ENTERPRISE routing grid.
+    expect(matrixProviderLabel('openai')).toBe('OpenAI');
+    expect(matrixProviderLabel('deepseek')).toBe('DeepSeek');
+    expect(matrixProviderLabel('openrouter')).toBe('OpenRouter');
+    expect(matrixProviderLabel('anthropic')).toBe('Anthropic');
+    expect(matrixProviderLabel('gemini')).toBe('Gemini');
+    expect(matrixProviderLabel('fireworks')).toBe('Fireworks');
+  });
+
+  it('falls back to first-letter capitalization for an unknown provider', () => {
+    expect(matrixProviderLabel('mistral')).toBe('Mistral');
+    expect(matrixProviderLabel('  MISTRAL  ')).toBe('Mistral');
+    expect(matrixProviderLabel('')).toBe('');
   });
 });
 

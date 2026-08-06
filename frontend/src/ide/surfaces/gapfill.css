@@ -1,0 +1,524 @@
+/* Version B — gap-fill lane.
+ *
+ * The six route-scoped lanes covered the app by route; fourteen shared component
+ * files sat between those scopes and were never touched. This file holds the CSS
+ * those components need. Shared grammar lives in ide.css — nothing here restates
+ * it, and every rule is scoped to `.ide-root` so it cannot leak into the public
+ * Signal pages.
+ *
+ * Every class is prefixed `gf-`. Tailwind 4 utilities are live in this build, so
+ * an unprefixed modifier (`.fixed`, `.grid`, `.block`, …) would be silently
+ * overridden by the utility of the same name.
+ */
+
+/* ── 1. Alignment is a column — the TRAILING case ──────────────────────────
+ *
+ * The Members list ends each row with a role badge (`PROJECT_ADMIN` /
+ * `PROJECT_DEVELOPER` / `PROJECT_VIEWER`). `.ide-badge` is content-width, so the
+ * three roles produced three different right edges and the Remove control danced
+ * left and right down the list. A fixed cell fixes the column; a long role WRAPS
+ * inside its cell rather than truncating, because "PROJECT_DEVELOP…" loses the
+ * word that carries the meaning.
+ *
+ * PROMOTION CANDIDATE: this is the trailing mirror of ide.css's
+ * `.ide-work-row > .ide-badge:first-child` and of projects.css's
+ * `.ide-project-statuscol`. Three lanes have now built the same grammar; it
+ * belongs in ide.css once, leading and trailing.
+ */
+.ide-root .gf-rolecol {
+  flex: 0 0 var(--gf-rolecol-w, 104px);
+  width: var(--gf-rolecol-w, 104px);
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.ide-root .gf-rolecol > .ide-badge {
+  max-width: 100%;
+  min-width: 0;
+  display: block;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* The trailing action cell is reserved even when a row has no action, because a
+   conditional control is exactly what breaks a trailing column: measured at
+   1600px, the "you" row (no Remove) put its role badge 88px right of every other
+   row's. The cell holds the column; an empty one renders nothing. */
+.ide-root .gf-actioncol {
+  flex: 0 0 auto;
+  min-width: var(--gf-actioncol-w, 92px);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ide-s2);
+  flex-wrap: wrap;
+}
+
+/* ── 2. Segmented choice at the shared control height ──────────────────────
+ *
+ * Role selection was three ghost buttons whose "selected" state was an inline
+ * borderColor/color override — a control that changes its own metric to say it is
+ * chosen. This is one segmented control: selection is a tint, and every segment
+ * keeps `--ide-control-h` because these are the project member invite targets the
+ * a11y script pins at 32px. (projects.css's `.ide-project-segment` is 26px, which
+ * is why it is deliberately not reused here.)
+ */
+.ide-root .gf-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-pill);
+  background: var(--ide-bg-sidebar);
+  max-width: 100%;
+}
+.ide-root .gf-seg button {
+  min-height: var(--ide-control-h);
+  padding: 0 var(--ide-s3);
+  border: 0;
+  border-radius: var(--ide-r-pill);
+  background: transparent;
+  color: var(--ide-fg-muted);
+  font: inherit;
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 120ms var(--ide-ease),
+    color 120ms var(--ide-ease);
+}
+.ide-root .gf-seg button:hover {
+  color: var(--ide-fg-bright);
+}
+.ide-root .gf-seg button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--ide-accent) 16%, transparent);
+  color: var(--ide-accent);
+}
+.ide-root .gf-seg button:focus-visible {
+  outline: 2px solid var(--ide-accent);
+  outline-offset: 1px;
+}
+
+/* A form's controls stack with the shared space scale instead of ad-hoc margins. */
+.ide-root .gf-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ide-s3);
+}
+.ide-root .gf-form > .ide-input,
+.ide-root .gf-form > .ide-select {
+  width: 100%;
+}
+.ide-root .gf-hint {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  line-height: 1.5;
+}
+/* There is no global anchor rule in the IDE chrome, so a link inside a note
+   would inherit the note's muted colour and stop reading as a link. */
+.ide-root .gf-note-link {
+  color: var(--ide-accent);
+}
+.ide-root .gf-note-title {
+  display: block;
+  font-weight: 650;
+  color: var(--ide-fg-bright);
+  margin-bottom: var(--ide-s1);
+}
+
+/* A note that lives inline in a rail or a grid: it must not inherit the parent's
+   `justify-items: center` or `align-items: center`, and its recovery control sits
+   beside the message rather than under it.
+   The tone comes from `.ide-note.bad` — tint plus a red leading edge — and the
+   text stays readable rather than being repainted red. */
+.ide-root .gf-inline-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ide-s2);
+  justify-self: stretch;
+  width: 100%;
+  text-align: left;
+}
+
+/* An action cluster wraps rather than clipping; controls keep their own metric. */
+.ide-root .gf-actions {
+  display: flex;
+  gap: var(--ide-s2);
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+/* ── 3. A row's identity chips are neutral ─────────────────────────────────
+ * `EXT` was a tracked-out uppercase micro-label painted in the accent — an
+ * always-true fact rendered as loudly as a measured one.
+ */
+.ide-root .gf-idchip {
+  flex: 0 0 auto;
+}
+/* A chip inside a truncating title is a chip that disappears. Measured at 375px,
+   "External" on a long name was clipped away entirely by the title's ellipsis, so
+   the one fact the chip exists to carry was the first thing lost. The title line
+   is a flex row: the NAME truncates, the chip never shrinks.
+   (gapfill.css is imported after projects.css, so these win the equal-specificity
+   tie against `.ide-project-row-title` by source order — deliberate.) */
+.ide-root .gf-titleline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ide-s2);
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+}
+.ide-root .gf-titletext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 4. Evidence rows ──────────────────────────────────────────────────────
+ * Share-link audit events and similar three-part facts: kind, outcome, time.
+ * The time sits on the right edge on a wide screen and drops under the fact on a
+ * phone rather than squeezing the words in front of it.
+ */
+.ide-root .gf-evidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ide-s1) var(--ide-s3);
+  padding: var(--ide-s2) 0;
+  border-bottom: 1px solid var(--ide-border);
+  font-size: var(--ide-t-caption);
+  min-width: 0;
+}
+.ide-root .gf-evidence-row:last-child {
+  border-bottom: 0;
+}
+.ide-root .gf-evidence-kind {
+  font-weight: 650;
+  color: var(--ide-fg-bright);
+}
+.ide-root .gf-evidence-time {
+  margin-left: auto;
+  color: var(--ide-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The activity feed's leading cell. The event kind is an identity, never a
+   measured state, so it is muted rather than accent-painted; it is a fixed
+   column so every summary in the feed starts at one x, and it WRAPS because
+   `RUN_PLAN_APPROVED` truncated to `RUN_PLAN_AP…` loses the verdict. */
+.ide-root .gf-kindcol {
+  flex: 0 0 var(--gf-kindcol-w, 132px);
+  width: var(--gf-kindcol-w, 132px);
+  min-width: 0;
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  color: var(--ide-fg-muted);
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.ide-root .gf-feed-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ide-s1) var(--ide-s3);
+  padding: var(--ide-s3) var(--ide-s4);
+  border-bottom: 1px solid var(--ide-border);
+  min-width: 0;
+}
+.ide-root .gf-feed-row:last-child {
+  border-bottom: 0;
+}
+.ide-root .gf-feed-summary {
+  flex: 1;
+  min-width: 180px;
+  overflow-wrap: anywhere;
+}
+.ide-root .gf-feed-actor {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ── 5. Stat tiles ─────────────────────────────────────────────────────────
+ * The usage-audit totals used an 18px literal, so the phone ramp could not reach
+ * the number, and `flex: 1; min-width: 120px` let seven tiles reflow into ragged
+ * rows. An auto-fit grid keeps them on one modular column set.
+ */
+.ide-root .gf-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: var(--ide-s3);
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .gf-stat-label {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+.ide-root .gf-stat-value {
+  font-size: var(--ide-t-h2);
+  font-weight: 700;
+  line-height: 1.15;
+  margin-top: var(--ide-s1);
+  color: var(--ide-fg-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 6. Wide data scrolls inside its own container ─────────────────────────
+ * Never the page. A nine-column attempt ledger cannot become nine stacked rows
+ * without destroying the row-to-row comparison that is the whole point of it, so
+ * it keeps its shape and takes its own scrollbar.
+ */
+.ide-root .gf-tablewrap {
+  overflow-x: auto;
+  margin-top: var(--ide-s3);
+  max-width: 100%;
+}
+.ide-root .gf-tablewrap > table {
+  width: 100%;
+  min-width: max-content;
+}
+
+/* The usage-audit tables carried `className='ide-table'`, a class DEFINED NOWHERE
+   in the app — every reference was in one component and no stylesheet answered
+   it. They rendered as bare browser-default tables: no cell padding, no header
+   treatment, no row rule, so at 375px the Time column ran straight into the User
+   column with no gap at all. This is the missing style.
+   PROMOTION CANDIDATE: if any other surface grows a table, this belongs in
+   ide.css as the app's one table, and `.ide-table` should either be defined
+   there or removed as a name. */
+.ide-root .gf-table {
+  border-collapse: collapse;
+  font-size: var(--ide-t-caption);
+}
+.ide-root .gf-table th,
+.ide-root .gf-table td {
+  padding: var(--ide-s2) var(--ide-s3);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--ide-border);
+}
+.ide-root .gf-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ide-bg-sidebar);
+  color: var(--ide-fg-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ide-root .gf-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.ide-root .gf-table tbody tr:hover td {
+  background: var(--ide-hover);
+}
+/* Counts and money read as columns of digits, not as prose. */
+.ide-root .gf-table td:nth-last-child(-n + 3) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Toolbar for a filtered report: fields grow, the commit action does not shrink. */
+.ide-root .gf-toolbar {
+  display: flex;
+  gap: var(--ide-s2);
+  flex-wrap: wrap;
+  align-items: end;
+  min-width: 0;
+}
+.ide-root .gf-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ide-s1);
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  min-width: 0;
+}
+.ide-root .gf-field-grow {
+  flex: 1;
+  min-width: 180px;
+}
+.ide-root .gf-rowhead {
+  display: flex;
+  gap: var(--ide-s2);
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  font-size: var(--ide-t-caption);
+}
+.ide-root .gf-rowhead strong {
+  color: var(--ide-fg-bright);
+}
+.ide-root .gf-pager {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ide-s2);
+  margin-top: var(--ide-s3);
+  flex-wrap: wrap;
+}
+
+/* ── 7. Disclosures ────────────────────────────────────────────────────────
+ * `.ide-root details > summary::before` is the app's one disclosure marker, so
+ * these only set type and rhythm. Detail bodies are captions, not body copy.
+ */
+.ide-root .gf-disclosure-summary {
+  cursor: pointer;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+.ide-root .gf-disclosure-summary:hover {
+  color: var(--ide-fg-bright);
+}
+.ide-root .gf-disclosure-body {
+  display: grid;
+  gap: var(--ide-s2);
+  margin-top: var(--ide-s2);
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  overflow-wrap: anywhere;
+}
+.ide-root .gf-plan-summary {
+  cursor: pointer;
+  color: var(--ide-fg-bright);
+  font-weight: 550;
+}
+.ide-root .gf-plan-body {
+  font-size: var(--ide-t-caption);
+  line-height: 1.55;
+  margin-top: var(--ide-s3);
+}
+.ide-root .gf-plan-section {
+  margin-top: var(--ide-s3);
+}
+.ide-root .gf-plan-section > strong {
+  color: var(--ide-fg-bright);
+}
+/* Tailwind 4's preflight sets `ul { list-style: none }`, so the plan's hard
+   constraints rendered as an unmarked block of sentences — the reader could not
+   see where one non-negotiable constraint ended and the next began. The marker is
+   restated explicitly. */
+.ide-root .gf-bullets {
+  margin: var(--ide-s1) 0 0;
+  padding-left: var(--ide-s5);
+  list-style: disc outside;
+}
+.ide-root .gf-bullets li {
+  margin-bottom: 2px;
+}
+.ide-root .gf-bullets li {
+  overflow-wrap: anywhere;
+}
+.ide-root .gf-none {
+  color: var(--ide-fg-muted);
+}
+
+/* ── 8. Setup index ────────────────────────────────────────────────────────
+ * "Open" was a word doing an affordance's job. A chevron says the same thing in
+ * the space of a glyph and tracks the type ramp via `--ide-icon`.
+ */
+.ide-root .gf-rowchevron {
+  flex-shrink: 0;
+  color: var(--ide-fg-muted);
+  display: inline-flex;
+  align-items: center;
+}
+/* `.ide-work-row` becomes a two-column grid at <=860px and auto-places trailing
+   children into row 2 column 1, where a lone chevron stretched 275px wide under
+   the title and read as a stray bullet. It belongs beside the title. */
+@media (max-width: 860px) {
+  .ide-root .ide-work-row > .gf-rowchevron {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    justify-self: end;
+  }
+}
+
+/* A trigger's chevron points where it is going. */
+.ide-root .gf-chevron-open,
+.ide-root .gf-chevron-closed {
+  display: inline-flex;
+  align-items: center;
+  transition: transform 120ms var(--ide-ease);
+}
+.ide-root .gf-chevron-open {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ide-root .gf-chevron-open,
+  .ide-root .gf-chevron-closed {
+    transition: none;
+  }
+}
+
+/* ── 9. Phone ──────────────────────────────────────────────────────────────
+ * Type and gutters already step down globally. What is needed here is SHAPE:
+ * nothing may force a row wider than the viewport, and no control may clip.
+ */
+@media (max-width: 600px) {
+  /* At 375px a name + email + role cell + Remove on one line leaves the name
+     about 90px. The row wraps: identity first, role and action under it. */
+  .ide-root .gf-rolecol {
+    --gf-rolecol-w: auto;
+    flex: 0 0 auto;
+    justify-content: flex-start;
+  }
+  .ide-root .gf-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* The feed's fixed leading column would leave the summary ~150px at 375px.
+     Kind and actor share the first line; the summary takes the width below. */
+  .ide-root .gf-kindcol {
+    --gf-kindcol-w: auto;
+    flex: 0 0 auto;
+  }
+  .ide-root .gf-feed-summary {
+    flex: 1 1 100%;
+    min-width: 0;
+    order: 3;
+  }
+  .ide-root .gf-feed-actor {
+    margin-left: auto;
+  }
+  .ide-root .gf-toolbar > .ide-btn {
+    width: 100%;
+  }
+  .ide-root .gf-field-grow {
+    flex: 1 1 100%;
+  }
+  /* Four artifact actions at 375px clipped the fourth. They wrap instead. */
+  .ide-root .agent-artifact-actions {
+    flex-wrap: wrap;
+  }
+  .ide-root .gf-evidence-time {
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
+  /* The shared status column is 84px on a phone. That is right for run statuses
+     and wrong for reconciliation verdicts: `UNAVAILABLE` broke as `UNAVAILA/BLE`
+     and `MISMATCH` as `MISMATC/H`. Three rows do not need a column here — the
+     badge takes its own width and stays one word. */
+  .ide-root .gf-evidence-row > .ide-project-statuscol {
+    --ide-project-statuscol-w: auto;
+    flex: 0 0 auto;
+    width: auto;
+  }
+  /* A label/value pair whose value is a full build command wrapped into a ragged
+     two-column tangle. Stack it. */
+  .ide-root .gf-plan-body .ide-kv {
+    display: block;
+  }
+  .ide-root .gf-plan-body .ide-kv span:last-child {
+    display: block;
+    text-align: left;
+    margin-top: 2px;
+  }
+}
