@@ -70,4 +70,33 @@ class OpenRouterModelMapperTest {
     assertThat(OpenRouterModelMapper.isSupported("gemini-3-pro-preview")).isFalse();
     assertThat(OpenRouterModelMapper.isSupported(null)).isFalse();
   }
+
+  @Test
+  void delisted_models_stay_routable_but_leave_the_picker() {
+    // The menu shrinks; the routing contract does not. A customer already pinned to one of these
+    // must keep dispatching — deleting the mapping instead would break historical runs, org
+    // overrides and cost attribution on rows that already used it.
+    for (String delisted :
+        java.util.List.of(
+            "qwen3-coder",
+            "qwen3.7-max",
+            "kimi-k2.6",
+            "minimax-m2.7",
+            "codestral-2508",
+            "mimo-v2.5-pro",
+            "gpt-5.3-codex")) {
+      assertThat(OpenRouterModelMapper.isSupported(delisted)).isTrue();
+      assertThat(OpenRouterModelMapper.toSlug(delisted)).isNotBlank();
+      assertThat(OpenRouterModelMapper.selectableAllowList()).doesNotContainKey(delisted);
+    }
+    // Every native vendor family stays selectable — Anthropic, OpenAI and Gemini in full.
+    assertThat(OpenRouterModelMapper.selectableAllowList())
+        .containsKeys(
+            "claude-sonnet-5", "claude-opus-5", "gpt-5.4", "gpt-5.1-codex", "gemini-3.5-flash");
+    // ...as does the curated coding set.
+    assertThat(OpenRouterModelMapper.selectableAllowList())
+        .containsKeys("glm-5.2", "deepseek-v4-pro", "qwen3-coder-next", "kimi-k3", "grok-4.5");
+    assertThat(OpenRouterModelMapper.selectableAllowList())
+        .hasSize(OpenRouterModelMapper.allowList().size() - 7);
+  }
 }

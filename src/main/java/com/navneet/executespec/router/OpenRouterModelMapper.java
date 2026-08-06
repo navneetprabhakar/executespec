@@ -1,6 +1,8 @@
 package com.navneet.executespec.router;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Maps an ExecuteSpec model-matrix id to its OpenRouter slug ({@code vendor/model}).
@@ -100,8 +102,51 @@ public final class OpenRouterModelMapper {
     return matrixModelId != null && SLUGS.containsKey(matrixModelId);
   }
 
-  /** Immutable view of the verified matrix-id → OpenRouter-slug allow-list. */
+  /**
+   * Ids that stay ROUTABLE but are no longer offered in the model picker.
+   *
+   * <p>The allow-list above is two things at once: the set we know how to route, and — through
+   * {@code OrgController.selectableModelsFor} — the menu a customer picks from. Those must be
+   * separable. Deleting a mapping to shorten the menu would also make every historical run, org
+   * override and persisted exact pin referencing that id throw at dispatch, and would strand cost
+   * attribution on rows that already used it.
+   *
+   * <p>So the menu is trimmed here instead. Each entry is superseded by a model that remains
+   * selectable, and each remains dispatchable for anything already pinned to it.
+   *
+   * <p>2026-08-06 — the OpenRouter picker was 40 rows. Target shape is the three native vendor
+   * families (Anthropic, OpenAI, Gemini — all mirrored here) plus a curated top-10 coding set.
+   */
+  private static final Set<String> NOT_SELECTABLE =
+      Set.of(
+          "qwen3-coder", // superseded by qwen3-coder-next
+          "qwen3.7-max", // qwen3.7-plus is ~4x cheaper at the same 1M context
+          "kimi-k2.6", // superseded by kimi-k2.7-code / kimi-k3
+          "minimax-m2.7", // superseded by minimax-m3
+          "codestral-2508", // not in the curated coding set
+          "mimo-v2.5-pro", // benchmark leftover (TB 2.0 cohort), not a product route
+          "gpt-5.3-codex" // redundant: the native OpenAI codex line is mirrored above
+          );
+
+  /**
+   * Immutable view of the verified matrix-id → OpenRouter-slug allow-list.
+   *
+   * <p>This is the ROUTING contract — every id here can be dispatched. Use {@link
+   * #selectableAllowList()} for anything user-facing.
+   */
   public static Map<String, String> allowList() {
     return SLUGS;
+  }
+
+  /**
+   * The subset offered in the model picker: {@link #allowList()} minus {@link #NOT_SELECTABLE}.
+   *
+   * <p>Routing, org-override validation and cost attribution must keep using {@link #allowList()},
+   * so a customer who already pinned a de-listed model is not broken by a menu change.
+   */
+  public static Map<String, String> selectableAllowList() {
+    return SLUGS.entrySet().stream()
+        .filter(e -> !NOT_SELECTABLE.contains(e.getKey()))
+        .collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 }
