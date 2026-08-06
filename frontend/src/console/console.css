@@ -1295,3 +1295,17 @@ button.con-side-empty:focus-visible {
     padding: 8px 9px;
   }
 }
+
+/* The hero's Start work. The top bar's Start is this surface's one accent-filled
+   commit action and leads to the same place, so the hero's copy of it is a ghost:
+   still a real affordance for someone reading the hero rather than the chrome,
+   but not a second primary competing with the first. */
+.ide-root .con-newrun.is-quiet {
+  background: transparent;
+  color: var(--ide-fg-bright);
+  border-color: var(--ide-border-strong);
+}
+.ide-root .con-newrun.is-quiet:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-accent);
+}

@@ -231,7 +231,16 @@ export default function ConsoleHome() {
               You approve the plan. Execution, tests, and the PR follow from there.
             </div>
           </div>
-          <button type='button' className='con-newrun lg' onClick={() => navigate('/compose')}>
+          {/* Ghost, not accent. The top bar's Start is the surface's one
+              accent-filled commit action and it goes to the same place; two
+              filled buttons to one destination is the accent-discipline
+              violation, not a second entry point. This stays as an affordance
+              for anyone reading the hero rather than the chrome. */}
+          <button
+            type='button'
+            className='con-newrun lg is-quiet'
+            onClick={() => navigate('/compose')}
+          >
             <PlusIcon size={16} />
             Start work
           </button>
