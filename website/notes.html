@@ -3,32 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Engineering Notes — ExecuteSpec</title>
-    <meta name="description" content="Write-ups on the ExecuteSpec harness, the plan gate, and the token ledger.">
+    <title>Research Notes — ExecuteSpec</title>
+    <meta name="description" content="Published benchmark results, method, and open questions from ExecuteSpec — an independent AI R&D lab building evidence-first coding agents. Every Terminal-Bench trajectory is public.">
     <meta name="robots" content="index, follow">
-    <meta name="theme-color" content="#0B0D10">
-    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#F6F7F8" media="(prefers-color-scheme: light)">
+    <meta name="color-scheme" content="light dark">
     <link rel="icon" type="image/svg+xml" href="assets/brand/merge-rail/executespec-merge-rail-favicon.svg">
     <link rel="canonical" href="https://executespec.ai/notes">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet">
     <style>
+        /* Palette is shared verbatim with index.html and the product's
+           ide.css. A reading surface breathes more than a control plane, so
+           scale diverges — the accent and semantics do not. */
         :root {
             --bg: #F6F7F8;
+            --card-bg: #FFFFFF;
             --ink: #111318;
             --ink-soft: #252A33;
             --text-dim: #5F6673;
+            --text-mute: #666E7A;
             --hairline: #DDE2EA;
-            --rail-blue: #4F7FE7;
+            --rail-blue: #5B8CFF;
+            --rail-blue-text: #2B54C4;
+            --success: #217A59;
+            --warning: #8A6712;
         }
         @media (prefers-color-scheme: dark) {
             :root {
                 --bg: #0B0D10;
+                --card-bg: #14171C;
                 --ink: #ECEEF2;
                 --ink-soft: #C9D1DB;
                 --text-dim: #9EA7B6;
+                --text-mute: #828B9A;
                 --hairline: rgba(255, 255, 255, 0.08);
+                --rail-blue-text: #9DBBFF;
+                --success: #3FBF8F;
+                --warning: #E5A93C;
             }
         }
         *, *::before, *::after { box-sizing: border-box; }
@@ -39,30 +53,109 @@
             font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
             line-height: 1.65;
             -webkit-font-smoothing: antialiased;
-            padding: 0 20px calc(48px + env(safe-area-inset-bottom));
+            padding: 0 20px calc(64px + env(safe-area-inset-bottom));
         }
-        main { max-width: 640px; margin: 0 auto; }
+        main { max-width: 720px; margin: 0 auto; }
         .top {
             padding: 28px 0 0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            display: flex; align-items: center; justify-content: space-between;
         }
         .brand {
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            color: var(--ink);
-            text-decoration: none;
-            font-size: 17px;
+            font-weight: 700; letter-spacing: -0.02em;
+            color: var(--ink); text-decoration: none; font-size: 17px;
         }
         .top a.back { color: var(--text-dim); text-decoration: none; font-size: 14px; }
         .top a.back:hover { color: var(--ink); }
-        h1 {
-            font-size: 34px;
-            letter-spacing: -0.03em;
-            margin: 64px 0 24px;
+
+        .eyebrow {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; font-weight: 600;
+            letter-spacing: 0.16em; text-transform: uppercase;
+            color: var(--text-mute);
+            margin: 64px 0 12px;
         }
-        p { color: var(--ink-soft); font-size: 17px; margin: 0 0 20px; }
+        h1 { font-size: clamp(30px, 5vw, 40px); letter-spacing: -0.03em; line-height: 1.08; margin: 0 0 20px; }
+        h2 {
+            font-size: 21px; letter-spacing: -0.02em; line-height: 1.25;
+            margin: 56px 0 8px; padding-top: 28px;
+            border-top: 1px solid var(--hairline);
+        }
+        h3 { font-size: 16px; margin: 32px 0 6px; letter-spacing: -0.01em; }
+        p { color: var(--ink-soft); font-size: 16.5px; margin: 0 0 18px; }
+        .lede { font-size: 18px; color: var(--text-dim); }
+        a { color: var(--rail-blue-text); }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Published results carry their scope inline. A benchmark number
+           without its method is a claim we did not measure. */
+        .result {
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin: 0 0 12px;
+        }
+        .result .r-head {
+            display: flex; align-items: baseline; justify-content: space-between;
+            gap: 14px; flex-wrap: wrap;
+        }
+        .result .r-name { font-weight: 600; font-size: 15.5px; }
+        .result .r-name .via { color: var(--text-mute); font-weight: 400; font-size: 13px; }
+        .result .r-score {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 19px; font-weight: 600;
+            letter-spacing: -0.02em;
+            font-variant-numeric: tabular-nums;
+        }
+        .result .r-score.lead { color: var(--success); }
+        .result .r-meta {
+            margin-top: 8px; font-size: 13px; color: var(--text-dim);
+            display: flex; gap: 16px; flex-wrap: wrap;
+        }
+        .result .r-meta .mono { font-variant-numeric: tabular-nums; }
+        .result a.traj { font-weight: 600; text-decoration: none; white-space: nowrap; }
+        .result a.traj:hover { text-decoration: underline; }
+
+        /* Open questions are labelled as open. They are not results and must
+           never be laid out like one. */
+        .open-q {
+            border-left: 3px solid var(--warning);
+            padding: 2px 0 2px 16px;
+            margin: 0 0 22px;
+        }
+        .open-q .q { font-weight: 600; font-size: 15.5px; margin: 0 0 4px; }
+        .open-q p { font-size: 15px; margin: 0; color: var(--text-dim); }
+
+        .status {
+            display: inline-block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10.5px; font-weight: 600;
+            letter-spacing: 0.08em; text-transform: uppercase;
+            padding: 3px 9px; border-radius: 999px;
+            border: 1px solid var(--hairline);
+            color: var(--text-mute);
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+
+        .method {
+            font-size: 14.5px; color: var(--text-dim);
+            background: var(--card-bg);
+            border: 1px solid var(--hairline);
+            border-radius: 14px;
+            padding: 18px 20px;
+            margin: 24px 0 0;
+        }
+        .method strong { color: var(--ink); }
+
+        .links {
+            margin-top: 56px; padding-top: 24px;
+            border-top: 1px solid var(--hairline);
+            font-size: 15.5px; color: var(--text-dim);
+        }
+        .links a { text-decoration: none; }
+        .links a:hover { text-decoration: underline; }
+        .pip { margin: 0 10px; color: var(--text-mute); }
     </style>
 </head>
 <body>
@@ -71,8 +164,148 @@
         <a class="brand" href="/">ExecuteSpec</a>
         <a class="back" href="/">&larr; Home</a>
     </div>
-    <h1>Engineering Notes</h1>
-    <p>Write-ups on the harness, the plan gate, and the token ledger — coming shortly.</p>
+
+    <div class="eyebrow">Research</div>
+    <h1>Research notes</h1>
+    <p class="lede">
+        ExecuteSpec is an independent AI R&amp;D lab studying one question: can a coding agent be made
+        to prove its work, cheaply enough to use every day? This page is what we have actually
+        measured, how we measured it, and what we still cannot answer.
+    </p>
+
+    <h2>Published results</h2>
+    <p>
+        We drive the production harness — the same classifier, planner, worker, and reviewer that run
+        customer specs — through public benchmarks. Identical frozen harness for every model, official
+        scorers, no excluded runs. Every Terminal-Bench trajectory below is public, including the
+        failures.
+    </p>
+
+    <h3>Terminal-Bench 2.1 &mdash; 89 tasks &times; 5 attempts</h3>
+
+    <div class="result">
+        <div class="r-head">
+            <div class="r-name">GLM 5.2 <span class="via">via Fireworks Fast</span></div>
+            <div class="r-score lead">79 / 89</div>
+        </div>
+        <div class="r-meta">
+            <span>70.6% per-attempt</span>
+            <span class="mono">445 trials</span>
+            <a class="traj" href="https://hub.harborframework.com/jobs/7870521c-c40b-4c16-815c-ecb0dfe9774f" target="_blank" rel="noopener">Trajectories &#8599;</a>
+        </div>
+    </div>
+
+    <div class="result">
+        <div class="r-head">
+            <div class="r-name">DeepSeek V4 Pro <span class="via">native API</span></div>
+            <div class="r-score">73 / 89</div>
+        </div>
+        <div class="r-meta">
+            <span>66.6% per-attempt</span>
+            <span class="mono">440 trials</span>
+            <a class="traj" href="https://hub.harborframework.com/jobs/e778501b-6e95-4b40-9d79-5bf0a4cf32a0" target="_blank" rel="noopener">Trajectories &#8599;</a>
+        </div>
+    </div>
+
+    <div class="result">
+        <div class="r-head">
+            <div class="r-name">DeepSeek V4 Flash 0731 <span class="via">via Fireworks</span></div>
+            <div class="r-score">72 / 89</div>
+        </div>
+        <div class="r-meta">
+            <span>62.7% per-attempt</span>
+            <span class="mono">442 trials</span>
+            <a class="traj" href="https://hub.harborframework.com/jobs/aa2ccc8c-5c99-41f9-ae0e-145ace60a60c" target="_blank" rel="noopener">Trajectories &#8599;</a>
+        </div>
+    </div>
+
+    <h3>SWE-bench Lite</h3>
+    <div class="result">
+        <div class="r-head">
+            <div class="r-name">DeepSeek V4 Pro <span class="via">official swebench 4.1.0 scorer</span></div>
+            <div class="r-score">58.2%</div>
+        </div>
+        <div class="r-meta">
+            <span>174 of 299 resolved</span>
+            <span class="mono">$6.02 total LLM cost</span>
+        </div>
+    </div>
+
+    <div class="method">
+        <p style="margin:0 0 12px"><strong>Method, stated plainly.</strong>
+        Terminal-Bench 2.1 runs used 89 tasks &times; 5 attempts under a fixed 1,500-second per-task
+        ceiling — tighter than some tasks declare, so these are internal comparative numbers, not
+        leaderboard submissions. &ldquo;Tasks solved&rdquo; counts tasks solved on at least one of five
+        attempts; &ldquo;per-attempt&rdquo; is the mean across all trials. All Terminal-Bench trials and
+        agent trajectories are public on Harbor Hub at the links above.</p>
+        <p style="margin:0"><strong>What these numbers are not.</strong>
+        Benchmark results measure harness&#43;model performance on benchmark tasks. They are not a
+        guarantee of results on your codebase, and we do not present them as one. Across the 882
+        DeepSeek Terminal-Bench trials there were zero non-timeout transport errors — every failure
+        was the model, the task, or the clock, not the harness.</p>
+    </div>
+
+    <h2>What the lab is working on</h2>
+    <p>
+        These are open questions, not results. They are listed so you can see what we are betting on
+        and hold us to it — none of them is a shipped claim, and long-form write-ups follow the
+        evidence rather than preceding it.
+    </p>
+
+    <div class="open-q">
+        <div class="q">Can verification be cheap enough to run on every task? <span class="status">Open</span></div>
+        <p>
+            The harness spends real money proving work: builds, test executions, review passes. Cost per
+            solved Terminal-Bench trial is currently around $0.05 on open-weight models. We want to know
+            how far that floor drops before verification quality starts degrading with it.
+        </p>
+    </div>
+
+    <div class="open-q">
+        <div class="q">Which failures does an agent hide from itself? <span class="status">Open</span></div>
+        <p>
+            A suite that prints &ldquo;all passed&rdquo; while exiting non-zero, a green run that only
+            proves the tree compiles, a reviewer vouching for a workspace another thread is still
+            editing — each of these was a real defect in our own harness, found by distrusting our own
+            green. We are cataloguing the class.
+        </p>
+    </div>
+
+    <div class="open-q">
+        <div class="q">Does a plan gate change what humans approve? <span class="status">Open</span></div>
+        <p>
+            Every run stops for a human before it spends on code. We can measure approval rates, edit
+            rates, and what people reject — but not yet whether the gate makes reviewers more careful or
+            merely trains them to click through it. That second outcome would make the gate theatre, and
+            we would rather find out.
+        </p>
+    </div>
+
+    <div class="open-q">
+        <div class="q">How much does harness discipline substitute for model scale? <span class="status">Open</span></div>
+        <p>
+            Open-weight models on a disciplined harness are landing within range of far more expensive
+            routes on our benchmarks. We do not yet know how much of that is the harness, how much is
+            benchmark shape, and how much would survive contact with a large brownfield repository.
+        </p>
+    </div>
+
+    <h2>Engineering write-ups</h2>
+    <p>
+        Long-form notes on the harness, the plan gate, and the token ledger are in progress and not yet
+        published. Rather than post placeholders, we would point you at the raw material: the
+        trajectories above are the unedited record of how the agent actually behaves, win or lose.
+    </p>
+
+    <div class="links">
+        <a href="/">Product</a>
+        <span class="pip">&middot;</span>
+        <a href="/about">About the lab</a>
+        <span class="pip">&middot;</span>
+        <a href="https://github.com/navneetprabhakar">GitHub</a>
+        <span class="pip">&middot;</span>
+        <a href="mailto:hello@executespec.ai">hello@executespec.ai</a>
+    </div>
 </main>
 </body>
 </html>
