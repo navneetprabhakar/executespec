@@ -522,3 +522,13 @@
     margin-top: 2px;
   }
 }
+
+/* `.ide-work-main` is placed `grid-column: 1 / -1` so a RUN row's title spans
+   the full width with its status badge tucked underneath. A row that also
+   carries a trailing chevron then puts both in row 1 column 2 — measured at an
+   800px viewport, the chevron started at x=527 while the title block ran to
+   x=533, so the glyph sat ON the text. Rows with a chevron keep the title in
+   column 1 and leave column 2 to the chevron; run rows are untouched. */
+.ide-root .ide-work-row:has(> .gf-rowchevron) .ide-work-main {
+  grid-column: 1;
+}
