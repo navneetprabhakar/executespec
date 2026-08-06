@@ -595,6 +595,84 @@ export function verdictFor(
   return {label: 'Failed', kind: 'bad'};
 }
 
+function sameStatement(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (s: string | null | undefined) =>
+    (s || '')
+      .replace(/\s+/g, ' ')
+      .replace(/[.\s]+$/, '')
+      .trim()
+      .toLowerCase();
+  const x = norm(a);
+  return x.length > 0 && x === norm(b);
+}
+
+/**
+ * The run-detail header already states the outcome once, in its status badge:
+ * `verdictFor()` returns the server's `customerTitle` as the badge label for
+ * ACTION_REQUIRED / POLICY_BLOCKED / WARNING outcomes. The muted note beside
+ * the badge repeated that same string verbatim, so the header said one thing
+ * twice. Return the note only when it adds a statement the badge does not
+ * already make; never drop a distinct status reason.
+ */
+export function headerStatusNoteFor(
+  verdictLabel: string,
+  customerTitle: string | null | undefined,
+  humanReason: string | null | undefined,
+): string | null {
+  const note = (customerTitle || humanReason || '').trim();
+  if (!note) return null;
+  return sameStatement(note, verdictLabel) ? null : note;
+}
+
+/**
+ * Same rule for the recovery card's title. When the server's `customerTitle`
+ * is already the badge label, the card drops its title line entirely and lets
+ * the diagnosis copy lead — a generic restatement ("This run did not reach a
+ * clean result.") is a wasted line beside a body that already says what went
+ * wrong. Returns null when there is no title worth a line of its own.
+ */
+export function recoveryCardTitleFor(
+  verdictLabel: string,
+  customerTitle: string | null | undefined,
+): string | null {
+  const title = (customerTitle || '').trim();
+  if (!title || sameStatement(title, verdictLabel)) return null;
+  return title;
+}
+
+const ACTION_CLAUSE_BREAKS = [' and ', ' before ', ' so that ', ' then ', ' — ', ', '];
+const ACTION_BUTTON_MAX = 40;
+const ACTION_BUTTON_MIN = 10;
+
+/**
+ * A primary action reads as a short verb phrase. `terminalOutcome.primaryAction
+ * .label` is server-supplied and is sometimes a whole sentence — on the
+ * run-result recovery card it is "Inspect the validation evidence and address
+ * the reported failure before retrying." Split it at its first clause boundary:
+ * the leading verb phrase labels the control, the full sentence is rendered as
+ * prose above it so no guidance is lost.
+ *
+ * Nothing is invented or truncated mid-thought: if no clause boundary yields a
+ * short enough phrase the label is left whole and the control wraps.
+ */
+export function splitActionLabel(label: string | null | undefined): {
+  button: string;
+  prose: string | null;
+} {
+  const full = (label || '').replace(/\s+/g, ' ').trim();
+  if (!full) return {button: '', prose: null};
+  const bare = full.replace(/[.\s]+$/, '');
+  if (bare.length <= ACTION_BUTTON_MAX) return {button: bare, prose: null};
+  for (const brk of ACTION_CLAUSE_BREAKS) {
+    const at = bare.indexOf(brk);
+    if (at < 0) continue;
+    const head = bare.slice(0, at).trim();
+    if (head.length >= ACTION_BUTTON_MIN && head.length <= ACTION_BUTTON_MAX)
+      return {button: head, prose: full};
+  }
+  return {button: full, prose: null};
+}
+
 export function missingScoreExplanation(
   run: Pick<api.RunSummary, 'runMode' | 'status' | 'triggeredByFinding'>,
 ): string {
