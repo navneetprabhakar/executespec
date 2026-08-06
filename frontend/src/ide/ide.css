@@ -5828,8 +5828,18 @@
 }
 
 /* Version B chrome: the top bar floats over the ambient wash rather than
-   sitting on an opaque slab, so the ground stays continuous behind it. */
+   sitting on an opaque slab, so the ground stays continuous behind it.
+
+   `backdrop-filter` CREATES A STACKING CONTEXT. Without the position/z-index
+   below, that context sits at z-index:auto in normal flow, which traps every
+   descendant's z-index inside it — the plan-gate popover asks for z-index:60
+   and still paints UNDER the main content, because 60 is then only meaningful
+   among the top bar's own children. The bar therefore has to carry a z-index
+   itself, above the content it floats over and below the 1000 skip-link.
+   Do not remove these two lines while the blur is here. */
 .ide-root .con-topbar {
+  position: relative;
+  z-index: 90;
   background: color-mix(in srgb, var(--ide-bg-editor) 72%, transparent);
   -webkit-backdrop-filter: saturate(1.7) blur(18px);
   backdrop-filter: saturate(1.7) blur(18px);
