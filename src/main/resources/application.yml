@@ -706,18 +706,6 @@ model-matrix:
         cached-input-per-1m: 0.16
         output-per-1m: 4.00
       notes: "Fireworks accounts/fireworks/models/kimi-k2p6 Standard path — ENTERPRISE BYOK. Priority/Fast tiers are more expensive and need route-level policy before exposure."
-    "[glm-5.1-fw]": # bracket-wrapped: dotted key (5.1) would otherwise bind as a nested path
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 202000
-      max-output-tokens: 25344
-      display-label: "GLM 5.1 (Fireworks)"
-      pricing:
-        input-per-1m: 1.40
-        cached-input-per-1m: 0.26
-        output-per-1m: 4.40
-      notes: "Fireworks accounts/fireworks/models/glm-5p1 Standard path — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
     # Fireworks' account-visible serverless catalogue was rechecked on 2026-07-24. Only
     # deepseek-v4-pro, kimi-k2p6, glm-5p1, and glm-5p2 remain among ExecuteSpec's coding cohort.
     # Removed serverless ids stay as legacy aliases below so persisted selections resolve to a
@@ -758,18 +746,6 @@ model-matrix:
         cached-input-per-1m: 0.014
         output-per-1m: 0.28
       notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash-0731 — the pinned 2026-07-31 re-post-trained Flash build; native DeepSeek exposes only the unversioned deepseek-v4-flash, so this slug is the only way to pin 0731. Vendor claims it beats V4-Pro on agent benchmarks (TB 2.1 82.7 vs 72.1) using an unreleased in-house harness; treated here as an unverified third-party claim. Live API smoke 2026-08-02: callable + tool_choice=required verified."
-    devstral-2:
-      provider: openrouter
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 262144
-      max-output-tokens: 32000
-      display-label: "Devstral 2 (OpenRouter)"
-      pricing:
-        input-per-1m: 0.40
-        cached-input-per-1m: 0.40
-        output-per-1m: 2.00
-      notes: "OpenRouter mistralai/devstral-2512 — Mistral agentic SWE coder (262K ctx); tools+tool_choice verified vs OpenRouter /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input (no Mistral prompt-cache via OpenRouter)."
     codestral-2508:
       provider: openrouter
       chain-tier: CAPABLE
@@ -980,7 +956,7 @@ model-matrix:
     gemini-pro-latest: gemini-3.1-pro-preview
     deepseek-v4-flash-fw: kimi-k2p6-fw
     minimax-m3-fw: glm-5.2-fw
-    minimax-m2.7-fw: glm-5.1-fw
+    minimax-m2.7-fw: glm-5.2-fw   # was glm-5.1-fw; that slug 404s upstream (2026-08-06)
     kimi-k2.7-code-fw: kimi-k2p6-fw
 
   fallback-chains:
