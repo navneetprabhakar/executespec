@@ -207,10 +207,12 @@ describe('protected transcript visual contract', () => {
       />,
     );
 
-    const evidence = rendered.querySelector('.agent-activity-evidence');
+    // The activity strip now shares ONE grammar: a status/kind glyph, a pill
+    // summary, and the deeper altitude behind a disclosure.
+    const evidence = rendered.querySelector('.agent-tool-call.is-event');
     expect(evidence).not.toBeNull();
     expect(evidence?.querySelector('summary')?.textContent).toContain('Verification evidence');
-    expect(evidence?.querySelector('p')?.textContent).toContain('Build passed');
+    expect(evidence?.querySelector('.agent-tool-detail')?.textContent).toContain('Build passed');
   });
 
   it('exposes the inline diff as an accessible expandable region', async () => {
@@ -280,7 +282,7 @@ describe('protected transcript visual contract', () => {
       revert?.click();
     });
     expect(rendered.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'current run and repository are not mutated',
+      'This run and repository are not mutated',
     );
     expect(fork).not.toHaveBeenCalled();
 
