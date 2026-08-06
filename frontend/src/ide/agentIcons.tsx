@@ -1,146 +1,54 @@
-// Presentational SVG icons for the agent panels — extracted from agentPanels.tsx to keep
-// that file under its committed line ceiling. Pure JSX, no logic, no dependencies.
+// Agent-surface icons — backed by `lucide-react`, the app's ONE icon library.
 //
-// ONE stroke family: 24x24 viewBox, `currentColor`, strokeWidth 2, round caps and
-// joins, `aria-hidden`. A literal text glyph (`×`, `↓`, `✓`) cannot do any of that —
-// it ignores the theme's colour roles and carries whatever weight the font happens
-// to ship — so every agent-surface glyph is drawn here instead.
+// These were hand-authored SVG paths. Hand-drawn glyphs drift: each one carried its
+// own optical weight, corner radius and terminal treatment, so a row of them read as
+// a set of near-misses rather than a family. Lucide is drawn on a single 24px grid
+// with consistent joinery, so the whole surface inherits one hand.
+//
+// The export NAMES and prop shapes are unchanged, so no call site churns. Sizing and
+// stroke come from `ICON_STROKE` / the ide.css `--ide-icon-*` scale — never per-icon
+// literals — so the set stays coherent as new icons are added.
+import {
+  ArrowDown as LuArrowDown,
+  ArrowUp as LuArrowUp,
+  Check,
+  AlertCircle,
+  Folder,
+  Loader,
+  Paperclip as LuPaperclip,
+  Square,
+  X,
+} from 'lucide-react';
 
-export const Paperclip = () => (
-  <svg
-    width='17'
-    height='17'
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' />
-  </svg>
-);
+/** One stroke weight for every chrome glyph in the app. */
+export const ICON_STROKE = 1.75;
 
-export const ArrowUp = () => (
-  <svg
-    width='16'
-    height='16'
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M12 19V5M5 12l7-7 7 7' />
-  </svg>
-);
+const common = {
+  strokeWidth: ICON_STROKE,
+  absoluteStrokeWidth: false,
+  'aria-hidden': true,
+  focusable: 'false',
+} as const;
 
-export const ArrowDown = ({size = 14}: {size?: number}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M12 5v14M19 12l-7 7-7-7' />
-  </svg>
-);
+export const Paperclip = () => <LuPaperclip size={17} {...common} />;
 
-export const CloseIcon = ({size = 14}: {size?: number}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M18 6L6 18M6 6l12 12' />
-  </svg>
-);
+export const ArrowUp = () => <LuArrowUp size={16} {...common} />;
 
-/** Tool-call succeeded. */
-export const ToolOkIcon = ({size = 12}: {size?: number}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M20 6L9 17l-5-5' />
-  </svg>
-);
+export const ArrowDown = ({size = 14}: {size?: number}) => <LuArrowDown size={size} {...common} />;
 
-/** Tool-call failed. */
+export const CloseIcon = ({size = 14}: {size?: number}) => <X size={size} {...common} />;
+
+export const ToolOkIcon = ({size = 12}: {size?: number}) => <Check size={size} {...common} />;
+
 export const ToolErrIcon = ({size = 12}: {size?: number}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <circle cx='12' cy='12' r='9' />
-    <path d='M15 9l-6 6M9 9l6 6' />
-  </svg>
+  <AlertCircle size={size} {...common} />
 );
 
-/** Tool-call dispatched, outcome not yet known. */
+/** Spins via `.agent-tool-spin` in ide.css; reduced-motion settles it. */
 export const ToolRunningIcon = ({size = 12}: {size?: number}) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <circle cx='12' cy='12' r='9' />
-    <path d='M12 7v5l3 3' />
-  </svg>
+  <Loader size={size} className='agent-tool-spin' {...common} />
 );
 
-export const StopIcon = () => (
-  <svg width='15' height='15' viewBox='0 0 24 24' aria-hidden='true'>
-    <rect x='6' y='6' width='12' height='12' rx='2' fill='currentColor' />
-  </svg>
-);
+export const StopIcon = () => <Square size={12} fill='currentColor' {...common} />;
 
-export const FolderIcon = () => (
-  <svg
-    width='13'
-    height='13'
-    viewBox='0 0 24 24'
-    fill='none'
-    stroke='currentColor'
-    strokeWidth='2'
-    strokeLinecap='round'
-    strokeLinejoin='round'
-    aria-hidden='true'
-  >
-    <path d='M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' />
-  </svg>
-);
+export const FolderIcon = () => <Folder size={14} {...common} />;

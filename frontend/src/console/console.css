@@ -57,7 +57,7 @@
      the token block in ide.css. `.con-root` is imported after `ide.css`, so this
      declaration is what actually decides the protected app's face. */
   font-family: var(--ide-font-ui);
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   line-height: 1.5;
   overflow: hidden;
 }
@@ -100,7 +100,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   line-height: 1.45;
   background: var(--ide-list-active);
   color: var(--ide-fg-bright);
@@ -137,7 +137,7 @@
   border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg-muted);
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   line-height: 1;
   cursor: pointer;
 }
@@ -155,7 +155,7 @@
   color: var(--ide-fg-bright);
   background: color-mix(in srgb, var(--ide-red) 14%, var(--ide-bg-widget));
   border-bottom: 1px solid color-mix(in srgb, var(--ide-red) 42%, var(--ide-border));
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
 }
 .con-api-error-retry {
   padding: 3px 9px;
@@ -172,7 +172,7 @@
 @media (max-width: 640px) {
   .con-root .con-banner {
     padding: 7px 12px;
-    font-size: 12px;
+    font-size: var(--ide-t-caption);
     gap: 8px;
   }
 }
@@ -215,7 +215,7 @@
   gap: 9px;
   min-height: 32px;
   font-weight: 650;
-  font-size: 14px;
+  font-size: var(--ide-t-body-lg);
   color: var(--ide-fg-bright);
   text-decoration: none;
   letter-spacing: 0;
@@ -247,7 +247,7 @@
   border: 1px solid transparent;
   border-radius: var(--ide-r-control);
   padding: 0 var(--ide-s3);
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 550;
   line-height: 1;
   white-space: nowrap;
@@ -368,7 +368,7 @@
   border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--ide-t-body);
 }
 .con-navitem > svg {
   color: color-mix(in srgb, var(--ide-fg-bright) 78%, var(--ide-fg-muted));
@@ -392,7 +392,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ide-fg-muted);
@@ -421,13 +421,13 @@
   border: 1px solid var(--ide-border);
   border-radius: 999px;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   line-height: 16px;
   color: var(--ide-fg-muted);
 }
 .con-side-empty {
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
 }
 /* RR-1655 — the disclosures now render a retry control in place of a false "you have none"
@@ -443,7 +443,7 @@ button.con-side-empty {
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
 }
 button.con-side-empty:hover {
@@ -462,7 +462,7 @@ button.con-side-empty:focus-visible {
   border-radius: var(--ide-r-control);
   color: var(--ide-fg-muted);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
 }
 .con-runitem svg,
 .con-navitem svg,
@@ -500,7 +500,7 @@ button.con-side-empty:focus-visible {
   flex: 1;
 }
 .con-side-tier {
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
   padding: 8px 10px;
   border-top: 1px solid var(--ide-border);
@@ -553,14 +553,14 @@ button.con-side-empty:focus-visible {
 }
 .con-hero-kicker {
   margin-bottom: 7px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   font-weight: 700;
   color: var(--ide-accent);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .con-hero-title {
-  font-size: 24px;
+  font-size: var(--ide-t-title);
   line-height: 1.22;
   font-weight: 700;
   color: var(--ide-fg-bright);
@@ -569,7 +569,7 @@ button.con-side-empty:focus-visible {
   overflow-wrap: anywhere;
 }
 .con-hero-sub {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   line-height: 1.6;
   color: color-mix(in srgb, var(--ide-fg-bright) 80%, var(--ide-fg-muted));
   max-width: 690px;
@@ -613,14 +613,14 @@ button.con-side-empty:focus-visible {
   display: block;
   margin-bottom: 5px;
   color: var(--ide-fg-bright);
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 700;
   line-height: 1.3;
 }
 .con-product-card small {
   display: block;
   color: var(--ide-fg-muted);
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   line-height: 1.45;
 }
 .con-cockpit-metrics {
@@ -649,14 +649,14 @@ button.con-side-empty:focus-visible {
   border-color: var(--ide-border-strong);
 }
 .con-metric-card strong {
-  font-size: 24px;
+  font-size: var(--ide-t-title);
   font-weight: 700;
   line-height: 1;
   color: var(--ide-fg-bright);
   font-variant-numeric: tabular-nums;
 }
 .con-metric-label {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   color: var(--ide-fg-muted);
   text-transform: none;
   letter-spacing: 0;
@@ -671,7 +671,7 @@ button.con-side-empty:focus-visible {
 }
 .con-newrun.lg {
   padding: 10px 16px;
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -700,7 +700,7 @@ button.con-side-empty:focus-visible {
   display: flex;
   align-items: center;
   gap: var(--ide-s2);
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 600;
   text-transform: none;
   letter-spacing: 0;
@@ -719,7 +719,7 @@ button.con-side-empty:focus-visible {
   color: var(--ide-fg-bright);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   min-height: 32px;
   padding: 6px 0;
   margin-left: auto;
@@ -755,24 +755,24 @@ button.con-side-empty:focus-visible {
   flex: 1;
 }
 .con-runrow-title {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .con-runrow-meta {
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
 }
 .con-runrow-action {
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   font-weight: 600;
   color: var(--ide-fg-bright);
   white-space: nowrap;
 }
 .con-empty {
   padding: 16px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
   border: 1px dashed var(--ide-border);
   border-radius: var(--ide-r-card);
@@ -827,17 +827,17 @@ button.con-side-empty:focus-visible {
   min-width: 0;
 }
 .con-setup-label {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 600;
   color: var(--ide-fg-bright);
 }
 .con-setup-detail {
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   line-height: 1.35;
   color: var(--ide-fg-muted);
 }
 .con-setup-action {
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   font-weight: 650;
   color: var(--ide-accent);
   white-space: nowrap;
@@ -870,12 +870,12 @@ button.con-side-empty:focus-visible {
   border-color: var(--ide-border-strong);
 }
 .con-proj-name {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 600;
   color: var(--ide-fg-bright);
 }
 .con-proj-desc {
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -934,7 +934,7 @@ button.con-side-empty:focus-visible {
     align-items: flex-start;
   }
   .con-hero-title {
-    font-size: 24px;
+    font-size: var(--ide-t-title);
   }
   .con-decision-hero {
     flex-direction: column;
@@ -976,7 +976,7 @@ button.con-side-empty:focus-visible {
     padding: 8px 2px 12px;
     border-bottom: 1px solid var(--ide-border);
     color: var(--ide-fg-bright);
-    font-size: 13px;
+    font-size: var(--ide-t-body);
     font-weight: 650;
   }
   .con-side-brand img {
@@ -1007,7 +1007,7 @@ button.con-side-empty:focus-visible {
     border-radius: var(--ide-r-control);
     color: var(--ide-fg-muted);
     background: transparent;
-    font-size: 12px;
+    font-size: var(--ide-t-caption);
     cursor: pointer;
   }
   .con-drawer-close:hover {
@@ -1031,7 +1031,7 @@ button.con-side-empty:focus-visible {
     gap: 3px;
     min-width: 0;
     padding: 7px 2px 6px;
-    font-size: 12px;
+    font-size: var(--ide-t-caption);
     font-weight: 600;
     color: var(--ide-fg-muted);
     text-decoration: none;
@@ -1086,7 +1086,7 @@ button.con-side-empty:focus-visible {
   border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--ide-t-body);
 }
 .con-menu-item:hover {
   background: var(--ide-hover);
@@ -1101,7 +1101,7 @@ button.con-side-empty:focus-visible {
     padding: 0 8px;
   }
   .con-brand {
-    font-size: 13px;
+    font-size: var(--ide-t-body);
     gap: 7px;
     max-width: 140px;
   }
