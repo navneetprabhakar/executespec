@@ -303,22 +303,19 @@
   color: var(--ide-fg-bright);
 }
 
-/* Tailwind preflight sets `svg { display: block }`. That is right for a glyph
-   in a flex row and WRONG for one sitting inside a run of text: a block svg
-   takes its own line and silently makes the containing chip two rows tall. Now
-   that every chrome glyph is a lucide `<svg>`, add this to any icon that must
-   flow inline with words rather than sit in its own flex/grid cell. */
-.ide-root .ide-inline-icon {
-  display: inline-block;
-  vertical-align: -0.15em;
-  flex-shrink: 0;
-}
-
-/* Numbers that stack into a column must not shift width digit-to-digit. */
-.ide-num,
+/* Numbers that stack into a column must not shift width digit-to-digit.
+   `.ide-num` was here and is referenced by no markup anywhere — so this rule
+   was carrying a selector that could never match while the classes the app
+   ACTUALLY renders numbers into went uncovered. Repointed at those. */
 .ide-root .ide-kv dd,
 .ide-work-score,
-.ide-work-cost {
+.ide-work-cost,
+.ide-root .sysd-kv-value,
+.ide-root .ob-stat-value,
+.ide-root .ide-invoice-number,
+.ide-root .ide-benchmark-count,
+.ide-root .con-side-count,
+.ide-root .agent-runcard-cost {
   font-variant-numeric: tabular-nums;
 }
 
@@ -2635,11 +2632,14 @@
   .ide-pane {
     padding: var(--ide-s4) var(--ide-s4) var(--ide-s6);
   }
+  /* 13px/10px predate the token scale and were never converted — the one
+     surviving off-scale block on this row. s3/s4 land on 12/16 and s2/s3 on
+     8/12, which is a 1-2px move and puts the row back on the ramp. */
   .ide-work-row {
     display: grid;
     grid-template-columns: 1fr auto;
-    gap: 8px 10px;
-    padding: 13px 16px;
+    gap: var(--ide-s2) var(--ide-s3);
+    padding: var(--ide-s3) var(--ide-s4);
   }
   .ide-work-row > .ide-badge:first-child {
     grid-column: 1;
@@ -5852,8 +5852,6 @@
 .ide-root .con-section-title {
   letter-spacing: -0.015em;
 }
-.ide-root .ide-metric-value,
-.ide-root .con-metric-value,
 .ide-root .ide-mono,
 .ide-root code,
 .ide-root kbd {
@@ -5888,8 +5886,7 @@
   inherits: false;
   initial-value: 0;
 }
-.ide-root .agent-card.is-pending,
-.ide-root .con-gate-waiting {
+.ide-root .agent-card.is-pending {
   --ide-glow: 0;
   animation: ide-gate-pulse 3.2s var(--ide-ease) infinite;
   box-shadow:
@@ -5906,8 +5903,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ide-root .agent-card.is-pending,
-  .ide-root .con-gate-waiting {
+  .ide-root .agent-card.is-pending {
     animation: none;
     --ide-glow: 0.5;
   }
