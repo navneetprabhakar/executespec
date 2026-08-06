@@ -878,10 +878,16 @@ describe('runResultUtils', () => {
   });
 
   it('formats log rows and skips noisy run-detail events', () => {
-    expect(logIcon('TOOL_CALL')).toBe('🔧');
-    expect(logIcon('TASK_WAVE_PLAN')).toBe('≋');
-    expect(logIcon('GOAL_DECISION')).toBe('🧭');
-    expect(logIcon('UNKNOWN')).toBe('·');
+    // The log now returns lucide components rather than emoji, so assert on
+    // identity + distinctness: the map must route these four types to three
+    // different glyphs, with an explicit fallback for the unknown case.
+    const tool = logIcon('TOOL_CALL');
+    const wave = logIcon('TASK_WAVE_PLAN');
+    const goal = logIcon('GOAL_DECISION');
+    const unknown = logIcon('UNKNOWN');
+    expect(typeof tool).toBe('object');
+    expect(new Set([tool, wave, goal, unknown]).size).toBe(4);
+    expect(logIcon('TOOL_RESULT')).toBe(tool);
     expect(logLabel('RUN_STATUS')).toBe('Run');
     expect(logLabel('GATE_OPENED')).toBe('Approval');
     expect(logLabel('RUN_PROVIDER_SWITCHED')).toBe('Provider');

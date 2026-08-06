@@ -1,3 +1,23 @@
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Circle,
+  Coins,
+  Compass,
+  Dot,
+  FilePen,
+  FlaskConical,
+  Hammer,
+  Layers,
+  type LucideIcon,
+  MessageSquare,
+  PauseCircle,
+  RotateCcw,
+  Shuffle,
+  Wrench,
+  XCircle,
+} from 'lucide-react';
+
 import type * as api from '@/lib/api';
 import type {DiffLine} from '@/ide/IdeKit';
 import {isAwaitingApprovalRunStatus, isLiveRunStatus, isQueuedRunStatus} from '@/lib/runStatus';
@@ -1706,25 +1726,33 @@ export function modelRankingCandidateMetrics(c: RankingCandidate): string {
   return `${quality} · ${cost} · ${latency} · ${benchmark}`;
 }
 
-export function logIcon(type?: string): string {
+/**
+ * Activity-log glyph. This used to return emoji (🔧 💬 ✅ …), which meant the
+ * log was the one surface in the app rendering in the system emoji font: fixed
+ * multicolour, its own metrics, and immune to `currentColor`, so a row could
+ * not take the severity colour beside it. Returning a lucide component keeps
+ * the log in the same icon family as the rest of the chrome and lets the glyph
+ * inherit the row's colour.
+ */
+export function logIcon(type?: string): LucideIcon {
   const t = (type || '').toUpperCase();
-  if (t.includes('TOOL')) return '🔧';
-  if (t.includes('LLM') || t.includes('COMPLETION')) return '💬';
-  if (t.includes('FILE')) return '✏️';
-  if (t.includes('BUILD') || t.includes('COMPILE')) return '🔨';
-  if (t.includes('TEST')) return '🧪';
-  if (t.includes('GATE')) return '⏸️';
-  if (t.includes('COST') || t.includes('TOKEN')) return '💰';
-  if (t.includes('COMPLETE')) return '✅';
-  if (t.includes('FAIL') || t.includes('ERROR')) return '❌';
-  if (t.includes('WARN')) return '⚠️';
-  if (t.includes('PROVIDER')) return '🔀';
-  if (t.includes('WAVE') || t.includes('PARALLEL')) return '≋';
-  if (t.includes('GOAL') || t.includes('DECISION')) return '🧭';
-  if (t.includes('CONTEXT')) return '🧭';
-  if (t.includes('RECOVERY')) return '♻️';
-  if (t.includes('STATUS')) return '●';
-  return '·';
+  if (t.includes('TOOL')) return Wrench;
+  if (t.includes('LLM') || t.includes('COMPLETION')) return MessageSquare;
+  if (t.includes('FILE')) return FilePen;
+  if (t.includes('BUILD') || t.includes('COMPILE')) return Hammer;
+  if (t.includes('TEST')) return FlaskConical;
+  if (t.includes('GATE')) return PauseCircle;
+  if (t.includes('COST') || t.includes('TOKEN')) return Coins;
+  if (t.includes('COMPLETE')) return CheckCircle2;
+  if (t.includes('FAIL') || t.includes('ERROR')) return XCircle;
+  if (t.includes('WARN')) return AlertTriangle;
+  if (t.includes('PROVIDER')) return Shuffle;
+  if (t.includes('WAVE') || t.includes('PARALLEL')) return Layers;
+  if (t.includes('GOAL') || t.includes('DECISION')) return Compass;
+  if (t.includes('CONTEXT')) return Compass;
+  if (t.includes('RECOVERY')) return RotateCcw;
+  if (t.includes('STATUS')) return Circle;
+  return Dot;
 }
 
 export function isNoisyLogEvent(ev: api.RunLogEvent): boolean {

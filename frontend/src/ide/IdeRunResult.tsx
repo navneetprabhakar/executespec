@@ -2951,14 +2951,21 @@ export default function IdeRunResult() {
                               : 'var(--ide-fg-muted)';
                       return (
                         <div key={i} className='ide-log-row'>
-                          <span style={{flexShrink: 0}} aria-hidden='true'>
-                            {logIcon(ev.type)}
-                          </span>
+                          {(() => {
+                            const Glyph = logIcon(ev.type);
+                            return (
+                              <Glyph
+                                size={14}
+                                strokeWidth={1.75}
+                                style={{flexShrink: 0, color}}
+                                aria-hidden='true'
+                              />
+                            );
+                          })()}
                           <span
                             className='ide-mono'
                             style={{
                               color,
-                              textTransform: 'uppercase',
                               fontSize: 'var(--ide-t-caption)',
                               paddingTop: 2,
                               overflow: 'hidden',

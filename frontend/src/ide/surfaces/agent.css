@@ -107,6 +107,41 @@
    scoped to the breakpoint that actually sets its max-width. */
 
 /* ──────────────────────────────────────────────────────────────────────────
+   5b. COMPOSER HINT VARIANTS.
+
+   One line of hint, at every width. The full variant names the accepted upload
+   types; the brief one is the same claim with that list dropped, because the
+   attach control's own label already carries it and two wrapped rows of chrome
+   above a 375px transcript is not a fair trade. Only one is ever displayed, and
+   `display: none` removes the other from the accessibility tree too, so the
+   reader is never told both. The separators are generated, so the hidden
+   variant cannot leave a dangling dot.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-hint-brief,
+.ide-root .agent-project-locked-brief {
+  display: none;
+}
+.ide-root .agent-composer-hint span + span::before {
+  content: '·';
+  margin-inline: var(--ide-s2);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   5c. RUN-CARD DISCLOSURE (phone form only; see `usePhoneLayout`).
+
+   Holds the descriptive rows — execution target / gating, and the task /
+   evidence / route readout. Phase, progress, spend and Stop stay outside it.
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .agent-runcard-detail > summary {
+  font-size: var(--ide-t-caption);
+}
+.ide-root .agent-runcard-detail-body {
+  display: grid;
+  gap: var(--ide-s2);
+  padding-top: var(--ide-s1);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
    6. PHONE LAYOUT (<=600px).
 
    The complaint was space, and it was measurable: a 375x667 phone spent 90px on
@@ -167,6 +202,103 @@
   .ide-root .agent-runcard-cost {
     margin-left: auto;
     text-align: right;
+  }
+
+  /* ── The project bar was the third stacked header. ──────────────────────
+     While a run is active every control in it is inert, so the two disabled
+     buttons were costing a whole 32px row plus its gap to say nothing. Drop
+     them and the reason shares the select's row. Unlocked, the row already
+     fits select + Unlink + Create in 351px, so this changes nothing there. */
+  .ide-root .agent-project-context {
+    padding: var(--ide-s2) var(--ide-s3);
+  }
+  .ide-root .agent-project-context:has(.agent-project-locked) > .ide-btn {
+    display: none;
+  }
+  .ide-root .agent-project-locked {
+    flex: 0 1 auto;
+  }
+  /* Clipped, not removed: the full sentence stays in the accessibility tree and
+     on the select's tooltip while the visible badge is one word. */
+  .ide-root .agent-project-locked-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .ide-root .agent-project-locked-brief {
+    display: inline;
+  }
+
+  /* ── Transcript density. ────────────────────────────────────────────────
+     12px is the surface's one phone gutter; the transcript was the only place
+     still paying 16px for its top and bottom. */
+  .ide-root .agent-chat-scroll {
+    padding: var(--ide-s3);
+  }
+  .ide-root .agent-chat-col {
+    gap: var(--ide-s3);
+  }
+
+  /* ── The run card is a card, not a page. ────────────────────────────────
+     Eight 11px gaps and 14px of padding were ~100px of the card's height on
+     their own, before a single fact was drawn. */
+  .ide-root .agent-runcard {
+    gap: var(--ide-s2);
+    padding: var(--ide-s3);
+  }
+
+  /* "Live events connected" is the everything-is-fine confirmation, and the
+     pulsing dot in the phase pill directly above already carries it. Every
+     DEGRADED stream state — reconnecting, connecting, snapshot-only, refused —
+     keeps its line, because those are the ones the reader has to act on. */
+  .ide-root .agent-runcard-stream.ok {
+    display: none;
+  }
+
+  /* Eight phase names cannot share 319px: at four columns the rail took two
+     rows, and at eight every label would truncate to three glyphs. The rail
+     becomes what it already encodes — a segmented meter of done / active /
+     failed — and the phase NAME stays spelled out in the head pill directly
+     above it, so nothing is inferred from colour alone. The labels remain in
+     the accessibility tree. */
+  .ide-root .agent-runcard-phases {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+  .ide-root .agent-runcard-phase {
+    font-size: 0;
+    line-height: 0;
+    padding: 5px 0;
+  }
+
+  /* Three short facts were three full-width stacked tiles (~190px of a 667px
+     screen). They share one row; a long value wraps inside its own tile rather
+     than being ellipsed, so "Evidence pending" and a long model id both stay
+     readable. */
+  .ide-root .agent-runcard-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ide-s1);
+  }
+  .ide-root .agent-runcard-kpis span {
+    padding: var(--ide-s1) var(--ide-s2);
+  }
+  .ide-root .agent-runcard-kpis b {
+    font-size: var(--ide-t-caption);
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* One-line hint (see 5b). */
+  .ide-root .agent-hint-full {
+    display: none;
+  }
+  .ide-root .agent-hint-brief {
+    display: inline;
   }
 
   /* The drawer is the whole task on a phone; 300px of 375 left the header

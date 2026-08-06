@@ -2032,4 +2032,123 @@ describe('IdeAgent', () => {
     expect(host.querySelector('.agent-conversation-close')).toBeNull();
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
+  // ── Phone run card ───────────────────────────────────────────────────────
+  //
+  // On a 375x667 screen the run card used to be taller than the whole
+  // transcript, so a conversation with an active run showed no conversation at
+  // all. Its descriptive rows now sit behind a disclosure on phones ONLY, and a
+  // running paid job must never be able to hide: phase, progress and Stop stay
+  // outside it, and every fact stays in the DOM at both sizes.
+
+  function renderRunCard(): HTMLDivElement {
+    const local = document.createElement('div');
+    document.body.appendChild(local);
+    const localRoot = createRoot(local);
+    root = localRoot;
+    host = local;
+    act(() => {
+      localRoot.render(
+        <AgentConversation
+          messages={[]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={false}
+          visibleAction={null}
+          gates={[]}
+          runCard={
+            {
+              runId: 'run-phone',
+              status: 'WORKING',
+              runTitle: 'Add replay protection',
+              aiProvider: 'OPENAI',
+              verifiedScore: null,
+              tasks: [{status: 'WORKING', title: 'Persist the ledger'}],
+            } as never
+          }
+          runCost={1.2}
+          runStreamStatus='CONNECTED'
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+    return local;
+  }
+
+  function withPhoneViewport(matches: boolean) {
+    const original = (window as unknown as {matchMedia?: unknown}).matchMedia;
+    (window as unknown as {matchMedia: unknown}).matchMedia = (query: string) => ({
+      matches: matches && /max-width:\s*600px/.test(query),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    return () => {
+      if (original === undefined) delete (window as unknown as {matchMedia?: unknown}).matchMedia;
+      else (window as unknown as {matchMedia: unknown}).matchMedia = original;
+    };
+  }
+
+  it('keeps the run card fully inline when the viewport is not phone-sized', () => {
+    const restore = withPhoneViewport(false);
+    try {
+      const local = renderRunCard();
+      expect(local.querySelector('.agent-runcard-detail')).toBeNull();
+      expect(local.querySelector('.agent-runcard-mode')?.textContent).toContain('plan-gated');
+      expect(local.querySelector('.agent-runcard-kpis')).not.toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('moves only the run card descriptive rows behind a disclosure on a phone', () => {
+    const restore = withPhoneViewport(true);
+    try {
+      const local = renderRunCard();
+      const detail = local.querySelector('.agent-runcard-detail');
+      expect(detail).not.toBeNull();
+      // Every fact survives, inside the disclosure.
+      expect(detail?.querySelector('.agent-runcard-mode')?.textContent).toContain('plan-gated');
+      expect(detail?.querySelector('.agent-runcard-kpis')?.textContent).toContain('route');
+      // Live state and the stop control are never inside it.
+      expect(detail?.querySelector('.agent-runcard-phases')).toBeNull();
+      expect(detail?.querySelector('.agent-runcard-bar')).toBeNull();
+      expect(detail?.querySelector('.agent-runcard-actions')).toBeNull();
+      expect(local.querySelector('.agent-runcard-phases')).not.toBeNull();
+      const stop = [...local.querySelectorAll('.agent-runcard-actions button')].find((button) =>
+        /stop/i.test(button.textContent || ''),
+      );
+      expect(stop).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  it('offers one hint variant per width without dropping the accepted upload types', () => {
+    const restore = withPhoneViewport(false);
+    try {
+      const local = renderRunCard();
+      const hint = local.querySelector('.agent-composer-hint');
+      expect(hint?.querySelector('.agent-hint-full')?.textContent).toBe(
+        'attach image, PDF, Markdown, text',
+      );
+      expect(hint?.querySelector('.agent-hint-brief')?.textContent).toBe('attach files');
+    } finally {
+      restore();
+    }
+  });
 });
