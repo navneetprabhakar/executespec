@@ -50,10 +50,11 @@ public final class OpenRouterModelMapper {
           // 2026-06-09 — Xiaomi MiMo v2.5 Pro for a TB 2.0 benchmark (OpenRouter-only,
           // tools-capable, 1M ctx). Slug verified vs the OpenRouter catalogue 2026-06-09.
           Map.entry("mimo-v2.5-pro", "xiaomi/mimo-v2.5-pro"),
-          // 2026-06-17 — Mistral coding models (OpenRouter-only, ENTERPRISE BYOK). Both expose
-          // tools + tool_choice (verified vs the OpenRouter /endpoints API 2026-06-17). devstral-2
-          // is the agentic SWE coder (262K ctx); codestral-2508 is the cheaper code model (256K).
-          Map.entry("devstral-2", "mistralai/devstral-2512"),
+          // 2026-06-17 — Mistral coding model (OpenRouter-only, ENTERPRISE BYOK); exposes
+          // tools + tool_choice (verified vs the OpenRouter /endpoints API 2026-06-17).
+          // codestral-2508 is the cheaper code model (256K ctx).
+          // devstral-2 (mistralai/devstral-2512) was removed 2026-08-06: absent from the live
+          // OpenRouter catalogue, so every dispatch to it 404s at transport.
           Map.entry("codestral-2508", "mistralai/codestral-2508"),
           // 2026-06-17 — Top coding-model expansion (OpenRouter, ENTERPRISE BYOK). All verified to
           // expose tools+tool_choice vs the OpenRouter /endpoints API 2026-06-17.
