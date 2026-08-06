@@ -27,15 +27,15 @@
   --ide-fg-statusbar: #ffffff;
   --ide-border: rgba(255, 255, 255, 0.08);
   --ide-border-strong: rgba(255, 255, 255, 0.16);
-  --ide-accent: #5b8def;
+  --ide-accent: #5b8cff;
   --ide-accent-fg: #ffffff;
   --ide-hover: #171d25;
   --ide-list-active: #162338;
   --ide-list-inactive: #1b2230;
-  --ide-green: #7ad1c8;
-  --ide-yellow: #f5c451;
-  --ide-red: #f17878;
-  --ide-blue: #7aa5f5;
+  --ide-green: #3fbf8f;
+  --ide-yellow: #e5a93c;
+  --ide-red: #f06b6b;
+  --ide-blue: #7ba3ff;
   /* Diff line tints — translucent so token colors stay readable; the old solid
      #487e02/#6c1313 painted a new file's whole viewport saturated green
      (review/11 defect #10). */
@@ -63,13 +63,15 @@
    * in the sans face with real weight contrast; hierarchy comes from weight and
    * size, never opacity. `--ide-font-mono` is opt-in per element.
    */
-  --ide-font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --ide-font-ui:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui,
+    sans-serif;
   --ide-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* SHAPE: three stable roles. Controls and pills share one step, containers
    * another, badges/dots are fully round. */
-  --ide-r-control: 6px;
-  --ide-r-card: 10px;
+  --ide-r-control: 7px;
+  --ide-r-card: 12px;
   --ide-r-pill: 999px;
 
   /* SPACE: one 4/8/12/16/24/32 scale. */
@@ -5791,5 +5793,72 @@
   .ide-root .agent-tool-spin {
     animation: none;
     opacity: 0.7;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Version B type detail.
+
+   Headings tighten optically as they grow — a 24px title set at the same
+   tracking as 13px body reads loose. Numbers that sit in columns use tabular
+   figures so digits line up instead of shimmering between rows. Both are the
+   difference between "styled" and "set".
+   ────────────────────────────────────────────────────────────────────────── */
+.ide-root .ide-h1 {
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.ide-root .ide-h2,
+.ide-root .con-section-title {
+  letter-spacing: -0.015em;
+}
+.ide-root .ide-metric-value,
+.ide-root .con-metric-value,
+.ide-root .ide-mono,
+.ide-root code,
+.ide-root kbd {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Version B chrome: the top bar floats over the ambient wash rather than
+   sitting on an opaque slab, so the ground stays continuous behind it. */
+.ide-root .con-topbar {
+  background: color-mix(in srgb, var(--ide-bg-editor) 72%, transparent);
+  -webkit-backdrop-filter: saturate(1.7) blur(18px);
+  backdrop-filter: saturate(1.7) blur(18px);
+}
+
+/* The approval gate is the one place the app asks for a decision and then
+   waits. A static amber pill reads the same whether it has waited two seconds
+   or two hours, so it gets a slow, animated ring — `@property` makes the glow
+   a real interpolatable number rather than an opacity fade. Reduced motion
+   settles it to a steady ring, never removes the signal. */
+@property --ide-glow {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+.ide-root .agent-card.is-pending,
+.ide-root .con-gate-waiting {
+  --ide-glow: 0;
+  animation: ide-gate-pulse 3.2s var(--ide-ease) infinite;
+  box-shadow:
+    0 0 0 calc(var(--ide-glow) * 3px) color-mix(in srgb, var(--ide-yellow) 13%, transparent),
+    0 0 calc(var(--ide-glow) * 26px) color-mix(in srgb, var(--ide-yellow) 22%, transparent);
+}
+@keyframes ide-gate-pulse {
+  0%,
+  100% {
+    --ide-glow: 0;
+  }
+  50% {
+    --ide-glow: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ide-root .agent-card.is-pending,
+  .ide-root .con-gate-waiting {
+    animation: none;
+    --ide-glow: 0.5;
   }
 }

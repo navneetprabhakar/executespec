@@ -1,6 +1,7 @@
 /*
  * Console shell layout (RL-2026-05-052, web control-plane reframe).
- * ExecuteSpec product shell: black-green canvas, bright green actions, quiet
+ * ExecuteSpec product shell, Version B: slate-biased grounds, ONE merge-rail
+ * blue accent held apart from the green/amber/red semantic family, quiet
  * borders, and editor/terminal affordances preserved inside work surfaces.
  * It exposes the existing --ide-* token names so protected surfaces can render
  * unchanged while the global chrome stays distinct from the in-editor IDE.
@@ -19,38 +20,67 @@
   --es-pistachio: #aacbc4;
   --es-stone: #6f7d7d;
   --es-white: #f1f7f7;
-  --ide-bg-editor: var(--es-black);
-  --ide-bg-sidebar: var(--es-dark-green);
-  --ide-bg-activitybar: var(--es-dark-green);
-  --ide-bg-panel: var(--es-dark-green);
-  --ide-bg-input: #052827;
-  --ide-bg-tab-active: var(--es-pine);
-  --ide-bg-tab-inactive: var(--es-dark-green);
-  --ide-bg-statusbar: #021211;
-  --ide-bg-widget: #052827;
-  --ide-fg: #d7e7e4;
-  --ide-fg-muted: var(--es-pistachio);
-  --ide-fg-bright: var(--es-white);
-  --ide-fg-statusbar: var(--es-white);
-  --ide-border: rgba(170, 203, 196, 0.16);
-  --ide-border-strong: rgba(170, 203, 196, 0.28);
-  --ide-accent: var(--es-action-green);
-  --ide-accent-fg: var(--es-black);
-  --ide-hover: var(--es-pine);
-  --ide-list-active: color-mix(in srgb, var(--es-brand-green) 62%, var(--es-black));
-  --ide-list-inactive: var(--es-pine);
-  --ide-green: var(--es-action-green);
-  --ide-yellow: #f5c451;
-  --ide-red: #ff7c7c;
-  --ide-blue: var(--es-mountain-meadow);
-  --ide-add: rgba(0, 223, 130, 0.18);
-  --ide-del: rgba(128, 23, 23, 0.4);
+  /* ── Version B palette ───────────────────────────────────────────────────
+   *
+   * This block previously derived the whole app palette from the `--es-*`
+   * green ramp, and set `--ide-accent` and `--ide-green` to the SAME token
+   * (`--es-action-green`). That is the defect this palette exists to fix: in a
+   * product whose entire job is reporting verified/unverified evidence, the
+   * button you press to spend money looked identical to a "passed" verdict.
+   *
+   * The accent is now the merge-rail blue. It is deliberately NOT in the
+   * green/amber/red family, so an accent can never be misread as a semantic
+   * result, and a result can never be misread as something to click. Grounds
+   * are slate-biased rather than neutral grey — a flat grey reads as unfinished
+   * at this density.
+   *
+   * `--es-*` values are retained above because the brand mark and the marketing
+   * site still use them; they are simply no longer the source of UI colour.
+   */
+  --ide-bg-editor: #0c0f14;
+  --ide-bg-sidebar: #151a23;
+  --ide-bg-activitybar: #141922;
+  --ide-bg-panel: #151a23;
+  --ide-bg-input: #12161e;
+  --ide-bg-tab-active: #0c0f14;
+  --ide-bg-tab-inactive: #141922;
+  --ide-bg-statusbar: #0a0d12;
+  --ide-bg-widget: #151a23;
+  --ide-fg: #e9edf3;
+  --ide-fg-muted: #8d99ab;
+  --ide-fg-bright: #ffffff;
+  --ide-fg-statusbar: #e9edf3;
+  --ide-border: rgba(255, 255, 255, 0.075);
+  --ide-border-strong: rgba(255, 255, 255, 0.16);
+  --ide-accent: #5b8cff;
+  --ide-accent-fg: #05070c;
+  --ide-hover: rgba(255, 255, 255, 0.045);
+  --ide-list-active: rgba(91, 140, 255, 0.14);
+  --ide-list-inactive: rgba(255, 255, 255, 0.028);
+  /* semantics: a separate family from the accent, each with a subtle pair */
+  --ide-green: #3fbf8f;
+  --ide-yellow: #e5a93c;
+  --ide-red: #f06b6b;
+  --ide-blue: #7ba3ff;
+  --ide-add: rgba(63, 191, 143, 0.13);
+  --ide-del: rgba(240, 107, 107, 0.13);
   --ide-shadow: rgba(0, 0, 0, 0.46);
 
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--ide-bg-editor);
+  /* Version B atmosphere: one very low-opacity accent wash from the top-left,
+     over the flat ground. It is the only decorative gradient in the app and it
+     must stay subtle enough that it never competes with the single accent-filled
+     commit action on the surface. */
+  background:
+    radial-gradient(
+      120% 80% at 12% -10%,
+      color-mix(in srgb, var(--ide-accent) 7%, transparent),
+      transparent 60%
+    ),
+    var(--ide-bg-editor);
+  background-attachment: fixed;
   color: var(--ide-fg);
   /* The shell used to force JetBrains Mono on every word of UI prose. Monospace
      is now opt-in per element (`.ide-mono`, code, ids, aligned numbers) — see
@@ -63,31 +93,33 @@
 }
 
 [data-theme='light'] .con-root {
-  --ide-bg-editor: var(--es-white);
+  /* Version B light. Not an inversion of the dark ramp — the accent darkens to
+     hold contrast on white, and the semantics darken with it. */
+  --ide-bg-editor: #f7f8fa;
   --ide-bg-sidebar: #ffffff;
   --ide-bg-activitybar: #ffffff;
   --ide-bg-panel: #ffffff;
   --ide-bg-input: #ffffff;
   --ide-bg-tab-active: #ffffff;
-  --ide-bg-tab-inactive: #e7efed;
-  --ide-bg-statusbar: var(--es-black);
+  --ide-bg-tab-inactive: #eef0f4;
+  --ide-bg-statusbar: #171c24;
   --ide-bg-widget: #ffffff;
-  --ide-fg: #0c2927;
-  --ide-fg-muted: #4f6662;
-  --ide-fg-bright: var(--es-black);
-  --ide-border: #cbdbd7;
-  --ide-border-strong: #9bb8b1;
-  --ide-hover: #e5f0ed;
-  --ide-list-active: #d8eee8;
-  --ide-list-inactive: #e7efed;
-  --ide-accent: var(--es-brand-green);
-  --ide-accent-fg: var(--es-white);
-  --ide-green: #08724f;
-  --ide-yellow: #b88700;
-  --ide-red: #d14b4b;
-  --ide-blue: var(--es-frog);
-  --ide-add: rgba(3, 98, 76, 0.14);
-  --ide-del: rgba(209, 75, 75, 0.12);
+  --ide-fg: #171c24;
+  --ide-fg-muted: #5d6875;
+  --ide-fg-bright: #05070c;
+  --ide-border: rgba(12, 15, 20, 0.1);
+  --ide-border-strong: rgba(12, 15, 20, 0.2);
+  --ide-hover: rgba(12, 15, 20, 0.04);
+  --ide-list-active: rgba(47, 95, 216, 0.1);
+  --ide-list-inactive: rgba(12, 15, 20, 0.026);
+  --ide-accent: #2f5fd8;
+  --ide-accent-fg: #ffffff;
+  --ide-green: #17845e;
+  --ide-yellow: #a97213;
+  --ide-red: #c4433f;
+  --ide-blue: #244fbc;
+  --ide-add: rgba(23, 132, 94, 0.11);
+  --ide-del: rgba(196, 67, 63, 0.1);
   --ide-shadow: rgba(17, 19, 24, 0.12);
 }
 
