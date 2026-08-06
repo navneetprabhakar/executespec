@@ -6,15 +6,7 @@ import {
   providerReadinessLabel,
 } from '@/ide/providerReadiness';
 import {Markdown} from '@/signal/components/Markdown';
-import {
-  CommandIcon,
-  ImageIcon,
-  PlusIcon,
-  RunsIcon,
-  SearchIcon,
-  SettingsIcon,
-  StatusDot,
-} from '@/ide/IdeIcons';
+import {CommandIcon, ImageIcon, PlusIcon, RunsIcon, SettingsIcon, StatusDot} from '@/ide/IdeIcons';
 import {IdeCodeViewer, type DiffLine} from '@/ide/IdeKit';
 import {extractAgentArtifacts} from '@/ide/agentArtifacts';
 import {ArtifactRail} from '@/ide/agentArtifactRail';
@@ -25,7 +17,6 @@ import {AgentBlockedActionCard} from '@/ide/AgentBlockedActionCard';
 import {
   asText,
   deriveSessionTitle,
-  friendlyTool,
   isTerminalRunStatus,
   runOpenPath,
   runPhaseLabel,
@@ -43,7 +34,9 @@ import {
 } from '@/ide/agentState';
 
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
-import {Paperclip, ArrowUp, StopIcon, FolderIcon} from '@/ide/agentIcons';
+import {ArrowDown, ArrowUp, CloseIcon, FolderIcon, Paperclip, StopIcon} from '@/ide/agentIcons';
+import {AgentToolActivity} from '@/ide/agentToolActivity';
+import {GateCard, GateQueueRow, relTime} from '@/ide/AgentApprovalCards';
 import {
   EmptyRuntimeState,
   OperatorIntro,
@@ -63,6 +56,7 @@ import {AgentManagedAiBalance} from '@/ide/AgentManagedAiBalance';
 import {executeRunMutation} from '@/lib/runMutationAttempt';
 
 export type {CloudRunRepoChoice, CloudRunRepoSelection} from '@/ide/AgentRepositoryScope';
+export {gateCostLabel} from '@/ide/AgentApprovalCards';
 
 function tokenCount(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0';
@@ -85,7 +79,7 @@ function hasRenderableAssistantContent(content: string): boolean {
 }
 
 function usageLabel(usage?: AgentUsageSummary | null, isSuperAdmin = false): string {
-  if (!usage || totalTokens(usage) <= 0) return 'Usage appears after the first response';
+  if (!usage || totalTokens(usage) <= 0) return '';
   const parts = [
     `${tokenCount(totalTokens(usage))} tokens`,
     `${tokenCount(usage.inputTokens)} in`,
@@ -185,9 +179,14 @@ export function AgentTopBar({
         <span className='agent-bar-dot' aria-hidden='true' />
         {barStatus.label}
       </span>
-      <span className='agent-usage-pill' title='Current chat session token usage'>
-        {usageLabel(sessionUsage)}
-      </span>
+      {/* A pill that says "nothing to show yet" is chrome that costs width and
+          carries no information; the usage reading appears the moment there is
+          one to report. */}
+      {usageLabel(sessionUsage) && (
+        <span className='agent-usage-pill' title='Current chat session token usage'>
+          {usageLabel(sessionUsage)}
+        </span>
+      )}
       {pendingGateCount > 0 && (
         <button className='agent-approval-pill' onClick={onOpenApprovals}>
           {pendingGateCount} approval{pendingGateCount === 1 ? '' : 's'}
@@ -294,7 +293,7 @@ function SettingsPopover({
           {remoteSandboxEnabled ? 'Sandbox policy' : 'Execution policy'}
         </div>
         <button className='agent-pop-close' onClick={onClose} aria-label='Close agent settings'>
-          ×
+          <CloseIcon size={15} />
         </button>
         <div className='agent-pop-row'>
           <span>Execution target</span>
@@ -371,9 +370,8 @@ function SettingsPopover({
             ))}
           </select>
           <small>
-            These settings control conversation replies only. Generated-code runs use the
-            organization model matrix and per-task tier routing. Web Agent does not turn the chat
-            model into a run-wide pin.
+            Applies to chat replies only. Runs use the organization model matrix and per-task tier
+            routing.
           </small>
         </div>
         {managedAi && <AgentManagedAiBalance balance={managedAi} />}
@@ -460,7 +458,7 @@ export function AgentChatsDrawer({
         <div className='agent-drawer-head'>
           <strong id='agent-chats-title'>Conversations</strong>
           <button className='agent-drawer-close' onClick={onClose} aria-label='Close conversations'>
-            ×
+            <CloseIcon size={15} />
           </button>
           <button className='ide-btn ghost' onClick={onNewChat}>
             <PlusIcon size={13} />
@@ -472,11 +470,11 @@ export function AgentChatsDrawer({
           <span>{sessions.length} conversations</span>
         </div>
         <p className='agent-drawer-truth'>
-          Conversation history restores messages and run links; its filesystem is not restorable.
+          Restores messages and run links; the filesystem is not restorable.
         </p>
         {sessionLimitReached && (
           <p className='agent-drawer-truth' role='status'>
-            Showing the 100 most recent conversations.
+            Showing the 100 most recent.
           </p>
         )}
         {gates.length > 0 && (
@@ -484,44 +482,41 @@ export function AgentChatsDrawer({
             <div className='agent-drawer-label'>Approval inbox</div>
             <div className='agent-drawer-list'>
               {gates.map((gate) => (
-                <div key={gate.runId} className='agent-drawer-gate'>
-                  <span className='agent-drawer-title'>
-                    {gate.title || gate.summary || gate.runId}
-                  </span>
-                  <span className='agent-drawer-meta'>
-                    {gateQueueMeta(gate, remoteSandboxEnabled)}
-                  </span>
-                  <span className='agent-drawer-riskline'>
-                    <b>{(gate.risk || 'LOW').toLowerCase()} risk</b>
-                    <span>{gate.tasks.length || 'n/a'} tasks</span>
-                    <span>{gateCostLabel(gate)}</span>
-                  </span>
-                  <span className='agent-drawer-actions'>
-                    <button
-                      className='ide-btn agent-btn-primary'
-                      onClick={() => onApproveGate(gate)}
-                      // RR-1489 — no one-click approval while cost is unknown; a null
-                      // credit value also disables the server's stale-approval guard.
-                      disabled={gate.creditsRequired == null}
-                    >
-                      Approve &amp; run
-                    </button>
-                    <button className='ide-btn ghost' onClick={() => onRejectGate(gate)}>
-                      Reject
-                    </button>
-                    <button className='ide-btn ghost' onClick={() => onOpenGate(gate.runId)}>
-                      Full plan
-                    </button>
-                  </span>
-                </div>
+                <GateQueueRow
+                  key={gate.runId}
+                  gate={gate}
+                  remoteSandboxEnabled={remoteSandboxEnabled}
+                  onApprove={onApproveGate}
+                  onReject={onRejectGate}
+                  onOpen={onOpenGate}
+                />
               ))}
             </div>
           </div>
         )}
         {status === 'loadingSession' ? (
-          <div className='agent-muted'>Loading…</div>
+          /* Loading is a skeleton shaped like the rows that are coming, not a
+             spinner or a word — the reader keeps the layout they are waiting for. */
+          <div className='agent-drawer-section' aria-hidden='true'>
+            <div className='agent-drawer-label'>Conversation history</div>
+            <div className='agent-drawer-list'>
+              {[0, 1, 2, 3].map((row) => (
+                <div key={row} className='agent-row-skeleton'>
+                  <span className='agent-skeleton-line title' />
+                  <span className='agent-skeleton-line meta' />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : sessions.length === 0 ? (
-          <div className='agent-muted'>No conversations yet.</div>
+          <div className='agent-drawer-empty'>
+            <strong>No conversations yet</strong>
+            <span>Start one to plan, run, and review remote work.</span>
+            <button className='ide-btn ghost' onClick={onNewChat}>
+              <PlusIcon size={13} />
+              New conversation
+            </button>
+          </div>
         ) : (
           <div className='agent-drawer-section'>
             <div className='agent-drawer-label'>Conversation history</div>
@@ -573,49 +568,17 @@ function sessionDrawerMeta(s: api.AgentSessionResponse, remoteSandboxEnabled: bo
   return `${scopeBadge(s)}${sessionMode(s, remoteSandboxEnabled)}`;
 }
 
-function gateAge(gate: api.AgentGateDecisionCard): string {
-  return relTime(gate.submittedAt);
-}
-
-// RR-1489 — the gate authorizes provider spend, so the card must show the USD
-// estimate and the hard cap that bounds the run, not credits alone.
-export function gateCostLabel(gate: api.AgentGateDecisionCard): string {
-  const parts: string[] = [];
-  if (gate.estimatedCostUsd != null) parts.push(`~$${gate.estimatedCostUsd.toFixed(2)}`);
-  if (gate.creditsRequired != null) parts.push(`${gate.creditsRequired} credits`);
-  if (gate.hardCapUsd != null) parts.push(`cap $${gate.hardCapUsd.toFixed(2)}`);
-  return parts.length ? parts.join(' / ') : 'cost pending';
-}
-
-function gateQueueMeta(gate: api.AgentGateDecisionCard, remoteSandboxEnabled: boolean): string {
-  const project =
-    gate.projectName || `Standalone ${remoteSandboxEnabled ? 'sandbox' : 'workspace'}`;
-  const route = gate.provider || gate.model || 'default route';
-  const age = gateAge(gate);
-  return `${project} · ${route}${age ? ` · ${age}` : ''}`;
-}
-
-function relTime(iso?: string | null): string {
-  if (!iso) return '';
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return '';
-  const mins = Math.floor((Date.now() - then) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
 function MessageBubble({
   message,
   dispatch,
   remoteSandboxEnabled,
+  streaming = false,
 }: {
   message: LocalMessage;
   dispatch: Dispatch<AgentAction>;
   remoteSandboxEnabled: boolean;
+  /** True only for the live edge of an in-flight assistant turn. */
+  streaming?: boolean;
 }) {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   if (message.role === 'user') {
@@ -645,6 +608,12 @@ function MessageBubble({
               : message.content}
           </Markdown>
         )}
+        {/* The heartbeat. It blinks on its own clock, unconditionally while the
+            turn is open, so a network stall or a model thinking-pause reads as
+            "still with you" instead of a frozen app. It is a sibling of the
+            markdown tree, so react-markdown remounting the edge span mid-stream
+            cannot restart or duplicate it. */}
+        {streaming && <span className='agent-caret' aria-hidden='true' />}
       </div>
       {message.role === 'assistant' && (
         <ArtifactRail
@@ -652,47 +621,6 @@ function MessageBubble({
           dispatch={dispatch}
           remoteSandboxEnabled={remoteSandboxEnabled}
         />
-      )}
-    </div>
-  );
-}
-
-/** Friendly activity chips for tool/run events — no raw JSON. */
-function Activity({items}: {items: StreamTimelineItem[]}) {
-  const shown = items.filter(
-    (i) =>
-      i.type === 'tool' ||
-      i.type === 'run' ||
-      (i.type === 'system' &&
-        /SUBAGENT|HANDOFF|PROVIDER|MODEL|CONTINUATION|RUN[ _]VALIDATION[ _]EVIDENCE/i.test(
-          i.title,
-        )),
-  );
-  if (!shown.length) return null;
-  return (
-    <div className='agent-activity' data-agent-region='activity'>
-      {shown.map((i) =>
-        i.type === 'system' && /RUN[ _]VALIDATION[ _]EVIDENCE/i.test(i.title) && i.detail ? (
-          <details key={i.id} className='agent-activity-evidence'>
-            <summary className='agent-activity-chip'>
-              <SearchIcon size={13} />
-              <span>Verification evidence</span>
-            </summary>
-            <p>{i.detail}</p>
-          </details>
-        ) : (
-          <span key={i.id} className='agent-activity-chip'>
-            {i.type === 'run' ? <RunsIcon size={13} /> : <SearchIcon size={13} />}
-            <span>
-              {i.type === 'run'
-                ? 'Run created'
-                : i.type === 'system'
-                  ? i.title
-                  : friendlyTool(i.title)}
-              {i.type === 'system' && i.detail ? ` · ${i.detail}` : ''}
-            </span>
-          </span>
-        ),
       )}
     </div>
   );
@@ -868,8 +796,10 @@ function SandboxRunCard({
         </div>
       )}
       <div className='agent-runcard-actions'>
+        {/* Navigation, not a commit — it stays a ghost so the surface keeps one
+            accent-filled action (the composer's send, or a live proposal). */}
         <button
-          className='ide-btn agent-btn-primary'
+          className='ide-btn ghost'
           onClick={() => onOpen(runOpenPath(run.runId, run.status))}
         >
           {terminal
@@ -1070,9 +1000,8 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
             >
               <strong>Prepare a revert run?</strong>
               <span>
-                This creates a new plan for hunk {pendingRevert.hunkIndex + 1} in{' '}
-                <code>{pendingRevert.filePath}</code>. The current run and repository are not
-                mutated.
+                New plan for hunk {pendingRevert.hunkIndex + 1} in{' '}
+                <code>{pendingRevert.filePath}</code>. This run and repository are not mutated.
               </span>
               <div className='agent-inline-diff-confirm-actions'>
                 <button
@@ -1095,7 +1024,7 @@ function InlineRunDiff({runId, onOpen}: {runId: string; onOpen: (path: string) =
             </div>
           )}
           <div className='agent-inline-diff-foot'>
-            Read-only preview. Revert creates a new plan and never mutates this run directly.
+            Revert creates a new plan; this run is never mutated directly.
           </div>
         </div>
       )}
@@ -1198,10 +1127,9 @@ function SandboxProposalCard({
         <strong>Create remote {remoteSandboxEnabled ? 'sandbox' : 'workspace'} run</strong>
         <span className='agent-card-meta'>plan gate before spend</span>
       </div>
-      <div className='agent-card-sub'>
-        ExecuteSpec will create a remote workspace, draft a plan, then stop for your approval before
-        coding or charging run credits.
-      </div>
+      {/* The consequence row below states plan-first, no-local-files,
+          approval-before-credits and PR-after-gates. A sentence repeating all
+          four is a paragraph the reader has to check against the chips. */}
       {pending.action.confirmationPrompt && (
         <div className='agent-card-sub'>{pending.action.confirmationPrompt}</div>
       )}
@@ -1257,8 +1185,7 @@ function LocalHandoffCard({pending, onDismiss}: {pending: PendingAction; onDismi
         <span className='agent-card-meta'>{pending.action.type.replace(/_/g, ' ')}</span>
       </div>
       <div className='agent-card-sub'>
-        This request needs local file or shell authority. The web agent stays server-side only; use
-        the CLI or VS Code client when your machine must execute commands.
+        Needs local file or shell authority; the web agent is server-side only.
       </div>
       <div className='agent-card-actions'>
         <button className='ide-btn' onClick={() => (window.location.href = '/cli-login')}>
@@ -1266,79 +1193,6 @@ function LocalHandoffCard({pending, onDismiss}: {pending: PendingAction; onDismi
         </button>
         <button className='ide-btn ghost' onClick={onDismiss}>
           Keep as advice
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function GateCard({
-  gate,
-  onApprove,
-  onReject,
-  onOpen,
-  busy,
-  remoteSandboxEnabled,
-}: {
-  gate: api.AgentGateDecisionCard;
-  onApprove: (gate: api.AgentGateDecisionCard) => void;
-  onReject: (gate: api.AgentGateDecisionCard) => void;
-  onOpen: (runId: string) => void;
-  busy: boolean;
-  remoteSandboxEnabled: boolean;
-}) {
-  return (
-    <div className='agent-card agent-gate-card waiting'>
-      <div className='agent-card-head'>
-        <RunsIcon size={16} />
-        <strong>
-          {remoteSandboxEnabled ? 'Sandbox' : 'Remote workspace'} plan awaiting approval
-        </strong>
-        {gate.risk && <span className='agent-card-meta'>risk {gate.risk.toLowerCase()}</span>}
-      </div>
-      <button className='agent-card-title' onClick={() => onOpen(gate.runId)}>
-        {gate.title || gate.summary || gate.runId}
-      </button>
-      <div className='agent-card-consequence-row'>
-        <span>{gate.projectName || 'standalone run'}</span>
-        {gate.tasks.length > 0 && <span>{gate.tasks.length} tasks</span>}
-        {/* RR-1489 — render the USD estimate and the hard cap that bound the spend. */}
-        {gate.estimatedCostUsd != null && <span>~${gate.estimatedCostUsd.toFixed(2)}</span>}
-        {gate.creditsRequired != null && <span>~{gate.creditsRequired} credits</span>}
-        {gate.hardCapUsd != null && <span>cap ${gate.hardCapUsd.toFixed(2)}</span>}
-        {gate.provider && <span>{gate.provider}</span>}
-        {gateAge(gate) && <span>{gateAge(gate)}</span>}
-        <span>PR only after publication gates pass</span>
-      </div>
-      {gate.creditsRequired == null && (
-        <div className='agent-card-sub' role='status'>
-          Cost is still being estimated. Approval is unavailable until the run credit count is
-          known.
-        </div>
-      )}
-      {gate.summary && <div className='agent-card-sub'>{gate.summary}</div>}
-      {gate.tasks.length > 0 && (
-        <ul className='agent-card-tasks'>
-          {gate.tasks.slice(0, 4).map((task) => (
-            <li key={task}>{task}</li>
-          ))}
-        </ul>
-      )}
-      <TrustBoundaryPanel compact />
-      <div className='agent-card-actions'>
-        <button
-          className='ide-btn agent-btn-primary'
-          onClick={() => onApprove(gate)}
-          // RR-1489 — cost must be known before spend is authorized.
-          disabled={busy || gate.creditsRequired == null}
-        >
-          Review &amp; approve
-        </button>
-        <button className='ide-btn ghost' onClick={() => onReject(gate)} disabled={busy}>
-          Reject
-        </button>
-        <button className='ide-btn ghost' onClick={() => onOpen(gate.runId)} disabled={busy}>
-          Open full plan
         </button>
       </div>
     </div>
@@ -1393,7 +1247,7 @@ function Composer({
                 onClick={() => onRemoveAttachment(a.attachmentId)}
                 aria-label={`Remove ${a.filename}`}
               >
-                ×
+                <CloseIcon size={12} />
               </button>
             </div>
           ))}
@@ -1458,7 +1312,7 @@ function Composer({
         )}
       </div>
       <div className='agent-composer-hint'>
-        Enter to send · attach image, PDF, Markdown, or text · web search built in
+        Enter to send · attach image, PDF, Markdown, text · web search
       </div>
     </div>
   );
@@ -1538,7 +1392,11 @@ export function AgentConversation({
   earlierTurnsError?: string | null;
   onLoadEarlierTurns?: () => void;
 }) {
-  const empty = messages.length === 0 && !isBusy && !visibleAction && !runCard;
+  // A surface holding a pending approval is POPULATED, not empty. Rendering the
+  // "nothing here yet" state underneath a gate the operator must act on was the
+  // two-states-at-once defect.
+  const empty =
+    messages.length === 0 && !isBusy && !visibleAction && !runCard && gates.length === 0;
   const showOperatorIntro = !visibleAction && !runCard && gates.length === 0 && !isBusy;
   const showOperatorInScroll = showOperatorIntro && messages.length === 0;
   const showComposerContract =
@@ -1578,6 +1436,29 @@ export function AgentConversation({
               onPick={(s) => dispatch({type: 'input:set', input: s})}
             />
           )}
+          <RouteDecision routingState={routingState ?? null} />
+          {empty
+            ? !showOperatorInScroll && (
+                <EmptyRuntimeState
+                  remoteSandboxEnabled={remoteSandboxEnabled}
+                  onPick={(s) => dispatch({type: 'input:set', input: s})}
+                />
+              )
+            : messages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  dispatch={dispatch}
+                  remoteSandboxEnabled={remoteSandboxEnabled}
+                  streaming={message.id === 'pending:assistant'}
+                />
+              ))}
+          <AgentToolActivity items={streamEvents} />
+          {isBusy && !streamText && <Typing />}
+          {/* Approvals are part of the RECORD, in the position they arrived —
+              after the turn that produced them, not floated above the whole
+              transcript where they read as a toast the conversation happened
+              under. Same card anatomy as every other event. */}
           {gates.length > 0 && (
             <div className='agent-gates-inline' data-agent-region='approval-gates'>
               <div className='agent-gates-label'>
@@ -1598,24 +1479,6 @@ export function AgentConversation({
               ))}
             </div>
           )}
-          <RouteDecision routingState={routingState ?? null} />
-          {empty
-            ? !showOperatorInScroll && (
-                <EmptyRuntimeState
-                  remoteSandboxEnabled={remoteSandboxEnabled}
-                  onPick={(s) => dispatch({type: 'input:set', input: s})}
-                />
-              )
-            : messages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  dispatch={dispatch}
-                  remoteSandboxEnabled={remoteSandboxEnabled}
-                />
-              ))}
-          <Activity items={streamEvents} />
-          {isBusy && !streamText && <Typing />}
           {runCard && (
             <SandboxRunCard
               run={runCard}
@@ -1650,7 +1513,7 @@ export function AgentConversation({
             onClick={onJumpToLatest}
             aria-label='Jump to latest activity'
           >
-            <span aria-hidden='true'>↓</span> New activity
+            <ArrowDown size={13} /> New activity
           </button>
         )}
       </div>
@@ -1662,7 +1525,7 @@ export function AgentConversation({
                 {remoteSandboxEnabled ? 'Remote sandbox only' : 'Remote server workspace'}
               </span>
               <span>Plan and cost first</span>
-              <span>Branch, tests, publication policy, and cost controls shown before run</span>
+              <span>Branch, tests, publication policy and cost shown before run</span>
               <span>No local files touched</span>
             </div>
           )}
