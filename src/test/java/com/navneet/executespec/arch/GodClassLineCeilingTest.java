@@ -56,7 +56,11 @@ class GodClassLineCeilingTest {
     // Lowered 2026-08-06 (chat/agent design pass): the tool-call grammar moved to
     // agentToolActivity.tsx and the approval cards to AgentApprovalCards.tsx. The
     // ratchet only moves DOWN — this is the new measured line count.
-    ceilings.put("frontend/src/ide/agentPanels.tsx", 1547);
+    // 1682 on dev -> 1617 here. The UX pass extracted the tool-call grammar and
+    // the approval cards out of this file. An earlier revision of this branch
+    // set 1547, which the file never actually reached — the ratchet must be the
+    // measured size, not an aspiration, or it fails closed for everyone else.
+    ceilings.put("frontend/src/ide/agentPanels.tsx", 1617);
     return Map.copyOf(ceilings);
   }
 
