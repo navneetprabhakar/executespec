@@ -542,6 +542,21 @@ model-matrix:
         cached-input-per-1m: 0.50
         output-per-1m: 25.00
       notes: "Opus 4.7 — ENTERPRISE-only pin (Beta). Pricing verified 2026-05-26: $5 in / $0.50 cached / $25 out per 1M."
+    claude-opus-5:
+      provider: anthropic
+      chain-tier: ARCHITECT
+      cost-class: FRONTIER
+      quality-class: PREMIUM
+      managed-ai-enabled: true
+      step-down-priority: 100
+      context-limit: 1000000
+      max-output-tokens: 64000
+      display-label: "Claude Opus 5"
+      pricing:
+        input-per-1m: 5.00
+        cached-input-per-1m: 0.50
+        output-per-1m: 25.00
+      notes: "Native Anthropic. Slug verified against the Anthropic /v1/models API 2026-08-06. Pricing cross-checked against the same model on OpenRouter (anthropic/claude-opus-5, $5/$25 per 1M). Cache-read at Anthropic's documented 0.1x input, matching claude-opus-4-8 and claude-sonnet-5. NOT a tier default: promotion needs a quality eval."
     claude-opus-4-8:
       provider: anthropic
       chain-tier: ARCHITECT
@@ -770,6 +785,42 @@ model-matrix:
         cached-input-per-1m: 0.30
         output-per-1m: 1.20
       notes: "OpenRouter minimax/minimax-m3 — 80.5% SWE-bench Verified, top open price/perf; tools verified vs /endpoints 2026-06-17. ENTERPRISE BYOK. cached=input."
+    "[gpt-5.1-codex-max]":
+      provider: openai
+      chain-tier: CAPABLE
+      quality-class: PREMIUM
+      context-limit: 400000
+      max-output-tokens: 32000
+      display-label: "GPT-5.1 Codex Max"
+      pricing:
+        input-per-1m: 1.25
+        cached-input-per-1m: 1.25
+        output-per-1m: 10.00
+      notes: "Native OpenAI codex line. Slug verified against the OpenAI /v1/models API 2026-08-06; pricing cross-checked against openai/gpt-5.1-codex-max on OpenRouter. cached=input, the conservative reading used by gpt-5.3-codex — a cache discount is not assumed, so managed-AI spend cannot undercharge. NOT a tier default: promotion needs a quality eval."
+    "[gpt-5.1-codex]":
+      provider: openai
+      chain-tier: CAPABLE
+      quality-class: PREMIUM
+      context-limit: 400000
+      max-output-tokens: 32000
+      display-label: "GPT-5.1 Codex"
+      pricing:
+        input-per-1m: 1.25
+        cached-input-per-1m: 1.25
+        output-per-1m: 10.00
+      notes: "Native OpenAI codex line. Slug verified against the OpenAI /v1/models API 2026-08-06; pricing cross-checked against openai/gpt-5.1-codex on OpenRouter. cached=input, the conservative reading used by gpt-5.3-codex — a cache discount is not assumed, so managed-AI spend cannot undercharge. NOT a tier default: promotion needs a quality eval."
+    "[gpt-5.2-codex]":
+      provider: openai
+      chain-tier: CAPABLE
+      quality-class: PREMIUM
+      context-limit: 400000
+      max-output-tokens: 32000
+      display-label: "GPT-5.2 Codex"
+      pricing:
+        input-per-1m: 1.75
+        cached-input-per-1m: 1.75
+        output-per-1m: 14.00
+      notes: "Native OpenAI codex line. Slug verified against the OpenAI /v1/models API 2026-08-06; pricing cross-checked against openai/gpt-5.2-codex on OpenRouter. cached=input, the conservative reading used by gpt-5.3-codex — a cache discount is not assumed, so managed-AI spend cannot undercharge. NOT a tier default: promotion needs a quality eval."
     "[gpt-5.3-codex]":
       provider: openrouter
       chain-tier: CAPABLE
