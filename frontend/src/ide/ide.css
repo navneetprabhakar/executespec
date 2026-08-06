@@ -682,13 +682,18 @@
  * without the prefix .ide-btn (0,1,0) loses and every filled button renders as
  * borderless plain text (founder-reported on the Run spec CTA, 2026-05-30).
  */
+/* A control must fit its own label. Labels are not always short — the server
+   supplies sentence-length primary-action text — so a control grows DOWN
+   inside its container rather than past it. Short labels are unaffected:
+   one line at 13px/1.35 is 18px, well under the 32px control height. */
 .ide-root .ide-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--ide-s2);
   min-height: var(--ide-control-h);
-  padding: 0 var(--ide-s3);
+  max-width: 100%;
+  padding: var(--ide-s1) var(--ide-s3);
   background: var(--ide-accent);
   color: var(--ide-accent-fg);
   border: 1px solid transparent;
@@ -696,8 +701,15 @@
   font-family: inherit;
   font-size: 13px;
   font-weight: 550;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+  /* break-word, not anywhere: `anywhere` also collapses the control's
+     min-content width to one character, so a button in a tight flex row gets
+     crushed and its label breaks mid-word ("Refre / sh"). break-word keeps the
+     longest word as the floor and still breaks a genuinely oversized token
+     rather than overflowing. */
+  overflow-wrap: break-word;
   cursor: pointer;
   text-decoration: none;
   transition:
@@ -731,7 +743,7 @@
 }
 .ide-root .ide-btn.lg {
   min-height: var(--ide-control-h-lg);
-  padding: 0 var(--ide-s5);
+  padding: var(--ide-s2) var(--ide-s5);
   font-size: 14px;
   font-weight: 600;
 }
@@ -1105,6 +1117,64 @@
   justify-content: flex-start;
   gap: 8px;
   margin-top: 12px;
+}
+/* Activity-log row: icon, type, time, message. Four fixed-ish columns leave
+   the message about 77px on a phone, so below 600px the icon/type/time head
+   keeps one line and the message takes the full width beneath it. */
+.ide-log-row {
+  display: grid;
+  grid-template-columns: 18px 104px 76px minmax(0, 1fr);
+  gap: var(--ide-s2);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  align-items: start;
+}
+.ide-log-row + .ide-log-row {
+  border-top: 1px solid var(--ide-border);
+}
+/* A pane title with a trailing action. It wraps rather than squeezing the
+   action: a 375px row that shrinks a button below its own word width breaks
+   the label mid-word. */
+.ide-head-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ide-s2);
+}
+.ide-head-note {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ide-fg-muted);
+}
+/* Publication-trust ledger. The verdict pill is a fixed column so every row's
+   evidence text starts at the same x — a PASS/BLOCK/UNKNOWN/INFO label must not
+   decide where the sentence beside it begins. */
+.ide-trust-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(0, 1fr);
+  gap: var(--ide-s3);
+  align-items: start;
+  padding: 10px 16px;
+}
+.ide-trust-row + .ide-trust-row {
+  border-top: 1px solid var(--ide-border);
+}
+.ide-trust-verdict {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--ide-s3);
+  min-width: 0;
+}
+.ide-trust-label {
+  font-size: 13px;
+  color: var(--ide-fg-muted);
+}
+.ide-trust-value {
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 /* Run Ask composer — textarea beside a compact action column on desktop;
    stacks with full-width actions on phones (see the 600px media query). */
@@ -3022,11 +3092,36 @@
   .ide-project-context-grid {
     grid-template-columns: 1fr;
   }
+  .ide-log-row {
+    grid-template-columns: 18px auto minmax(0, 1fr);
+    row-gap: var(--ide-s1);
+  }
+  .ide-log-row > :last-child {
+    grid-column: 1 / -1;
+  }
+  /* Phones: three columns leaves the evidence value about 50px wide, which
+     breaks values like "unattributed/unattributed" mid-word. Stack the label
+     above its verdict + value instead. */
+  .ide-trust-row {
+    grid-template-columns: 1fr;
+    gap: var(--ide-s1);
+  }
+  .ide-trust-verdict {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--ide-s2);
+  }
+  /* Phones: the primary action takes the full card width, then the diagnostic
+     buttons share one row beneath it. The old `flex: 1 1 140px` was a
+     descendant rule, so it also hit the buttons inside the nested diagnostic
+     group — a 140px basis in a 210px group forced each of Logs / Evidence /
+     Files onto its own line and left a third of the card empty. */
   .ide-recovery-actions {
-    justify-content: stretch;
+    flex-direction: column;
+    align-items: stretch;
   }
   .ide-recovery-actions .ide-btn {
-    flex: 1 1 140px;
+    flex: 1 1 auto;
+    min-width: 0;
     justify-content: center;
   }
   /* Ask composer stacks on phones: full-width textarea, then a row of

@@ -99,7 +99,10 @@ import {
   SEV,
   shouldUseRunEvidenceChat,
   shouldShowModelRanking,
+  headerStatusNoteFor,
   isTestExecutionTerminal,
+  recoveryCardTitleFor,
+  splitActionLabel,
   TEST_EXECUTION_MAX_POLLS,
   TEST_EXECUTION_POLL_INTERVAL_MS,
   TABS,
@@ -1246,8 +1249,15 @@ export default function IdeRunResult() {
       : issues.length > 0
         ? `${issues.length} validation issue${issues.length === 1 ? '' : 's'} found.`
         : 'Open the logs and evidence to identify the failing stage.');
+  const headerStatusNote = headerStatusNoteFor(
+    v.label,
+    run?.terminalOutcome?.customerTitle,
+    run?.statusReason ? humanStatusReason(run.statusReason) : '',
+  );
+  const recoveryCardTitle = recoveryCardTitleFor(v.label, run?.terminalOutcome?.customerTitle);
   const durableFailureEvidence = terminalFailureEvidence(run);
   const terminalPrimaryAction = terminalOutcomePrimaryAction(run?.terminalOutcome);
+  const primaryActionCopy = splitActionLabel(terminalPrimaryAction?.label);
   const stoppedByUser = run?.terminalOutcome?.category === 'USER_STOPPED';
   const trustFacts = publicationTrustFacts(run, publication);
   const correctionHistory = correctionEvidenceHistory(run);
@@ -1388,12 +1398,8 @@ export default function IdeRunResult() {
                 <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
               )}
               <span style={{flex: 1}} />
-              {(run?.terminalOutcome?.customerTitle ||
-                (run?.statusReason && humanStatusReason(run.statusReason))) && (
-                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>
-                  {run?.terminalOutcome?.customerTitle ||
-                    humanStatusReason(run?.statusReason || '')}
-                </span>
+              {headerStatusNote && (
+                <span style={{color: 'var(--ide-fg-muted)', fontSize: 12}}>{headerStatusNote}</span>
               )}
             </div>
 
@@ -1403,13 +1409,13 @@ export default function IdeRunResult() {
                   <div className='ide-recovery-kicker'>
                     {stoppedByUser ? 'Run stopped' : 'Next step'}
                   </div>
-                  <div className='ide-recovery-title'>
-                    {run?.terminalOutcome?.customerTitle ||
-                      (statusUpper === 'PARTIAL'
-                        ? 'This run completed with unresolved work.'
-                        : 'This run did not reach a clean result.')}
-                  </div>
+                  {recoveryCardTitle && (
+                    <div className='ide-recovery-title'>{recoveryCardTitle}</div>
+                  )}
                   <div className='ide-recovery-copy'>{failureText}</div>
+                  {primaryActionCopy.prose && (
+                    <div className='ide-recovery-copy'>{primaryActionCopy.prose}</div>
+                  )}
                   <div className='ide-recovery-meta'>
                     {!stoppedByUser && (
                       <span>
@@ -1432,12 +1438,20 @@ export default function IdeRunResult() {
                     <div aria-label='Primary outcome action'>
                       {terminalPrimaryAction.behavior === 'navigate' ? (
                         terminalPrimaryAction.href?.startsWith('/') ? (
-                          <Link className='ide-btn' to={terminalPrimaryAction.href}>
-                            {terminalPrimaryAction.label}
+                          <Link
+                            className='ide-btn'
+                            to={terminalPrimaryAction.href}
+                            title={primaryActionCopy.prose || undefined}
+                          >
+                            {primaryActionCopy.button}
                           </Link>
                         ) : (
-                          <a className='ide-btn' href={terminalPrimaryAction.href}>
-                            {terminalPrimaryAction.label}
+                          <a
+                            className='ide-btn'
+                            href={terminalPrimaryAction.href}
+                            title={primaryActionCopy.prose || undefined}
+                          >
+                            {primaryActionCopy.button}
                           </a>
                         )
                       ) : (
@@ -1450,8 +1464,9 @@ export default function IdeRunResult() {
                             if (terminalPrimaryAction.behavior === 'retry') trySameRoute();
                             else if (terminalPrimaryAction.tab) setTab(terminalPrimaryAction.tab);
                           }}
+                          title={primaryActionCopy.prose || undefined}
                         >
-                          {terminalPrimaryAction.label}
+                          {primaryActionCopy.button}
                         </button>
                       )}
                     </div>
@@ -2617,15 +2632,12 @@ export default function IdeRunResult() {
             const visibleLog = eventLog?.filter((ev) => !isNoisyLogEvent(ev)) ?? null;
             return (
               <div className='ide-pane' style={{position: 'absolute', inset: 0, overflowY: 'auto'}}>
-                <h1 className='ide-h1' style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                <h1 className='ide-h1 ide-head-row'>
                   Activity log{visibleLog?.length ? ` · ${visibleLog.length}` : ''}{' '}
-                  <span
-                    className='ide-mono'
-                    style={{fontSize: 12, color: 'var(--ide-fg-muted)', fontWeight: 400}}
-                  >
+                  <span className='ide-mono ide-head-note'>
                     {eventReplay?.available && eventReplay.retainedUntil
-                      ? `· replay available until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
-                      : '· replay retained for up to 24h'}
+                      ? `· replay until ${new Date(eventReplay.retainedUntil).toLocaleString()}`
+                      : '· replay kept up to 24h'}
                   </span>
                   <span style={{flex: 1}} />
                   {/* RES-6 — the replay is a snapshot; let the user re-pull it. */}
@@ -2668,20 +2680,7 @@ export default function IdeRunResult() {
                               ? 'var(--ide-yellow)'
                               : 'var(--ide-fg-muted)';
                       return (
-                        <div
-                          key={i}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '18px 104px 76px minmax(0, 1fr)',
-                            gap: 8,
-                            padding: '8px 10px',
-                            borderBottom:
-                              i < visibleLog.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                            fontSize: 12,
-                            lineHeight: 1.45,
-                            alignItems: 'start',
-                          }}
-                        >
+                        <div key={i} className='ide-log-row'>
                           <span style={{flexShrink: 0}} aria-hidden='true'>
                             {logIcon(ev.type)}
                           </span>
@@ -2889,32 +2888,14 @@ export default function IdeRunResult() {
               />
             )}
             <div className='ide-card' style={{padding: 0}}>
-              {trustFacts.map((fact, index) => (
-                <div
-                  key={fact.label}
-                  style={{
-                    padding: '10px 16px',
-                    borderBottom:
-                      index < trustFacts.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    display: 'grid',
-                    gridTemplateColumns: 'minmax(150px, 0.35fr) minmax(0, 1fr)',
-                    gap: 12,
-                    alignItems: 'start',
-                  }}
-                >
-                  <span style={{fontSize: 13, color: 'var(--ide-fg-muted)'}}>{fact.label}</span>
-                  {/* The verdict pill is a fixed column so every row's evidence
-                      text starts at the same x — a PASS/BLOCK/UNKNOWN/INFO label
-                      must not decide where the sentence beside it begins. */}
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '84px minmax(0, 1fr)',
-                      alignItems: 'start',
-                      gap: 12,
-                      minWidth: 0,
-                    }}
-                  >
+              {trustFacts.map((fact) => (
+                <div key={fact.label} className='ide-trust-row'>
+                  <span className='ide-trust-label'>{fact.label}</span>
+                  {/* Verdict pill and value share a row; the pill is a fixed
+                      column on wide viewports so every row's evidence text
+                      starts at the same x, and the whole row stacks on phones
+                      rather than squeezing the value into ~50px. */}
+                  <div className='ide-trust-verdict'>
                     <IdeBadge kind={fact.kind === 'neutral' ? 'warn' : fact.kind}>
                       {fact.kind === 'ok'
                         ? 'PASS'
@@ -2924,12 +2905,7 @@ export default function IdeRunResult() {
                             ? 'UNKNOWN'
                             : 'INFO'}
                     </IdeBadge>
-                    <span
-                      className='ide-mono'
-                      style={{fontSize: 12, overflowWrap: 'anywhere', lineHeight: 1.5}}
-                    >
-                      {fact.value}
-                    </span>
+                    <span className='ide-mono ide-trust-value'>{fact.value}</span>
                   </div>
                 </div>
               ))}
