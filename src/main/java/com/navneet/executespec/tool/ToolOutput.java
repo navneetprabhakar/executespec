@@ -61,12 +61,27 @@ public final class ToolOutput {
     try {
       Path dir = ctx.workspaceRoot().resolve(".agent-context").resolve("tool-output");
       Files.createDirectories(dir);
-      String fname = tool + "-" + System.currentTimeMillis() + ".txt";
-      Files.writeString(dir.resolve(fname), output);
+      // A millisecond timestamp is NOT unique: two spills for the same tool inside one millisecond
+      // (reachable via the default-ON parallel read-tool batches, or back-to-back build/test
+      // spills)
+      // produced an identical filename, and the default TRUNCATE_EXISTING write let the second call
+      // silently destroy the first — after which the model was pointed at a readFile path that
+      // resolved to a DIFFERENT tool call's output. Make the name collision-proof with a random
+      // suffix and refuse to overwrite: CREATE_NEW throws FileAlreadyExistsException on the
+      // (astronomically unlikely) collision, which the fail-open catch turns into a plain
+      // truncation
+      // rather than a wrong-content overwrite.
+      String fname = tool + "-" + System.currentTimeMillis() + "-" + shortToken() + ".txt";
+      Files.writeString(dir.resolve(fname), output, java.nio.file.StandardOpenOption.CREATE_NEW);
       return ".agent-context/tool-output/" + fname;
     } catch (Exception e) {
       return null;
     }
+  }
+
+  /** Short, collision-proof, filesystem-safe token (no timing/entropy assumptions elsewhere). */
+  private static String shortToken() {
+    return java.util.UUID.randomUUID().toString().substring(0, 8);
   }
 
   /** Head+tail preview keeping the start (context) + the end (where errors usually are). */

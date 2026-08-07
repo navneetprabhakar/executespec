@@ -807,11 +807,11 @@ public class GitTool {
       String out2 = new String(p2.getInputStream().readAllBytes());
       int exit2 = p2.waitFor();
 
-      // Switch back to main regardless of push result
-      new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
-          .redirectErrorStream(true)
-          .start()
-          .waitFor();
+      // Switch back to main regardless of push result. If this FAILS the workspace is left on the
+      // feature branch — a later reviewer diff / getDiffSinceInit / another repo's push in a
+      // multi-repo loop would then measure or publish from the wrong branch. It is a cleanup step,
+      // not the push outcome, so log loudly rather than failing the (successful) push.
+      checkoutMainOrWarn(wsPath, branchName);
 
       if (exit2 == 0) {
         log.info("[GitTool] Pushed branch {} to remote: {}", branchName, repoUrl);
@@ -859,12 +859,25 @@ public class GitTool {
       if (statusExit != 0) return GitToolResult.err("status failed: " + statusOut);
       if (statusOut.isBlank()) return GitToolResult.ok("CLEAN");
 
-      runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
+      // Stage everything, and CHECK the result. A swallowed `git add -A` failure (index lock,
+      // permission, dubious-ownership fatal) combined with `commit --allow-empty` below published
+      // an
+      // EMPTY commit — a PR/branch with zero file content — and returned ok(branchName). The status
+      // check above already proved the worktree is dirty, so `--allow-empty` never served the
+      // legitimate path; it only masked a staging failure. Check the add exit and drop
+      // --allow-empty
+      // so a staging failure surfaces as an error instead of a silent empty publish.
+      ProcessBuilder add = new ProcessBuilder("git", "-C", repoDir, "add", "-A");
+      add.redirectErrorStream(true);
+      Process pa = add.start();
+      String addOut = new String(pa.getInputStream().readAllBytes());
+      int addExit = pa.waitFor();
+      if (addExit != 0) return GitToolResult.err("git add failed: " + addOut);
       runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
       runQuietly(repoDir, "git", "-C", repoDir, "config", "user.name", "ExecuteSpec Agent");
 
       ProcessBuilder commit =
-          new ProcessBuilder("git", "-C", repoDir, "commit", "--allow-empty", "-m", commitMessage);
+          new ProcessBuilder("git", "-C", repoDir, "commit", "-m", commitMessage);
       commit.redirectErrorStream(true);
       Process pc = commit.start();
       String commitOut = new String(pc.getInputStream().readAllBytes());
@@ -1003,6 +1016,36 @@ public class GitTool {
   }
 
   /**
+   * Post-push cleanup: return the workspace to {@code main}. A non-zero exit here leaves the tree
+   * on the just-pushed feature branch, which silently corrupts a later diff / another repo's push
+   * in a multi-repo loop, so the failure is logged loudly rather than swallowed. It is not the push
+   * outcome, so it does not change the caller's success/err result.
+   */
+  private static void checkoutMainOrWarn(String wsPath, String branchName) {
+    try {
+      Process p =
+          new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
+              .redirectErrorStream(true)
+              .start();
+      String out = new String(p.getInputStream().readAllBytes());
+      int exit = p.waitFor();
+      if (exit != 0) {
+        log.warn(
+            "[GitTool] could not checkout main after pushing {} (exit={}) — workspace left on the"
+                + " feature branch: {}",
+            branchName,
+            exit,
+            out.strip());
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.warn("[GitTool] checkout main after push interrupted for {}", branchName, e);
+    } catch (Exception e) {
+      log.warn("[GitTool] checkout main after push failed for {}", branchName, e);
+    }
+  }
+
+  /**
    * Push workspace to a Bitbucket branch using a scoped API token. The static Git username is the
    * Bitbucket-supported {@code x-bitbucket-api-token-auth}; the legacy username parameter remains
    * for call compatibility and REST operations.
@@ -1052,11 +1095,10 @@ public class GitTool {
       String out2 = new String(p2.getInputStream().readAllBytes());
       int exit2 = p2.waitFor();
 
-      // Switch back to main regardless of push result
-      new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
-          .redirectErrorStream(true)
-          .start()
-          .waitFor();
+      // Switch back to main regardless of push result. A silent failure leaves the workspace on the
+      // feature branch, corrupting a later diff / another repo's push. Cleanup step — log, don't
+      // fail the successful push.
+      checkoutMainOrWarn(wsPath, branchName);
 
       if (exit2 == 0) {
         log.info("[GitTool] Pushed branch {} to Bitbucket: {}", branchName, cloneUrl);
