@@ -15,7 +15,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class OpenAiNativeToolClientProtocolTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
-  private final OpenAiNativeToolClient client = new OpenAiNativeToolClient(mapper);
+  private final OpenAiNativeToolClient client = new OpenAiNativeToolClient(mapper, null);
 
   private ChatResponse parse(String json) throws Exception {
     JsonNode node = mapper.readTree(json);

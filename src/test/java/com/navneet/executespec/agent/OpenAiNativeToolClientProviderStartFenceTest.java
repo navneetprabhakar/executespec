@@ -26,7 +26,7 @@ class OpenAiNativeToolClientProviderStartFenceTest {
   void setUp() throws Exception {
     server = new MockWebServer();
     server.start();
-    client = new OpenAiNativeToolClient(new ObjectMapper());
+    client = new OpenAiNativeToolClient(new ObjectMapper(), null);
   }
 
   @AfterEach
