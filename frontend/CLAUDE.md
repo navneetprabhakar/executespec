@@ -358,6 +358,20 @@ set in no environment, while still shipping in the first-paint vendor chunk. Bac
 unaffected. Re-introducing browser tracing must start from a real per-environment OTLP endpoint plus
 an actual instrumentation registration, not a provider that only calls `register()`.
 
+### All decisions skip (`console/ConsoleDecisions.tsx` + `console/decisionSkips.ts`)
+
+Each row in the `/decisions` queue carries a **Skip** control that hides it from THIS queue in THIS
+browser (versioned localStorage, bounded 200 entries, 30-day prune, quota-safe). It is triage
+visibility only: nothing is cancelled, rejected, archived, or sent to the server, and there is no
+server-side "decision skipped" fact — the four server decisions (SKIP / RETRY / FIX /
+ATTEMPT_ANYWAY) belong to the Execution-View per-solution gate, a different surface with its own
+state machine. So the copy must keep saying "hidden from your queue … the run is unchanged", the
+hidden count must stay visible with a Show hidden / Restore path, and this control must never be
+wired to a run mutation without a real backend decision contract behind it. The row is a `div` with
+a transparent navigation button plus the skip button — a button inside a button is invalid and
+keyboard-unreachable. Pinned by `ConsoleDecisions.test.tsx` (hide, restore, no extra run API call,
+reload persistence).
+
 ## Truth-surface contracts
 
 Surfaces that report absence must distinguish "none" from "we could not tell you":
