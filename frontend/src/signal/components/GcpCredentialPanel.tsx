@@ -1,3 +1,4 @@
+import {Check, X} from 'lucide-react';
 import {useEffect, useState} from 'react';
 import {Button} from '@/signal/components/Primitives';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -174,7 +175,14 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
                     : 'var(--signal-coral)',
               }}
             >
-              {validation.valid ? '✓ Credential valid' : '✗ Issues found'}
+              <span style={{display: 'inline-flex', alignItems: 'center', gap: 5}}>
+                {validation.valid ? (
+                  <Check size={13} strokeWidth={2.25} aria-hidden='true' />
+                ) : (
+                  <X size={13} strokeWidth={2.25} aria-hidden='true' />
+                )}
+                {validation.valid ? 'Credential valid' : 'Issues found'}
+              </span>
               {validation.issues?.length > 0 && (
                 <ul style={{margin: '4px 0 0', paddingLeft: 18}}>
                   {validation.issues.map((iss, i) => (

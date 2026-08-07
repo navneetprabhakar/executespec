@@ -1,3 +1,4 @@
+import {X} from 'lucide-react';
 import {ReactNode, useEffect, useRef} from 'react';
 import {Button} from '@/signal/components/Primitives';
 
@@ -113,7 +114,7 @@ export function Modal({
                 lineHeight: 1,
               }}
             >
-              ✕
+              <X size={16} strokeWidth={1.75} aria-hidden='true' />
             </button>
           )}
         </div>

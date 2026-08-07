@@ -1,3 +1,4 @@
+import {Check, Circle} from 'lucide-react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
@@ -1276,7 +1277,11 @@ export function IdeProjectCode() {
                           color: r.webhookInstalled ? 'var(--ide-green)' : 'var(--ide-red)',
                         }}
                       >
-                        {r.webhookInstalled ? '✓' : '○'}
+                        {r.webhookInstalled ? (
+                          <Check size={14} strokeWidth={2.25} aria-label='Webhook installed' />
+                        ) : (
+                          <Circle size={14} strokeWidth={1.75} aria-label='Webhook not installed' />
+                        )}
                       </div>
                     </div>
                     <div>

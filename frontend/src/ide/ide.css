@@ -1352,10 +1352,16 @@
   flex-shrink: 0;
   vertical-align: -2px;
 }
+/* Holds a lucide chevron since 2026-08-07 (was a `▸`/`▾` text glyph, which sat
+   on the text baseline at the UI face's own weight and never matched the 1.75
+   stroke around it). Tailwind preflight sets `svg { display: block }`, so the
+   box has to center the child itself rather than rely on inline alignment. */
 .ide-tree-chev {
   width: 12px;
-  display: inline-block;
-  font-size: var(--ide-t-caption);
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--ide-fg-muted);
   flex-shrink: 0;
 }
