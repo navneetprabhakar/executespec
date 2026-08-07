@@ -179,7 +179,8 @@ public final class RunTerminalOutcomeContract {
             reasonDetail,
             publication,
             autoPublicationExpected,
-            publicationBlockCode(failureReason));
+            publicationBlockCode(failureReason),
+            PlannerRecoveryOutcomeCopy.blockCode(failureReason));
     Impact impact =
         new Impact(
             actualCostUsd,
@@ -272,7 +273,8 @@ public final class RunTerminalOutcomeContract {
       String reasonDetail,
       Publication publication,
       boolean autoPublicationExpected,
-      String publicationBlockCode) {
+      String publicationBlockCode,
+      String plannerBlockCode) {
     boolean publicationWithheld = publication == Publication.NOT_CREATED && autoPublicationExpected;
     if ("CLEAN_COMPLETION".equals(code)) {
       if (publicationWithheld) {
@@ -318,17 +320,14 @@ public final class RunTerminalOutcomeContract {
           "Execution limit reached", message, action);
     }
     if (POLICY_CODES.contains(code)) {
-      String message =
-          "PLANNER_RECOVERY_POLICY_BLOCKED".equals(code)
-              ? publication == Publication.PR_CREATED
-                  ? "The plan failed deterministic validation and bounded recovery could not"
-                      + " produce an approvable update to the existing pull request."
-                  : "The plan failed deterministic validation and bounded recovery could not"
-                      + " produce an approvable plan. No code or pull request was created."
-              : "The requested change was blocked by an enforced project policy.";
+      if ("PLANNER_RECOVERY_POLICY_BLOCKED".equals(code)) {
+        // Nine distinct causes hide behind this one status reason and imply different customer
+        // actions; the specific one is persisted on failureReason, not on statusReason.
+        return PlannerRecoveryOutcomeCopy.definition(plannerBlockCode, publication);
+      }
       return RunTerminalOutcomeDefinitions.policyBlocked(
           "Run blocked by policy",
-          message,
+          "The requested change was blocked by an enforced project policy.",
           "Review the policy evidence before changing the request.");
     }
     if (code.startsWith("TESTS_FAILED")) {
