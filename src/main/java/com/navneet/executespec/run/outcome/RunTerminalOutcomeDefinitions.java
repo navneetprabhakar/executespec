@@ -104,6 +104,26 @@ final class RunTerminalOutcomeDefinitions {
         3);
   }
 
+  /**
+   * A policy stop the customer can clear themselves by resubmitting with a different setting — an
+   * exact model pin, a confirmation requirement, a benchmark requirement. Deliberately NOT {@link
+   * #policyBlocked}: that shape reports {@code retryable=false}, which is wrong here, because the
+   * work was never attempted and the same request with the setting changed proceeds normally. The
+   * {@code START_NEW_RUN} type already routes to compose, where those settings live.
+   */
+  static Definition resubmitRequired(String title, String message, String nextAction) {
+    return new Definition(
+        Category.ACTION_REQUIRED,
+        title,
+        message,
+        true,
+        "START_NEW_RUN",
+        nextAction,
+        null,
+        AutomationDisposition.ACTION_REQUIRED,
+        3);
+  }
+
   static Definition policyBlocked(String title, String message, String nextAction) {
     return new Definition(
         Category.POLICY_BLOCKED,
