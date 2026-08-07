@@ -53,6 +53,13 @@
   --ide-border: rgba(255, 255, 255, 0.075);
   --ide-border-strong: rgba(255, 255, 255, 0.16);
   --ide-accent: #5b8cff;
+  /* Ink for text/glyphs sitting ON --ide-accent and the light semantic fills
+     (--ide-blue, --ide-red): the org avatar, the user chat bubble, the unread
+     badge. Those grounds are LIGHT in this theme, so the ink is near-black
+     (6.4-6.8:1). Do NOT set this to white to fix a filled button — filled
+     controls sit on the always-dark --ide-accent-fill and take
+     --ide-accent-fill-fg instead. This block wraps every protected route, so it,
+     not ide.css's own value, is what the app resolves. */
   --ide-accent-fg: #05070c;
   --ide-hover: rgba(255, 255, 255, 0.045);
   --ide-list-active: rgba(91, 140, 255, 0.14);
@@ -114,9 +121,13 @@
   --ide-list-inactive: rgba(12, 15, 20, 0.026);
   --ide-accent: #2f5fd8;
   --ide-accent-fg: #ffffff;
-  --ide-green: #17845e;
-  --ide-yellow: #a97213;
-  --ide-red: #c4433f;
+  /* Each semantic is also the ink of a badge whose ground is a tint OF ITSELF
+     (.ide-badge mixes ~12% of the token into the surface). The previous values
+     read 3.38-4.03:1 against those tints at 12px — under AA. These are darkened
+     so each clears 4.5:1 on both its own tint and plain white. */
+  --ide-green: #0f6a4a;
+  --ide-yellow: #8a5c0a;
+  --ide-red: #b03532;
   --ide-blue: #244fbc;
   --ide-add: rgba(23, 132, 94, 0.11);
   --ide-del: rgba(196, 67, 63, 0.1);
@@ -284,8 +295,8 @@
   justify-content: center;
   gap: var(--ide-s2);
   min-height: var(--ide-control-h);
-  background: var(--ide-accent);
-  color: var(--ide-accent-fg);
+  background: var(--ide-accent-fill);
+  color: var(--ide-accent-fill-fg);
   border: 1px solid transparent;
   border-radius: var(--ide-r-control);
   padding: 0 var(--ide-s3);
@@ -298,7 +309,7 @@
   transition: background-color 120ms var(--ide-ease);
 }
 .ide-root .con-newrun:hover {
-  background: color-mix(in srgb, var(--ide-accent) 88%, var(--ide-fg-bright));
+  background: var(--ide-accent-fill-hover);
 }
 /* One focus treatment for the whole shell. Anything omitted here fell back to
    the browser's default ring, which on the dark-green chrome rendered as a
