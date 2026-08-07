@@ -74,6 +74,33 @@ class ReadCodeOutlineToolTest {
   }
 
   @Test
+  @DisplayName("outline() lists enum CONSTANTS (getEntries) — not just enum methods/fields")
+  void outlineListsEnumConstants() {
+    String src =
+        "package a.b;\n\n"
+            + "public enum Color {\n"
+            + "  RED, GREEN, BLUE;\n"
+            + "  public String hex() { return \"#\"; }\n"
+            + "}\n";
+    String o = ReadCodeOutlineTool.outline("Color.java", src);
+    // The constants are usually the whole point of outlining an enum — they must be present, or the
+    // model concludes a value is absent and adds a duplicate.
+    assertThat(o).contains("enum Color").contains("constants: RED, GREEN, BLUE").contains("hex");
+  }
+
+  @Test
+  @DisplayName("outline() marks the imports list as truncated past the 40-import cap")
+  void outlineMarksImportTruncation() {
+    StringBuilder src = new StringBuilder("package a.b;\n");
+    for (int i = 0; i < 45; i++) {
+      src.append("import p.C").append(i).append(";\n");
+    }
+    src.append("public class Foo {}\n");
+    String o = ReadCodeOutlineTool.outline("Foo.java", src.toString());
+    assertThat(o).contains("imports (45)").contains("more not shown");
+  }
+
+  @Test
   @DisplayName("enabled() reflects the flag (drives the ToolRegistry binding gate)")
   void enabledReflectsFlag() {
     when(flags.isEnabled(ReadCodeOutlineTool.FLAG)).thenReturn(false);

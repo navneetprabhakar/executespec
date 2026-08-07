@@ -490,7 +490,18 @@ final class GlobTool implements Tool {
                   : FileVisitResult.TERMINATE;
             }
           });
-      return ToolResult.ok(out.isEmpty() ? "no matches" : String.join("\n", out));
+      if (out.isEmpty()) return ToolResult.ok("no matches");
+      String body = String.join("\n", out);
+      // The walk TERMINATEs at MAX_RESULTS, so a full list may be missing later matches. Mark it —
+      // otherwise the model treats exactly-500 paths as the complete set and never sees the rest
+      // (the same silent-cap class as the other search tools). Matches ListFilesTool's marker.
+      if (out.size() >= MAX_RESULTS) {
+        body +=
+            "\n...[result truncated at "
+                + MAX_RESULTS
+                + " paths — there may be more; narrow the pattern or base to see the rest]";
+      }
+      return ToolResult.ok(body);
     } catch (SecurityException se) {
       return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());
     } catch (IOException ioe) {
@@ -1036,7 +1047,12 @@ final class LspFallbackTool implements Tool {
         Pattern.compile(
             "(?m)^\\s*(?:export\\s+)?(?:async\\s+)?(?:function|class|const|let|var|def)\\s+([A-Za-z_$][\\w$]*)");
     var matcher = pattern.matcher(text);
-    while (matcher.find() && arr.size() < 200) {
+    boolean symbolCapHit = false;
+    while (matcher.find()) {
+      if (arr.size() >= 200) {
+        symbolCapHit = true;
+        break;
+      }
       ObjectNode item = arr.addObject();
       item.put("name", matcher.group(1));
       item.put(
@@ -1046,6 +1062,15 @@ final class LspFallbackTool implements Tool {
     ObjectNode out = JsonSupport.JSON.createObjectNode();
     out.put("path", path);
     out.set("symbols", arr);
+    // This heuristic recognizes only function/class/const/let/var/def, so it under-reports Java /
+    // Go / Rust / etc.; and it caps at 200. Disclose the cap so the model doesn't read a truncated
+    // list as the file's complete symbol set.
+    if (symbolCapHit) {
+      out.put("complete", false);
+      out.put(
+          "truncationNote",
+          "stopped at the first 200 symbols — readFile or readCodeOutline for more");
+    }
     return ToolResult.ok(out.toString());
   }
 
@@ -1059,47 +1084,107 @@ final class LspFallbackTool implements Tool {
     Path rootReal = root.toRealPath();
     ArrayNode matches = JsonSupport.JSON.createArrayNode();
     Pattern token = Pattern.compile("\\b" + Pattern.quote(symbol) + "\\b");
-    try (var stream = Files.walk(root, 8)) {
-      for (Path file :
+    int oversizedSkipped = 0;
+    int unreadableSkipped = 0;
+    boolean fileCapHit = false;
+    boolean matchCapHit = false;
+    // Peek one past the 500-file cap so we can honestly report that files went unscanned rather
+    // than presenting a truncated scan as exhaustive.
+    List<Path> candidates;
+    try (var stream = Files.walk(root, MAX_REFERENCE_WALK_DEPTH)) {
+      candidates =
           stream
               .filter(p -> Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
-              .limit(500)
-              .toList()) {
-        String rel = root.relativize(file).toString();
-        if (rel.contains(".git/") || rel.contains("node_modules/") || rel.contains("target/"))
-          continue;
-        // RR-552 — reject symlinks and any file whose real path escapes the workspace, so a
-        // repository link to a host credential/config/source file cannot be read into the
-        // model-visible response. Also skip oversized targets before reading them whole.
-        try {
-          if (Files.isSymbolicLink(file) || !file.toRealPath().startsWith(rootReal)) {
-            continue;
-          }
-          if (Files.size(file) > MAX_REFERENCE_FILE_BYTES) {
-            continue;
-          }
-        } catch (IOException ignored) {
+              .limit(MAX_REFERENCE_FILES + 1L)
+              .toList();
+    }
+    if (candidates.size() > MAX_REFERENCE_FILES) {
+      fileCapHit = true;
+      candidates = candidates.subList(0, MAX_REFERENCE_FILES);
+    }
+    for (Path file : candidates) {
+      if (matches.size() >= MAX_REFERENCES) {
+        matchCapHit = true;
+        break;
+      }
+      String rel = root.relativize(file).toString();
+      // Segment-exact exclusion: a substring check ("target/") also excluded legitimately-named
+      // directories like `mytarget/` or `restarget/`, silently dropping real references in them.
+      if (containsExcludedSegment(rel)) continue;
+      // RR-552 — reject symlinks and any file whose real path escapes the workspace, so a
+      // repository link to a host credential/config/source file cannot be read into the
+      // model-visible response. Also skip oversized targets before reading them whole.
+      try {
+        if (Files.isSymbolicLink(file) || !file.toRealPath().startsWith(rootReal)) {
           continue;
         }
-        String text;
-        try {
-          text = Files.readString(file);
-        } catch (Exception ignored) {
+        if (Files.size(file) > MAX_REFERENCE_FILE_BYTES) {
+          oversizedSkipped++;
           continue;
         }
-        String[] lines = text.split("\\R", -1);
-        for (int i = 0; i < lines.length && matches.size() < 100; i++) {
-          if (token.matcher(lines[i]).find()) {
-            matches.add(rel + ":" + (i + 1) + ": " + lines[i].trim());
-          }
+      } catch (IOException ignored) {
+        unreadableSkipped++;
+        continue;
+      }
+      String text;
+      try {
+        // ISO-8859-1 maps every byte and never throws; the previous strict-UTF-8 readString threw
+        // (and was swallowed) on any latin-1 / UTF-16 / stray-byte file, dropping its references
+        // silently. ASCII identifier search is unaffected.
+        text = Files.readString(file, java.nio.charset.StandardCharsets.ISO_8859_1);
+      } catch (Exception ignored) {
+        unreadableSkipped++;
+        continue;
+      }
+      String[] lines = text.split("\\R", -1);
+      for (int i = 0; i < lines.length && matches.size() < MAX_REFERENCES; i++) {
+        if (token.matcher(lines[i]).find()) {
+          matches.add(rel + ":" + (i + 1) + ": " + lines[i].trim());
         }
+        if (matches.size() >= MAX_REFERENCES) matchCapHit = true;
       }
     }
     ObjectNode out = JsonSupport.JSON.createObjectNode();
     out.put("action", action);
     out.put("symbol", symbol);
     out.set("matches", matches);
+    // Disclose every way this scan was bounded so the model never reads a capped/partial scan as
+    // "the symbol is not referenced anywhere" — that false negative makes it delete/duplicate code.
+    if (fileCapHit || matchCapHit || oversizedSkipped > 0 || unreadableSkipped > 0) {
+      List<String> notes = new ArrayList<>();
+      if (matchCapHit) notes.add("stopped at the first " + MAX_REFERENCES + " matches");
+      if (fileCapHit)
+        notes.add(
+            "scanned only the first "
+                + MAX_REFERENCES_FILES_LABEL
+                + " files (depth "
+                + MAX_REFERENCE_WALK_DEPTH
+                + ")");
+      if (oversizedSkipped > 0) notes.add(oversizedSkipped + " oversized file(s) skipped");
+      if (unreadableSkipped > 0) notes.add(unreadableSkipped + " unreadable file(s) skipped");
+      out.put("complete", false);
+      out.put(
+          "truncationNote",
+          "INCOMPLETE reference scan ("
+              + String.join("; ", notes)
+              + ") — this is not proof the"
+              + " symbol is unused; use searchFiles to search the whole tree.");
+    } else {
+      out.put("complete", true);
+    }
     return ToolResult.ok(out.toString());
+  }
+
+  private static final int MAX_REFERENCE_WALK_DEPTH = 8;
+  private static final int MAX_REFERENCE_FILES = 500;
+  private static final String MAX_REFERENCES_FILES_LABEL = "500";
+  private static final int MAX_REFERENCES = 100;
+
+  private static boolean containsExcludedSegment(String rel) {
+    for (String seg : rel.split("/")) {
+      if (seg.equals(".git") || seg.equals("node_modules") || seg.equals("target")) return true;
+    }
+    return false;
   }
 
   private static String firstText(JsonNode args, String... names) {

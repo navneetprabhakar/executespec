@@ -43,6 +43,28 @@ class RepositorySearchServiceTest {
   }
 
   @Test
+  void findsMatchesInNonUtf8EncodedSourceFiles() throws Exception {
+    // A latin-1 file: the 0xE9 byte ("é" in ISO-8859-1) is a malformed UTF-8 lead byte, so the old
+    // strict-UTF-8 readAllLines threw MalformedInputException, the file was silently dropped, and
+    // the ASCII token in it read as absent — the model would then re-implement it.
+    Path source = root.resolve("Legacy.java");
+    byte[] bytes =
+        ("class Legacy { /* café needleToken */ }\n")
+            .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    Files.write(source, bytes);
+    var service = new RepositorySearchService();
+
+    var search =
+        service.search(
+            root,
+            new RepositorySearchService.SearchRequest(
+                "needleToken", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0));
+
+    assertThat(search.hits()).isNotEmpty();
+    assertThat(search.hits().get(0).path()).isEqualTo("Legacy.java");
+  }
+
+  @Test
   void inventoryFingerprintIsIndependentOfMaterializationPath() throws Exception {
     Path first = root.resolve("first");
     Path second = root.resolve("second");
