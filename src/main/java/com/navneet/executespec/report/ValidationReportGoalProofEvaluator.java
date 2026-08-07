@@ -269,6 +269,13 @@ public class ValidationReportGoalProofEvaluator {
       if ("UNKNOWN".equals(status)) {
         continue;
       }
+      // Explicitly not-applicable evidence (V367 runtime-surface applicability — e.g. endpoint
+      // coverage "N/A" on a LIBRARY/CLI/STATIC_WEB run) declares that nothing was measurable, not
+      // that a proof is missing. Counting it as an unproven gap blocked the sole-independent-gap
+      // advisory state on every non-HTTP clean run (2026-08-05 live-verification residual).
+      if ("N/A".equalsIgnoreCase(status) || "NOT_APPLICABLE".equalsIgnoreCase(status)) {
+        continue;
+      }
       // The explicit independent-functional trust-cap row explains the same gap already carried
       // by a passing workspace-only tests row. Keep it in the evidence ledger, but do not turn
       // that single verifier gap into a second code-quality gap that recommends more codegen.
@@ -317,7 +324,10 @@ public class ValidationReportGoalProofEvaluator {
     }
 
     if (nonFunctionalTests && !hasOtherUnproven) {
-      return decision(
+      // The ONLY remaining gap is the independent-functional-scope gap: deterministic workspace
+      // (or legacy execution-verified) tests passed and every other proof passed. Mark it
+      // explicitly so customer surfaces can render this advisory state instead of a defect.
+      return new GoalDonenessDecision(
           GoalDonenessState.UNCERTAIN,
           RunContinuationDecision.STOP_BLOCKED,
           nonFunctionalTestBlockedReason(tests),
@@ -328,8 +338,18 @@ public class ValidationReportGoalProofEvaluator {
           incomplete,
           evidence,
           risks,
+          "",
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0.0,
+          0L,
           false,
-          false);
+          false,
+          true);
     }
 
     return decision(

@@ -339,7 +339,7 @@ export function IdeProjectSettings() {
                       </option>
                     ))}
                   </select>
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                     {!providerReadiness.supported
                       ? 'The server will enforce provider policy when work starts.'
                       : providerReadiness.error
@@ -368,7 +368,7 @@ export function IdeProjectSettings() {
                     disabled={!canEdit}
                     onChange={(e) => setBranchNaming(e.target.value)}
                   />
-                  <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+                  <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
                     Variables: {'{slug}'}, {'{date}'}, {'{runId}'}
                     <br />
                     Example: execspec/{'{slug}'}-{'{date}'} →
@@ -432,11 +432,9 @@ export function IdeProjectSettings() {
                     Archive
                   </button>
                 )}
-                <button
-                  className='ide-btn ghost'
-                  style={{color: 'var(--ide-red)'}}
-                  onClick={() => setProjectAction('delete')}
-                >
+                {/* Ghost that reddens on hover only — a permanently red label in a
+                    calm action row reads as an error state rather than a choice. */}
+                <button className='ide-btn danger' onClick={() => setProjectAction('delete')}>
                   Delete
                 </button>
               </div>
@@ -505,12 +503,12 @@ export function IdeProjectSettings() {
                           >
                             {display.label}
                           </div>
-                          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                             {display.sizeLabel}
                             {d.mimeType ? ` · ${d.mimeType}` : ''}
                           </div>
                           {display.readiness && (
-                            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 2}}>
+                            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 2}}>
                               {display.readiness.replace(/_/g, ' ').toLowerCase()}
                             </div>
                           )}
@@ -529,7 +527,6 @@ export function IdeProjectSettings() {
                         <button
                           className='ide-btn ghost'
                           aria-label={`Delete ${display.label}`}
-                          style={{padding: '3px 8px', color: 'var(--ide-red)'}}
                           onClick={() => setDeleteDocFor({docId: d.id, label: display.label})}
                         >
                           ×
@@ -632,10 +629,10 @@ export function IdeProjectSettings() {
                     >
                       <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
                         <div style={{flex: 1, minWidth: 0}}>
-                          <div className='ide-mono' style={{fontSize: 11}}>
+                          <div className='ide-mono' style={{fontSize: 12}}>
                             {job.id.slice(0, 8)}
                           </div>
-                          <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 3}}>
+                          <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 3}}>
                             {new Date(job.createdAt).toLocaleString()}
                             {job.sizeBytes != null ? ` · ${formatBytes(job.sizeBytes)}` : ''}
                             {job.expiresAt
@@ -656,22 +653,24 @@ export function IdeProjectSettings() {
                         </IdeBadge>
                       </div>
                       {job.errorCode && (
-                        <div style={{fontSize: 11, color: 'var(--ide-red)', marginTop: 6}}>
+                        <div style={{fontSize: 12, color: 'var(--ide-red)', marginTop: 6}}>
                           {job.errorCode.replace(/_/g, ' ')}
                         </div>
                       )}
                       {job.sha256 && (
                         <div
                           className='ide-mono'
-                          style={{fontSize: 10, color: 'var(--ide-fg-muted)', marginTop: 5}}
+                          style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 5}}
                         >
                           SHA-256 {job.sha256}
                         </div>
                       )}
                       <div style={{display: 'flex', gap: 6, marginTop: 9}}>
+                        {/* "Create export" above is this surface's one accent commit
+                            action; a per-row retrieval is a ghost. */}
                         {job.downloadable && (
                           <button
-                            className='ide-btn'
+                            className='ide-btn ghost'
                             disabled={busy === `download-export-${job.id}`}
                             onClick={() => downloadExport(job)}
                           >
@@ -696,7 +695,7 @@ export function IdeProjectSettings() {
                         </button>
                       </div>
                       {exportAudit?.jobId === job.id && (
-                        <div style={{marginTop: 10, fontSize: 11}}>
+                        <div style={{marginTop: 10, fontSize: 12}}>
                           {exportAudit.rows.map((event) => (
                             <div key={event.id} className='ide-kv'>
                               <span>{event.eventType.replace(/_/g, ' ')}</span>

@@ -13,7 +13,7 @@ export function ProjectChatConfirmationCard({
 }) {
   return (
     <div className='ide-card agent-sandbox-proposal waiting' role='alert'>
-      <div style={{fontSize: 11, fontWeight: 700, letterSpacing: '0.12em'}}>
+      <div style={{fontSize: 12, fontWeight: 700, letterSpacing: '0.12em'}}>
         Explicit confirmation required
       </div>
       <dl style={{display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 12px'}}>

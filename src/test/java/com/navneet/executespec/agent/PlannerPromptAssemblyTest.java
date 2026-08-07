@@ -13,7 +13,7 @@ class PlannerPromptAssemblyTest {
   void taskExpanderUsesCanonicalPromptAssembler() {
     PromptAssembler assembler = mock(PromptAssembler.class);
     when(assembler.assemble("task-expander.md")).thenReturn("assembled task prompt");
-    TaskExpanderAgent agent = new TaskExpanderAgent(null, null, null, assembler);
+    TaskExpanderAgent agent = new TaskExpanderAgent(null, null, null, null, assembler);
 
     assertThat(agent.loadPrompt()).isEqualTo("assembled task prompt");
     verify(assembler).assemble("task-expander.md");
@@ -23,7 +23,8 @@ class PlannerPromptAssemblyTest {
   void coherencePlannerUsesCanonicalPromptAssembler() {
     PromptAssembler assembler = mock(PromptAssembler.class);
     when(assembler.assemble("coherence-planner.md")).thenReturn("assembled coherence prompt");
-    CoherencePlannerAgent agent = new CoherencePlannerAgent(null, null, null, assembler, null);
+    CoherencePlannerAgent agent =
+        new CoherencePlannerAgent(null, null, null, assembler, null, null);
 
     assertThat(agent.loadPrompt()).isEqualTo("assembled coherence prompt");
     verify(assembler).assemble("coherence-planner.md");

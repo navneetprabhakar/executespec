@@ -49,7 +49,20 @@ while (($#)); do
   esac
 done
 
-[ -n "$SHA" ] || SHA="$(git rev-parse HEAD)"
+# `--sha` NAMES the artifact and is what lands in CURRENT_SHA / RUNNING_SHA and
+# the JAR filename. It does NOT check anything out — the build below packages
+# this working tree. So if the tree is not actually at that commit, the deploy
+# ships one commit's code under another commit's label, and the deploy
+# workflow's RUNNING_SHA check cannot detect it because that marker is written
+# FROM the label. (2026-08-06: shipped pre-merge code as the merge commit
+# exactly this way; only a content diff of the served CSS bundle caught it.)
+# Resolve to a full sha and prove HEAD matches before anything is built.
+if [ -n "$SHA" ]; then
+  SHA="$(git rev-parse --verify "${SHA}^{commit}" 2>/dev/null)" || {
+    echo "unknown commit: $SHA" >&2; exit 2; }
+else
+  SHA="$(git rev-parse HEAD)"
+fi
 INSTANCE="executespec-${ENVNAME}-vm"
 BUCKET="gs://executespec-${ENVNAME}-deploy"
 BUCKET_NAME="executespec-${ENVNAME}-deploy"
@@ -108,6 +121,37 @@ fi
 
 # ── Real deploy from here ─────────────────────────────────────────────────────
 [ "${CONFIRM_DEPLOY:-}" = "YES" ] || { echo "Refusing to deploy without CONFIRM_DEPLOY=YES"; exit 3; }
+
+# ── 0. The artifact must actually BE the commit it is labelled with ───────────
+HEAD_SHA="$(git rev-parse HEAD)"
+if [ "$SHA" != "$HEAD_SHA" ]; then
+  cat >&2 <<EOF
+Refusing to deploy: --sha does not match this checkout.
+
+  --sha  $SHA
+  HEAD   $HEAD_SHA
+
+--sha only LABELS the artifact; the build packages the working tree. Deploying
+now would ship HEAD's code stamped with the --sha label, and RUNNING_SHA would
+agree with the label rather than the contents.
+
+Fix:  git fetch origin && git checkout <branch> && git pull --ff-only
+Then re-run. Override only if you know the JAR is already correct:
+  ALLOW_SHA_MISMATCH=YES $0 --deploy --sha $SHA
+EOF
+  [ "${ALLOW_SHA_MISMATCH:-}" = "YES" ] || exit 4
+  echo "[warn] ALLOW_SHA_MISMATCH=YES — proceeding with a label that does not match HEAD"
+fi
+
+# A dirty tree means the artifact is not any commit, labelled or otherwise.
+if ! git diff --quiet HEAD -- src frontend pom.xml 2>/dev/null; then
+  echo "Refusing to deploy: uncommitted changes under src/, frontend/ or pom.xml." >&2
+  git status --short -- src frontend pom.xml >&2 | head -10
+  echo "Commit, stash, or re-run with ALLOW_DIRTY_TREE=YES to override." >&2
+  [ "${ALLOW_DIRTY_TREE:-}" = "YES" ] || exit 5
+  echo "[warn] ALLOW_DIRTY_TREE=YES — the JAR will not match any commit"
+fi
+echo "[verify] checkout is at $SHA, tree clean — artifact will match its label"
 
 # ── 1. Build frontend + JAR (mirrors deploy.yml) ──────────────────────────────
 if [ "$SKIP_BUILD" -eq 0 ]; then

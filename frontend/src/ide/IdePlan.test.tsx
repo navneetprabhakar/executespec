@@ -231,7 +231,9 @@ describe('IdePlan approval gate identity (RR-1459)', () => {
 
     try {
       await render();
-      expect(text()).toContain('Planning — classifying + outlining your request');
+      // The status badge beside this line already says PLANNING, so the copy no longer repeats
+      // the word; it still names what the planner is actually doing.
+      expect(text()).toContain('Classifying and outlining');
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3_000);

@@ -669,7 +669,12 @@ public class LlmExecutionPolicyFactory {
         orgRepository
             .findById(credentialOrgId)
             .orElseThrow(() -> new IllegalArgumentException("credential policy org not found"));
-    LlmPolicySnapshot.KeySourceMode mode = keySourceMode(credentialOrg.getKeySourceMode());
+    // 2026-08-05 — snapshot the RESOLVER's tier-normalized mode, not the raw org column.
+    // LlmExecutionDispatchGuard revalidates against ApiKeyResolver's normalized value (a non-BYOK
+    // tier forces SYSTEM even when a stale HYBRID/OWN_KEYS marker remains on the row); snapshotting
+    // the raw column made every dispatch for such orgs fail POLICY_STALE ("key-source policy
+    // changed") on a policy that never actually changed.
+    LlmPolicySnapshot.KeySourceMode mode = keySourceMode(credentials.keys().keySourceMode());
     Set<String> enabled = parseProviders(credentialOrg.getEnabledProviders());
     Set<String> allowed = new LinkedHashSet<>();
     Map<String, LlmPolicySnapshot.CredentialSource> sources = new LinkedHashMap<>();

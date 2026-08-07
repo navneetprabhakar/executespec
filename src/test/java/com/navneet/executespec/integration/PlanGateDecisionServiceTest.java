@@ -295,6 +295,54 @@ class PlanGateDecisionServiceTest {
     assertThat(run.getStatus()).isEqualTo("CANCELLED");
     assertThat(result.evidence().managedAiOutcome()).isEqualTo("NOT_EVALUATED");
     verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard);
+    // A rejection must never queue the resume continuation — but it IS a first-time customer
+    // decision, so the post-commit audit/activity event carrying the real actor is published.
+    verify(events, never()).publishEvent(any(PlanGateResumeReadyCommitted.class));
+    verify(events, times(1))
+        .publishEvent(
+            new PlanGateDecisionCommitted(
+                "run-1",
+                "project-1",
+                PlanGateDecisionService.DecisionKind.REJECT,
+                "owner-1",
+                null,
+                null,
+                null));
+  }
+
+  @Test
+  void firstTimeApprovalPublishesActorBearingDecisionEventAndReplayDoesNot() {
+    stubAllowedAdmission();
+    actor.getUser().setEmail("owner@example.com");
+    actor.getUser().setFirstName("Ada");
+    actor.getUser().setLastName("Lovelace");
+    run.setRunTitle("Fixture run");
+    var command = new PlanApprovalService.Command(true, 3, "REALTIME", null, null, null);
+
+    var first = service.decide("run-1", command, actor);
+    var replay = service.decide("run-1", command, actor);
+
+    assertThat(first.replayed()).isFalse();
+    assertThat(replay.replayed()).isTrue();
+    // Exactly ONE decision event for the first-time decision; the exact replay publishes nothing.
+    verify(events, times(1))
+        .publishEvent(
+            new PlanGateDecisionCommitted(
+                "run-1",
+                "project-1",
+                PlanGateDecisionService.DecisionKind.APPROVE,
+                "owner-1",
+                "owner@example.com",
+                "Ada Lovelace",
+                "Fixture run"));
+    verify(events, times(1)).publishEvent(new PlanGateResumeReadyCommitted("run-1"));
+  }
+
+  @Test
+  void preApprovalCancelPublishesNoCustomerDecisionEvent() {
+    service.cancel(
+        "run-1", actor, PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API, "user cancelled");
+
     verify(events, never()).publishEvent(any());
   }
 
@@ -646,14 +694,176 @@ class PlanGateDecisionServiceTest {
   }
 
   private void assertInvalidContinuationDecision() {
+    // APPROVE must refuse with the stable unrecoverable code — never 500, never a gate bypass.
     assertThatThrownBy(
-            () -> service.decide("run-1", PlanApprovalService.Command.rejectLegacy(), actor))
+            () -> service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor))
         .isInstanceOfSatisfying(
             ResponseStatusException.class,
             error -> {
               assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-              assertThat(error.getReason()).contains("continuation payload is invalid");
+              assertThat(error.getReason())
+                  .contains("PLAN_GATE_STATE_UNRECOVERABLE[CONTINUATION_PAYLOAD_INVALID]")
+                  .contains("continuation payload is invalid")
+                  .contains("Cancel the run and resubmit");
             });
-    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard);
+    assertThat(run.getStatus()).isEqualTo("AWAITING_APPROVAL");
+
+    // REJECT succeeds by fencing the run terminal so the customer can always stop a broken run.
+    var result = service.decide("run-1", PlanApprovalService.Command.rejectLegacy(), actor);
+
+    assertThat(result.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.CANCEL);
+    assertThat(result.evidence()).isNull();
+    assertThat(run.getStatus()).isEqualTo("CANCELLED");
+    assertThat(run.getFailureReason())
+        .contains("PLAN_GATE_STATE_UNRECOVERABLE[CONTINUATION_PAYLOAD_INVALID]");
+    assertThat(gate.getStatus()).isEqualTo("PENDING");
+    assertThat(gate.getApprovalEvidenceJson()).isNull();
+    assertThat(outbox.getStatus()).isEqualTo("CANCELLED");
+    assertThat(outbox.getLastError())
+        .isEqualTo("PLAN_GATE_STATE_UNRECOVERABLE[CONTINUATION_PAYLOAD_INVALID]");
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+  }
+
+  @Test
+  void missingContinuationRowRefusesApproveTypedAndCancelFencesTerminal() {
+    when(outboxRepository.findByIdForUpdate("run-1")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () -> service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason())
+                  .contains("PLAN_GATE_STATE_UNRECOVERABLE[CONTINUATION_ROW_MISSING]")
+                  .contains("Cancel the run and resubmit");
+            });
+    assertThat(run.getStatus()).isEqualTo("AWAITING_APPROVAL");
+
+    var result =
+        service.cancel(
+            "run-1",
+            actor,
+            PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API,
+            "Cancelled by user");
+
+    assertThat(result.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.CANCEL);
+    assertThat(run.getStatus()).isEqualTo("CANCELLED");
+    assertThat(run.getCurrentGate()).isNull();
+    assertThat(run.getCompletedAt()).isNotNull();
+    assertThat(run.getFailureReason())
+        .contains("PLAN_GATE_STATE_UNRECOVERABLE[CONTINUATION_ROW_MISSING]")
+        .contains("Cancelled by user");
+    // The broken PENDING gate row is untouched: no receipt can be fabricated for corrupt rows.
+    assertThat(gate.getStatus()).isEqualTo("PENDING");
+    assertThat(gate.getApprovalEvidenceJson()).isNull();
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+  }
+
+  @Test
+  void missingGateRowRefusesApproveTypedAndCancelFencesTerminal() {
+    when(gateRepository.findByIdForPlanGateOpen("gate:plan:run-1")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () -> service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason())
+                  .contains("PLAN_GATE_STATE_UNRECOVERABLE[GATE_ROW_MISSING]");
+            });
+
+    var result =
+        service.cancel(
+            "run-1",
+            actor,
+            PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API,
+            "Cancelled by user");
+
+    assertThat(result.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.CANCEL);
+    assertThat(run.getStatus()).isEqualTo("CANCELLED");
+    assertThat(run.getFailureReason()).contains("PLAN_GATE_STATE_UNRECOVERABLE[GATE_ROW_MISSING]");
+    // The orphaned continuation row is fenced so the resume dispatcher can never consume it.
+    assertThat(outbox.getStatus()).isEqualTo("CANCELLED");
+    assertThat(outbox.getLeaseOwner()).isNull();
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+  }
+
+  @Test
+  void missingPlanArtifactRefusesApproveTypedAndRejectFencesTerminal() {
+    run.setPlanJson(null);
+
+    assertThatThrownBy(
+            () -> service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason())
+                  .contains("PLAN_GATE_STATE_UNRECOVERABLE[PLAN_ARTIFACT_MISSING]");
+            });
+
+    var result = service.decide("run-1", PlanApprovalService.Command.rejectLegacy(), actor);
+
+    assertThat(result.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.CANCEL);
+    assertThat(run.getStatus()).isEqualTo("CANCELLED");
+    assertThat(run.getFailureReason())
+        .contains("PLAN_GATE_STATE_UNRECOVERABLE[PLAN_ARTIFACT_MISSING]");
+    assertThat(gate.getStatus()).isEqualTo("PENDING");
+    assertThat(outbox.getStatus()).isEqualTo("CANCELLED");
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+  }
+
+  @Test
+  void corruptContinuationDigestRefusesApproveTypedAndCancelFencesTerminal() {
+    outbox.setPayloadSha256("0".repeat(64));
+
+    assertThatThrownBy(
+            () -> service.decide("run-1", PlanApprovalService.Command.approveLegacy(), actor))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason())
+                  .contains("PLAN_GATE_STATE_UNRECOVERABLE[GATE_CONTINUATION_IDENTITY_MISMATCH]");
+            });
+
+    var result =
+        service.cancel(
+            "run-1",
+            actor,
+            PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API,
+            "Cancelled by user");
+
+    assertThat(result.decision()).isEqualTo(PlanGateDecisionService.DecisionKind.CANCEL);
+    assertThat(run.getStatus()).isEqualTo("CANCELLED");
+    assertThat(run.getFailureReason())
+        .contains("PLAN_GATE_STATE_UNRECOVERABLE[GATE_CONTINUATION_IDENTITY_MISMATCH]");
+    assertThat(outbox.getStatus()).isEqualTo("CANCELLED");
+    verifyNoInteractions(apiKeyResolver, managedAiUsageService, governanceGuard, events);
+  }
+
+  @Test
+  void brokenGateStateOnNonAwaitingRunStillConflictsInsteadOfFencing() {
+    run.setStatus("WORKING");
+    when(outboxRepository.findByIdForUpdate("run-1")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(
+            () ->
+                service.cancel(
+                    "run-1",
+                    actor,
+                    PlanGateDecisionService.ResolutionSource.RUN_CANCEL_API,
+                    "Cancelled by user"))
+        .isInstanceOfSatisfying(
+            ResponseStatusException.class,
+            error -> {
+              assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(error.getReason())
+                  .contains("PLAN_GATE_STATE_UNRECOVERABLE[CONTINUATION_ROW_MISSING]")
+                  .contains("current state");
+            });
+    assertThat(run.getStatus()).isEqualTo("WORKING");
   }
 }

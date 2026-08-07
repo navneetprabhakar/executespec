@@ -1,5 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
+import {FolderGit2, Plus, X} from 'lucide-react';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader} from '@/ide/IdeKit';
 import {LoadError} from '@/ide/LoadError';
@@ -110,6 +111,7 @@ export default function IdeProjects() {
     const totalRuns =
       (numOf(s, 'activeRuns') ?? 0) +
       (numOf(s, 'completedRuns') ?? 0) +
+      (numOf(s, 'partialRuns') ?? 0) +
       (numOf(s, 'failedRuns') ?? 0);
     const prs = ((s.recentPrs as unknown[]) || []).filter((pr) => {
       const st =
@@ -124,42 +126,36 @@ export default function IdeProjects() {
     const avg = numOf(s, 'recencyAvgScore') ?? numOf(s, 'avgScore');
     const spent = isSuperAdmin ? numOf(s, 'totalCostUsd') : undefined;
     const techDebt = debt[p.id];
+    // Open PRs mean the project is in flight, which is ordinary. It used to render
+    // `bad` (red), so a perfectly healthy project read as a failure at a glance.
     const status = p.archivedAt
       ? {l: 'Archived', k: 'warn' as const}
       : !statsLoaded
         ? {l: 'Status unknown', k: 'warn' as const}
         : prs > 0
-          ? {l: 'Live', k: 'bad' as const}
+          ? {l: 'Live', k: 'info' as const}
           : totalRuns > 0
             ? {l: 'Healthy', k: 'ok' as const}
             : {l: 'New', k: 'warn' as const};
     return (
       <Link key={p.id} className='ide-run-card' to={`/projects/${p.id}`}>
-        <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
-          <span style={{fontSize: 16}}>▤</span>
-          <span className='ide-run-title' style={{flex: 1, margin: 0}}>
-            {p.name}
+        <div className='ide-project-cardhead'>
+          <span className='ide-project-cardicon' aria-hidden='true'>
+            <FolderGit2 size='var(--ide-icon)' strokeWidth={1.75} />
           </span>
+          <span className='ide-project-cardhead-name'>{p.name}</span>
           <IdeBadge kind={status.k}>{status.l}</IdeBadge>
         </div>
-        <div className='ide-run-meta ide-mono' style={{marginBottom: 10}}>
+        <div className='ide-run-meta ide-mono'>
           {statsLoaded ? (
             <>
               {totalRuns} run{totalRuns === 1 ? '' : 's'} · {prs} PR{prs === 1 ? '' : 's'} open
             </>
           ) : (
-            'Project activity not loaded'
+            'Activity not loaded'
           )}
         </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3,1fr)',
-            gap: 8,
-            paddingTop: 10,
-            borderTop: '1px solid var(--ide-border)',
-          }}
-        >
+        <div className='ide-project-cardstats'>
           {[
             ['Avg score', avg != null ? `${Math.round(avg)}%` : '—'],
             ...(isSuperAdmin
@@ -168,12 +164,8 @@ export default function IdeProjects() {
             ['Tech debt', techDebt != null ? String(techDebt) : '—'],
           ].map(([k, v]) => (
             <div key={k}>
-              <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{k}</div>
-              <div
-                style={{fontSize: 15, fontWeight: 600, marginTop: 2, color: 'var(--ide-fg-bright)'}}
-              >
-                {v}
-              </div>
+              <div className='ide-project-cardstat-label'>{k}</div>
+              <div className='ide-project-cardstat-value'>{v}</div>
             </div>
           ))}
         </div>
@@ -184,22 +176,22 @@ export default function IdeProjects() {
   return (
     <div className='ide-pane'>
       {agentHandoff && (
-        <div className='ide-card' role='status' style={{marginBottom: 12}}>
+        <div className='ide-note info' role='status' style={{marginBottom: 'var(--ide-s3)'}}>
           <strong>Create a project for this conversation</strong>
-          <p className='ide-sub' style={{margin: '6px 0 10px'}}>
-            Your conversation and draft are preserved. After creation, the agent will open with the
-            new project linked.
+          <p style={{margin: 'var(--ide-s1) 0 var(--ide-s2)'}}>
+            Your conversation and draft are preserved; the agent reopens with the new project
+            linked.
           </p>
           <button className='ide-btn ghost' onClick={() => navigate(agentHandoff.returnPath)}>
-            Cancel and return to conversation
+            Back to conversation
           </button>
         </div>
       )}
-      <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4}}>
+      <div className='ide-project-toolbar'>
         <h1 className='ide-h1' style={{margin: 0}}>
           Projects
         </h1>
-        <span style={{flex: 1}} />
+        <span className='ide-project-toolbar-spacer' />
         {!creating ? (
           <button
             className='ide-btn'
@@ -208,10 +200,11 @@ export default function IdeProjects() {
               setCreateError('');
             }}
           >
-            ＋ New project
+            <Plus size='var(--ide-icon)' strokeWidth={1.75} aria-hidden='true' />
+            New project
           </button>
         ) : (
-          <span style={{display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap'}}>
+          <span className='ide-project-createrow'>
             <input
               className='ide-input'
               autoFocus
@@ -261,7 +254,7 @@ export default function IdeProjects() {
                 setCreateError('');
               }}
             >
-              ✕
+              <X size='var(--ide-icon)' strokeWidth={1.75} aria-hidden='true' />
             </button>
             <span className='ide-sub' role={createError ? 'alert' : undefined}>
               {createError ||
@@ -280,20 +273,16 @@ export default function IdeProjects() {
       </div>
       <div className='ide-sub'>{projects ? `${filtered.length} projects` : ' '}</div>
 
-      <div style={{display: 'flex', gap: 4, marginBottom: 14}}>
+      <div className='ide-project-segment' role='group' aria-label='Project filter'>
         {(['mine', 'archived'] as const).map((f) => (
           <button
             key={f}
-            className='ide-badge interactive'
-            style={{
-              cursor: 'pointer',
-              textTransform: 'capitalize',
-              borderColor: filter === f ? 'var(--ide-accent)' : undefined,
-              color: filter === f ? 'var(--ide-accent)' : undefined,
-            }}
+            type='button'
+            className={filter === f ? 'active' : ''}
+            aria-pressed={filter === f}
             onClick={() => setFilter(f)}
           >
-            {f}
+            {f === 'mine' ? 'Mine' : 'Archived'}
           </button>
         ))}
       </div>

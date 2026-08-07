@@ -1,3 +1,23 @@
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Circle,
+  Coins,
+  Compass,
+  Dot,
+  FilePen,
+  FlaskConical,
+  Hammer,
+  Layers,
+  type LucideIcon,
+  MessageSquare,
+  PauseCircle,
+  RotateCcw,
+  Shuffle,
+  Wrench,
+  XCircle,
+} from 'lucide-react';
+
 import type * as api from '@/lib/api';
 import type {DiffLine} from '@/ide/IdeKit';
 import {isAwaitingApprovalRunStatus, isLiveRunStatus, isQueuedRunStatus} from '@/lib/runStatus';
@@ -593,6 +613,84 @@ export function verdictFor(
   if (score >= 85) return {label: 'Shippable', kind: 'ok'};
   if (score >= 70) return {label: 'Needs review', kind: 'warn'};
   return {label: 'Failed', kind: 'bad'};
+}
+
+function sameStatement(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (s: string | null | undefined) =>
+    (s || '')
+      .replace(/\s+/g, ' ')
+      .replace(/[.\s]+$/, '')
+      .trim()
+      .toLowerCase();
+  const x = norm(a);
+  return x.length > 0 && x === norm(b);
+}
+
+/**
+ * The run-detail header already states the outcome once, in its status badge:
+ * `verdictFor()` returns the server's `customerTitle` as the badge label for
+ * ACTION_REQUIRED / POLICY_BLOCKED / WARNING outcomes. The muted note beside
+ * the badge repeated that same string verbatim, so the header said one thing
+ * twice. Return the note only when it adds a statement the badge does not
+ * already make; never drop a distinct status reason.
+ */
+export function headerStatusNoteFor(
+  verdictLabel: string,
+  customerTitle: string | null | undefined,
+  humanReason: string | null | undefined,
+): string | null {
+  const note = (customerTitle || humanReason || '').trim();
+  if (!note) return null;
+  return sameStatement(note, verdictLabel) ? null : note;
+}
+
+/**
+ * Same rule for the recovery card's title. When the server's `customerTitle`
+ * is already the badge label, the card drops its title line entirely and lets
+ * the diagnosis copy lead — a generic restatement ("This run did not reach a
+ * clean result.") is a wasted line beside a body that already says what went
+ * wrong. Returns null when there is no title worth a line of its own.
+ */
+export function recoveryCardTitleFor(
+  verdictLabel: string,
+  customerTitle: string | null | undefined,
+): string | null {
+  const title = (customerTitle || '').trim();
+  if (!title || sameStatement(title, verdictLabel)) return null;
+  return title;
+}
+
+const ACTION_CLAUSE_BREAKS = [' and ', ' before ', ' so that ', ' then ', ' — ', ', '];
+const ACTION_BUTTON_MAX = 40;
+const ACTION_BUTTON_MIN = 10;
+
+/**
+ * A primary action reads as a short verb phrase. `terminalOutcome.primaryAction
+ * .label` is server-supplied and is sometimes a whole sentence — on the
+ * run-result recovery card it is "Inspect the validation evidence and address
+ * the reported failure before retrying." Split it at its first clause boundary:
+ * the leading verb phrase labels the control, the full sentence is rendered as
+ * prose above it so no guidance is lost.
+ *
+ * Nothing is invented or truncated mid-thought: if no clause boundary yields a
+ * short enough phrase the label is left whole and the control wraps.
+ */
+export function splitActionLabel(label: string | null | undefined): {
+  button: string;
+  prose: string | null;
+} {
+  const full = (label || '').replace(/\s+/g, ' ').trim();
+  if (!full) return {button: '', prose: null};
+  const bare = full.replace(/[.\s]+$/, '');
+  if (bare.length <= ACTION_BUTTON_MAX) return {button: bare, prose: null};
+  for (const brk of ACTION_CLAUSE_BREAKS) {
+    const at = bare.indexOf(brk);
+    if (at < 0) continue;
+    const head = bare.slice(0, at).trim();
+    if (head.length >= ACTION_BUTTON_MIN && head.length <= ACTION_BUTTON_MAX)
+      return {button: head, prose: full};
+  }
+  return {button: full, prose: null};
 }
 
 export function missingScoreExplanation(
@@ -1349,6 +1447,63 @@ export function goalDecisionLabel(decision?: string | null): string {
   }
 }
 
+/**
+ * Informational copy for a clean run whose ONLY remaining goal-proof gap is independent
+ * functional verification. The evidence stays visible; only the audience framing changes so
+ * customers do not misread an evidence disclosure as a defect. Absent/false flag => null, which
+ * keeps the existing advisory rendering for older servers.
+ */
+export function independentProofGapNotice(
+  goal?: Pick<api.GoalDonenessDecisionData, 'independentProofGapOnly'> | null,
+): string | null {
+  if (goal?.independentProofGapOnly !== true) return null;
+  return 'Independent functional verification pending — all deterministic checks passed. This is an evidence disclosure, not a defect.';
+}
+
+/** Badge kind for goal evidence: neutral/informational when the gap is disclosure-only. */
+export function goalEvidenceKind(
+  goal?: Pick<api.GoalDonenessDecisionData, 'state' | 'independentProofGapOnly'> | null,
+): 'ok' | 'warn' | 'bad' | 'info' {
+  if (goal?.independentProofGapOnly === true) return 'info';
+  return goalStateKind(goal?.state);
+}
+
+/** Badge label for goal evidence: reworded (not hidden) when the gap is disclosure-only. */
+export function goalEvidenceLabel(
+  goal?: Pick<api.GoalDonenessDecisionData, 'state' | 'independentProofGapOnly'> | null,
+): string {
+  if (goal?.independentProofGapOnly === true) return 'Independent verification pending';
+  return goalStateLabel(goal?.state);
+}
+
+/**
+ * Run-credit display with the durable refund acknowledgment. Absent `creditsRefunded` (older
+ * servers) renders exactly the legacy number/em-dash.
+ */
+export function creditsReservedDisplay(
+  run?: Pick<api.RunDetail, 'creditsCharged' | 'creditsRefunded'> | null,
+): string {
+  if (run?.creditsCharged == null) return '—';
+  const base = String(run.creditsCharged);
+  if (run.creditsRefunded !== true) return base;
+  return `${base} ${run.creditsCharged === 1 ? 'credit' : 'credits'} — refunded`;
+}
+
+/**
+ * Report model attribution: prefer the proven `modelsUsed` set over the single legacy
+ * `modelUsed` string, and surface a MIXED route attribution explicitly.
+ */
+export function reportModelDisplay(
+  report?: Pick<api.ValidationReportData, 'modelUsed' | 'modelsUsed' | 'routeAttribution'> | null,
+): string {
+  if (!report) return '—';
+  const base = report.modelsUsed?.length ? report.modelsUsed.join(', ') : report.modelUsed || '—';
+  if (report.routeAttribution === 'MIXED') {
+    return base === '—' ? 'Mixed routes' : `Mixed routes · ${base}`;
+  }
+  return base;
+}
+
 export function goalDecisionHelp(decision?: string | null): string | null {
   switch ((decision || '').toUpperCase()) {
     case 'STOP_FAILED':
@@ -1571,25 +1726,33 @@ export function modelRankingCandidateMetrics(c: RankingCandidate): string {
   return `${quality} · ${cost} · ${latency} · ${benchmark}`;
 }
 
-export function logIcon(type?: string): string {
+/**
+ * Activity-log glyph. This used to return emoji (🔧 💬 ✅ …), which meant the
+ * log was the one surface in the app rendering in the system emoji font: fixed
+ * multicolour, its own metrics, and immune to `currentColor`, so a row could
+ * not take the severity colour beside it. Returning a lucide component keeps
+ * the log in the same icon family as the rest of the chrome and lets the glyph
+ * inherit the row's colour.
+ */
+export function logIcon(type?: string): LucideIcon {
   const t = (type || '').toUpperCase();
-  if (t.includes('TOOL')) return '🔧';
-  if (t.includes('LLM') || t.includes('COMPLETION')) return '💬';
-  if (t.includes('FILE')) return '✏️';
-  if (t.includes('BUILD') || t.includes('COMPILE')) return '🔨';
-  if (t.includes('TEST')) return '🧪';
-  if (t.includes('GATE')) return '⏸️';
-  if (t.includes('COST') || t.includes('TOKEN')) return '💰';
-  if (t.includes('COMPLETE')) return '✅';
-  if (t.includes('FAIL') || t.includes('ERROR')) return '❌';
-  if (t.includes('WARN')) return '⚠️';
-  if (t.includes('PROVIDER')) return '🔀';
-  if (t.includes('WAVE') || t.includes('PARALLEL')) return '≋';
-  if (t.includes('GOAL') || t.includes('DECISION')) return '🧭';
-  if (t.includes('CONTEXT')) return '🧭';
-  if (t.includes('RECOVERY')) return '♻️';
-  if (t.includes('STATUS')) return '●';
-  return '·';
+  if (t.includes('TOOL')) return Wrench;
+  if (t.includes('LLM') || t.includes('COMPLETION')) return MessageSquare;
+  if (t.includes('FILE')) return FilePen;
+  if (t.includes('BUILD') || t.includes('COMPILE')) return Hammer;
+  if (t.includes('TEST')) return FlaskConical;
+  if (t.includes('GATE')) return PauseCircle;
+  if (t.includes('COST') || t.includes('TOKEN')) return Coins;
+  if (t.includes('COMPLETE')) return CheckCircle2;
+  if (t.includes('FAIL') || t.includes('ERROR')) return XCircle;
+  if (t.includes('WARN')) return AlertTriangle;
+  if (t.includes('PROVIDER')) return Shuffle;
+  if (t.includes('WAVE') || t.includes('PARALLEL')) return Layers;
+  if (t.includes('GOAL') || t.includes('DECISION')) return Compass;
+  if (t.includes('CONTEXT')) return Compass;
+  if (t.includes('RECOVERY')) return RotateCcw;
+  if (t.includes('STATUS')) return Circle;
+  return Dot;
 }
 
 export function isNoisyLogEvent(ev: api.RunLogEvent): boolean {

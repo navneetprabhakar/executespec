@@ -370,7 +370,7 @@ export function SharedPage() {
               label='PR · OPEN'
               title={userRequest.slice(0, 80)}
               repo={prUrl.replace(/^https?:\/\/[^/]+\//, '').replace(/\/pull\//, '#')}
-              ciStatus={<span className='ci-ok'>● open</span>}
+              ciStatus={<span className='ci-ok'>open</span>}
               actions={
                 <button type='button' onClick={() => window.open(prUrl, '_blank', 'noopener')}>
                   Open on GitHub

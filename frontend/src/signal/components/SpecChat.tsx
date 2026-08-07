@@ -333,14 +333,14 @@ export function SpecChat({
                 padding: '8px 12px',
                 background: m.role === 'user' ? 'var(--signal-ink)' : 'var(--signal-card-elev)',
                 color: m.role === 'user' ? 'var(--signal-bg)' : 'var(--signal-ink)',
-                borderRadius: 12,
+                borderRadius: 'var(--ide-r-card)',
                 ...(m.role === 'user' ? {borderBottomRightRadius: 4} : {borderBottomLeftRadius: 4}),
               }}
             >
               <div
                 style={{
                   fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 10,
+                  fontSize: 12,
                   opacity: 0.6,
                   marginBottom: 3,
                 }}
@@ -377,7 +377,7 @@ export function SpecChat({
               fontSize: 12,
               color: 'var(--signal-coral-text)',
               background: 'var(--signal-coral-soft)',
-              borderRadius: 10,
+              borderRadius: 'var(--ide-r-card)',
               marginBottom: 10,
             }}
           >
@@ -410,7 +410,7 @@ export function SpecChat({
               width: '100%',
               background: 'var(--signal-card-elev)',
               border: '1px solid var(--signal-hairline)',
-              borderRadius: 10,
+              borderRadius: 'var(--ide-r-card)',
               padding: '8px 12px',
               fontFamily: 'inherit',
               fontSize: 13,
@@ -429,7 +429,7 @@ export function SpecChat({
                 gap: 4,
                 padding: '6px 8px',
                 border: '1px solid var(--signal-hairline)',
-                borderRadius: 8,
+                borderRadius: 'var(--ide-r-card)',
                 background: 'var(--signal-card-elev)',
                 fontSize: 12,
               }}

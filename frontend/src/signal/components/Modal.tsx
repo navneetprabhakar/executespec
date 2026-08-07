@@ -1,3 +1,4 @@
+import {X} from 'lucide-react';
 import {ReactNode, useEffect, useRef} from 'react';
 import {Button} from '@/signal/components/Primitives';
 
@@ -113,7 +114,7 @@ export function Modal({
                 lineHeight: 1,
               }}
             >
-              ✕
+              <X size={16} strokeWidth={1.75} aria-hidden='true' />
             </button>
           )}
         </div>
@@ -243,7 +244,7 @@ export function PromptModal({
             <label
               style={{
                 display: 'block',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 700,
                 letterSpacing: '0.14em',
                 textTransform: 'uppercase',
@@ -291,7 +292,7 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   background: 'var(--signal-card-elev)',
   border: '1px solid var(--signal-hairline)',
-  borderRadius: 8,
+  borderRadius: 'var(--ide-r-card)',
   padding: '10px 12px',
   fontSize: 13,
   color: 'var(--signal-ink)',

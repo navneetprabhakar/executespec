@@ -29,6 +29,27 @@ Auth, account, org, project, RBAC, PAT, OAuth, and user-level client preferences
   `iat` for legacy tokens, so a re-login in the logout second works without allowing an older token
   through the epoch.
 
+## Uniform 401/403 JSON error contract
+
+- `JsonAuthenticationEntryPoint` (401) and `JsonAccessDeniedHandler` (403) are both registered on
+  `SecurityConfig`'s `exceptionHandling` and share one backend-path boundary (`/api`, `/actuator`,
+  `/webhooks`, `/oauth2`, `/login/oauth2`). Backend paths receive the stable envelope
+  `{timestamp, status, error, message, path}`; SPA paths keep their pre-existing redirect (401)
+  or container error page (403).
+- The 403 body uses the established `error="forbidden"` slug (same as
+  `ValidationAdvice.slugForStatus(403)`) with a fixed `message="Access denied"` — never the
+  triggering exception's message, class name, or any internal detail. Filter-level URL-rule role
+  denials (e.g. `/api/admin/**` without SUPER_ADMIN) previously leaked Spring's default error
+  body, which differed in shape from the 400/401 contract; method-level denials already flowed
+  through `ValidationAdvice.onAccessDenied` and stay unchanged.
+- Pinned by `JsonAccessDeniedHandlerTest`, which asserts the 403 field set equals the 401 entry
+  point's field set byte-for-byte.
+- The PAT-capability rejection in `JwtAuthenticationFilter.authenticateWithPat` reuses
+  `JsonAccessDeniedHandler.writeForbiddenBody` (message "PAT scope does not permit this action")
+  instead of `sendError`, so scoped-PAT API consumers get the same envelope — the last 403
+  producer that leaked the Boot default body (2026-08-05 live-verification residual). Pinned by
+  `JwtAuthenticationFilterPatTransportTest.patScopeDenialWritesTheUniformForbiddenJsonBody`.
+
 ## Signing-secret boot gate (RR-858)
 
 - `JwtSecretValidator` runs on `prod`, `dev` AND `benchmark`. Shared deployments are reachable and

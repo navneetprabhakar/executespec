@@ -47,7 +47,26 @@ public record RunTerminalOutcome(
       Double capUsd,
       Boolean codeChanged,
       Publication publication,
-      String prUrl) {}
+      String prUrl,
+      /**
+       * Whether the run credit charged for this run was compensated by the durable failed-run
+       * refund ledger ({@code run_quota_refund}, V300). {@code true} when a durable refund row
+       * exists (pending rows are idempotently applied), {@code false} when this terminal
+       * non-success run has no refund evidence, {@code null} when refund state is not applicable or
+       * was not resolved by the caller (success outcomes, list projections, legacy callers).
+       */
+      Boolean creditsRefunded) {
+
+    /** Pre-creditsRefunded shape; refund state defaults to unresolved ({@code null}). */
+    public Impact(
+        Double actualCostUsd,
+        Double capUsd,
+        Boolean codeChanged,
+        Publication publication,
+        String prUrl) {
+      this(actualCostUsd, capUsd, codeChanged, publication, prUrl, null);
+    }
+  }
 
   public record NextAction(String type, String label, String href) {}
 }

@@ -18,7 +18,6 @@ import com.navneet.executespec.codeintel.repository.RunCodeMapRepository;
 import com.navneet.executespec.cost.EffectiveRouteProjection;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
-import com.navneet.executespec.integration.PlannerFailureDiagnostic;
 import com.navneet.executespec.integration.RunPipelineSupport;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.ValidationReportScoreProjection;
@@ -39,7 +38,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunMapper {
 
-  private static final int UNPROVEN_COMPLETION_SCORE_CAP = 84;
   private final IntegrationRunRepository integrationRunRepository;
   private final ProjectRepository projectRepository;
   private final AppUserRepository appUserRepository;
@@ -52,6 +50,14 @@ public class RunMapper {
   private final RunCostTracker runCostTracker;
   private final ObjectMapper objectMapper;
   private final com.navneet.executespec.security.WorkspacePathRedaction workspacePathRedaction;
+
+  /**
+   * Durable V300 failed-run quota compensation ledger. Nullable-tolerant so bare test constructions
+   * without the bean keep working; a null repository leaves refund state unresolved (never falsely
+   * "not refunded").
+   */
+  private final com.navneet.executespec.billing.repository.RunQuotaRefundRepository
+      runQuotaRefundRepository;
 
   public RunSummary toSummary(PipelineRun r) {
     return toSummary(r, null, null, null);
@@ -92,7 +98,38 @@ public class RunMapper {
       Integer verifiedScore,
       Boolean localExecutionRequested,
       Boolean localExecutionAccepted) {
-    return toSummary(r, verifiedScore, localExecutionRequested, localExecutionAccepted, List.of());
+    return toSummary(
+        r,
+        verifiedScore,
+        localExecutionRequested,
+        localExecutionAccepted,
+        tasksForSingleRunProjection(r));
+  }
+
+  /**
+   * Task-proof fail-closed coverage for SINGLE-run summary responses (submit/fork ACK, project
+   * reassignment). The batch list path already hydrates tasks per page; the single-run path used to
+   * pass an empty task list, so a persisted COMPLETE row with durable non-DONE goal evidence was
+   * projected as COMPLETE by these responses while the list and detail said PARTIAL. Only
+   * persisted-COMPLETE runs need the lookup — every other status is projected unchanged.
+   */
+  private List<AgentTask> tasksForSingleRunProjection(PipelineRun r) {
+    if (agentTaskRepository == null
+        || r == null
+        || r.getRunId() == null
+        || !"COMPLETE".equals(r.getStatus())) {
+      return List.of();
+    }
+    try {
+      List<AgentTask> tasks = agentTaskRepository.findByRunId(r.getRunId());
+      return tasks == null ? List.of() : tasks;
+    } catch (RuntimeException ex) {
+      log.warn(
+          "task-proof lookup failed for run {} — projecting without task evidence: {}",
+          r.getRunId(),
+          ex.getMessage());
+      return List.of();
+    }
   }
 
   private RunSummary toSummary(
@@ -133,14 +170,15 @@ public class RunMapper {
         r.getSourceRunId(),
         r.getHarnessVersion(),
         actualCostUsd,
-        displayRunStatusReason(
+        RunDisplayPolicy.displayRunStatusReason(
             r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
         com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
             r.getRunId(),
             displayStatus,
-            displayRunStatusReason(
+            RunDisplayPolicy.displayRunStatusReason(
                 r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
-            displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus),
+            RunDisplayPolicy.displayRunFailureReason(
+                r.getFailureReason(), r.getStatus(), displayStatus),
             actualCostUsd,
             r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
             r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
@@ -151,7 +189,7 @@ public class RunMapper {
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
         r.getScmPrUrl(),
         r.getGithubPrUrl(),
-        displayVerifiedScore(verifiedScore, displayStatus),
+        RunDisplayPolicy.displayVerifiedScore(verifiedScore, displayStatus),
         localExecutionRequested,
         localExecutionAccepted);
   }
@@ -177,7 +215,24 @@ public class RunMapper {
         .orElse(null);
   }
 
+  /**
+   * Viewer-less detail projection. Operator-grade continuation-policy internals are withheld
+   * (fail-closed) because no viewer authority is available — the SSE {@code RUN_DETAIL} push path
+   * cannot know each subscriber's role. Authenticated REST reads should use {@link
+   * #toDetail(PipelineRun, List, com.navneet.executespec.auth.security.AppUserDetails)}.
+   */
   public RunDetail toDetail(PipelineRun r, List<AgentTask> tasks) {
+    return toDetail(r, tasks, null);
+  }
+
+  public RunDetail toDetail(
+      PipelineRun r,
+      List<AgentTask> tasks,
+      com.navneet.executespec.auth.security.AppUserDetails viewer) {
+    // RR-1552 pattern reused via CostVisibilityPolicy: continuation-policy ranking/candidate
+    // evidence is operator-grade detail, scoped to billing-grade roles of the run's OWNING org.
+    boolean includeOperatorContinuationPolicy =
+        com.navneet.executespec.cost.CostVisibilityPolicy.canViewRawCost(viewer, r.getOrgId());
     // Tier 7: populate integration source if this run was triggered by an integration
     RunDetail.IntegrationSource integrationSource =
         integrationRunRepository
@@ -199,11 +254,14 @@ public class RunMapper {
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
     String displayStatusReason =
-        displayRunStatusReason(
+        RunDisplayPolicy.displayRunStatusReason(
             r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus);
     String displayFailureReason =
-        redactPaths(displayRunFailureReason(r.getFailureReason(), r.getStatus(), displayStatus));
+        redactPaths(
+            RunDisplayPolicy.displayRunFailureReason(
+                r.getFailureReason(), r.getStatus(), displayStatus));
     Double actualCostUsd = actualCostForRead(r);
+    Boolean creditsRefunded = creditsRefunded(r, displayStatus);
     com.navneet.executespec.run.outcome.RunTerminalOutcome terminalOutcome =
         com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
             r.getRunId(),
@@ -214,7 +272,8 @@ public class RunMapper {
             r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
             r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
             com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
-                r));
+                r),
+            creditsRefunded);
 
     RunDetail.RunDetailBuilder builder =
         RunDetail.builder()
@@ -232,10 +291,15 @@ public class RunMapper {
             .completedAt(r.getCompletedAt())
             .repoUrl(r.getRepoUrl())
             .repoMode(r.getRepoMode())
+            // Terminal-success display statuses keep the (already success-suppressed) structured
+            // value instead of echoing success copy into a field named "failureReason".
             .failureReason(
-                terminalOutcome == null ? displayFailureReason : terminalOutcome.customerMessage())
+                terminalOutcome == null || RunDisplayPolicy.isTerminalSuccessDisplay(displayStatus)
+                    ? displayFailureReason
+                    : terminalOutcome.customerMessage())
             .statusReason(displayStatusReason)
             .terminalOutcome(terminalOutcome)
+            .creditsRefunded(creditsRefunded)
             .planJson(r.getPlanJson())
             .reviewJson(r.getReviewJson())
             .runGoalDoneness(
@@ -247,7 +311,7 @@ public class RunMapper {
                     // shows the planner's sequence; status is a decoration-only tiebreaker (and the
                     // sole ordering for legacy rows that predate plan_index, which sort last).
                     .sorted(TASK_DISPLAY_ORDER)
-                    .map(this::toTaskSummary)
+                    .map(t -> toTaskSummary(t, includeOperatorContinuationPolicy))
                     .toList())
             .integrationSource(integrationSource)
             // Tier 8: compile / API spec / preview
@@ -323,7 +387,7 @@ public class RunMapper {
             .validationStatus(null)
             .validationPhase(null)
             .verifiedScore(
-                displayVerifiedScore(
+                RunDisplayPolicy.displayVerifiedScore(
                     ValidationReportScoreProjection.effectiveVerifiedScore(report, objectMapper),
                     displayStatus))
             .accuracyScore(report != null ? report.getAccuracyScore() : null);
@@ -360,16 +424,31 @@ public class RunMapper {
     return planIndex == null ? Integer.MAX_VALUE : planIndex;
   }
 
+  /**
+   * Viewer-less task projection: operator-grade continuation-policy internals are withheld
+   * (fail-closed). Privileged surfaces must call {@link #toTaskSummary(AgentTask, boolean)}.
+   */
   public TaskSummary toTaskSummary(AgentTask t) {
+    return toTaskSummary(t, false);
+  }
+
+  public TaskSummary toTaskSummary(AgentTask t, boolean includeOperatorContinuationPolicy) {
     // Server workspace paths (e.g. /opt/app/workspace/<runId>/...) are host layout, not customer
     // evidence — redact them from every DTO-projected diagnostic field before it leaves the API.
     JsonNode goalDoneness =
         parseJson(redactPaths(t.getGoalDonenessJson()), "goalDoneness", t.getTaskId());
-    String displayStatus = displayTaskStatus(t.getStatus(), goalDoneness);
-    String failureReason = redactPaths(extractFailureReason(t));
+    String displayStatus = RunDisplayPolicy.displayTaskStatus(t.getStatus(), goalDoneness);
+    String failureReason = redactPaths(RunDisplayPolicy.extractFailureReason(objectMapper, t));
     if (failureReason == null && "PARTIAL".equals(displayStatus) && goalDoneness != null) {
       failureReason = goalDoneness.path("reason").asText(null);
     }
+    JsonNode continuationDecision =
+        RunDisplayPolicy.withheldOperatorContinuationPolicy(
+            parseJson(
+                redactPaths(t.getContinuationDecisionJson()),
+                "continuationDecision",
+                t.getTaskId()),
+            includeOperatorContinuationPolicy);
     return new TaskSummary(
         t.getTaskId(),
         t.getTitle(),
@@ -394,8 +473,7 @@ public class RunMapper {
         t.getCompletedAt(),
         failureReason,
         goalDoneness,
-        parseJson(
-            redactPaths(t.getContinuationDecisionJson()), "continuationDecision", t.getTaskId()),
+        continuationDecision,
         parseJson(
             redactPaths(t.getContinuationActionsJson()), "continuationActions", t.getTaskId()),
         extractObjective(t.getTaskJson()),
@@ -406,34 +484,39 @@ public class RunMapper {
   }
 
   /**
-   * A persisted COMPLETE row means the worker stopped at this task boundary; it does not override
-   * the task's later evidence-backed goal decision. Keep the persistence status unchanged for
-   * crash-resume bookkeeping, but fail closed in the customer-facing DTO whenever goal proof is
-   * present and not DONE. Legacy COMPLETE rows without goal proof remain backward compatible.
+   * V300 refund evidence for the run detail projection. {@code null} when refund state is not
+   * applicable (non-terminal or success display status) or cannot be resolved (no repository in a
+   * bare test construction, lookup failure); {@code true} when a durable {@code run_quota_refund}
+   * row exists (PENDING rows are idempotently applied by the refund worker, so the durable intent
+   * itself is refund evidence); {@code false} when this terminal non-success run has no refund row.
    */
-  static String displayTaskStatus(String persistedStatus, JsonNode goalDoneness) {
-    if (!"COMPLETE".equals(persistedStatus) || goalDoneness == null) {
-      return persistedStatus;
+  private Boolean creditsRefunded(PipelineRun r, String displayStatus) {
+    if (r == null
+        || r.getRunId() == null
+        || !RunDisplayPolicy.isRefundApplicableDisplayStatus(displayStatus)) {
+      return null;
     }
-    String goalState = goalDoneness.path("state").asText("");
-    return goalState.isBlank()
-            || "DONE".equals(goalState)
-            || downstreamValidationDeferred(goalDoneness)
-        ? persistedStatus
-        : "PARTIAL";
+    if (runQuotaRefundRepository == null) {
+      return null;
+    }
+    try {
+      return runQuotaRefundRepository.existsById(r.getRunId());
+    } catch (RuntimeException ex) {
+      log.warn("refund lookup failed for run {}: {}", r.getRunId(), ex.getMessage());
+      return null;
+    }
   }
 
-  String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
+  /**
+   * Public because customer-facing aggregates (e.g. the project dashboard counters) must bucket
+   * runs by the same fail-closed display projection as the run list, not by persisted status.
+   */
+  public String displayRunStatus(String persistedStatus, List<AgentTask> tasks) {
     if (!"COMPLETE".equals(persistedStatus) || tasks == null || tasks.isEmpty()) {
       return persistedStatus;
     }
     boolean allTasksProvenComplete = tasks.stream().allMatch(this::isTaskProvenCompleteForDisplay);
     return allTasksProvenComplete ? persistedStatus : "PARTIAL";
-  }
-
-  static Integer displayVerifiedScore(Integer persistedScore, String displayStatus) {
-    if (persistedScore == null || "COMPLETE".equals(displayStatus)) return persistedScore;
-    return Math.min(persistedScore, UNPROVEN_COMPLETION_SCORE_CAP);
   }
 
   private boolean isTaskProvenCompleteForDisplay(AgentTask task) {
@@ -443,7 +526,9 @@ public class RunMapper {
     try {
       JsonNode proof = objectMapper.readTree(json);
       String state = proof.path("state").asText("");
-      return state.isBlank() || "DONE".equals(state) || downstreamValidationDeferred(proof);
+      return state.isBlank()
+          || "DONE".equals(state)
+          || RunDisplayPolicy.downstreamValidationDeferred(proof);
     } catch (Exception error) {
       log.warn(
           "Malformed goal proof cannot certify run completion: taskId={} ({})",
@@ -453,59 +538,9 @@ public class RunMapper {
     }
   }
 
-  private static boolean downstreamValidationDeferred(JsonNode goalDoneness) {
-    JsonNode evidence = goalDoneness == null ? null : goalDoneness.path("evidence");
-    if (evidence == null || !evidence.isArray()) return false;
-    for (JsonNode item : evidence) {
-      if ("downstreamValidationDeferred=true".equals(item.asText())) return true;
-    }
-    return false;
-  }
-
-  static String displayRunStatusReason(
-      String persistedReason,
-      String persistedFailure,
-      String persistedStatus,
-      String displayStatus) {
-    if ("COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)) {
-      return "TASK_PROOF_INCOMPLETE";
-    }
-    String projected =
-        PlannerFailureDiagnostic.projectStatusReason(persistedReason, persistedFailure);
-    if (projected != null && !projected.isBlank()) return projected;
-    // FAILED/ERROR rows historically persisted only a coded failureReason, leaving statusReason
-    // null while terminalOutcome carried a real code. Fall back to the stable code prefix only —
-    // never the raw detail after the first colon, and never free prose that fails the code shape.
-    if ("FAILED".equals(persistedStatus) || "ERROR".equals(persistedStatus)) {
-      return stableFailureCodePrefix(persistedFailure);
-    }
-    return projected;
-  }
-
   /** Null-tolerant path redaction so bare test constructions without the bean stay usable. */
   private String redactPaths(String value) {
     return workspacePathRedaction == null ? value : workspacePathRedaction.redact(value);
-  }
-
-  /**
-   * Bounded stable-code prefix of a persisted failure reason, or null when it is not code-shaped.
-   */
-  private static final java.util.regex.Pattern STABLE_FAILURE_CODE =
-      java.util.regex.Pattern.compile("[A-Z][A-Z0-9_]{2,63}");
-
-  static String stableFailureCodePrefix(String persistedFailure) {
-    if (persistedFailure == null || persistedFailure.isBlank()) return null;
-    int colon = persistedFailure.indexOf(':');
-    String prefix = (colon < 0 ? persistedFailure : persistedFailure.substring(0, colon)).trim();
-    return STABLE_FAILURE_CODE.matcher(prefix).matches() ? prefix : null;
-  }
-
-  private static String displayRunFailureReason(
-      String persistedFailure, String persistedStatus, String displayStatus) {
-    if (persistedFailure != null && !persistedFailure.isBlank()) return persistedFailure;
-    return "COMPLETE".equals(persistedStatus) && "PARTIAL".equals(displayStatus)
-        ? "one or more tasks lack durable completion proof"
-        : persistedFailure;
   }
 
   /** Parses the objective field from the planner's TaskDefinition JSON stored in the task. */
@@ -545,55 +580,5 @@ public class RunMapper {
           e.getMessage());
       return null;
     }
-  }
-
-  /**
-   * Pulls a human-readable failure reason from the task's stored report JSON (WorkerReport#blockers
-   * for BLOCKED, WorkerReport#selfReview for PARTIAL) or falls back to the lastLlmFailure flag set
-   * by the recovery system.
-   *
-   * <p>Note: {@code self_review} is intentionally skipped for COMPLETE tasks — parent tasks
-   * completed from subtask decomposition store "Decomposed into N subtasks: N complete" in {@code
-   * self_review}, which is a success note, not a failure reason. That info is already surfaced via
-   * {@code completionNotes} in the TaskSummary.
-   */
-  private String extractFailureReason(AgentTask t) {
-    boolean isComplete = "COMPLETE".equals(t.getStatus());
-    if (t.getWorkerReportJson() != null && !t.getWorkerReportJson().isBlank()) {
-      try {
-        JsonNode report = objectMapper.readTree(t.getWorkerReportJson());
-        // BLOCKED tasks: "blockers" field
-        String blockers = report.path("blockers").asText("");
-        if (!blockers.isBlank()) return blockers;
-        // PARTIAL tasks: "self_review" (snake_case from WorkerReport).
-        // Skip for COMPLETE tasks — self_review on COMPLETE tasks contains subtask
-        // decomposition summaries ("Decomposed into N subtasks: N complete"), which
-        // are success notes, not failures. These are already in completionNotes.
-        if (!isComplete) {
-          String selfReview = report.path("self_review").asText("");
-          if (!selfReview.isBlank()) return selfReview;
-        }
-      } catch (Exception e) {
-        // RR-1124 — a non-blank but malformed worker report is corruption, not "no failure
-        // reason". Log a repair signal; the lastLlmFailure fallback below still applies.
-        log.warn(
-            "RR-1124 malformed persisted workerReportJson: taskId={} — failure reason from report"
-                + " unavailable ({})",
-            t.getTaskId(),
-            e.getMessage());
-      }
-    }
-    // Fallback: lastLlmFailure (set by blockTask / recovery)
-    String last = t.getLastLlmFailure();
-    if (last != null && !last.isBlank()) return last;
-    // Final safety net: never return an empty string for FAILED tasks.
-    // Empty string is worse than null because the UI's null-check may treat
-    // it as "set" and skip the placeholder. Eval Bug D (2026-04-16): S2
-    // Anthropic T3 surfaced as `failureReason: ""` and the harness retried
-    // silently. Anchor to "unknown" so the UI always shows something.
-    if ("FAILED".equals(t.getStatus())) {
-      return "unknown — see worker logs for run " + t.getRunId();
-    }
-    return null;
   }
 }

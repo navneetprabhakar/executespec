@@ -87,9 +87,12 @@ class RunCostTrackerEstimateStage1Test {
 
     assertThat(est.lowUsd()).as("low band").isGreaterThan(0.20);
     assertThat(est.highUsd()).as("high band").isGreaterThan(1.04);
+    // 2026-08-05 plan-scaled tail multiplier: 1.6 base + 0.15 x weight(1 LOW) + 0.4 project
+    // + 0.2 x (3 repos - 1) = 2.55, below the 3.0 cap. The pin above (high > actual $1.04)
+    // is the load-bearing conservatism check for this audit shape.
     assertThat(est.highUsd() / est.lowUsd())
-        .as("high/low ratio reflects HIGH_MULTIPLIER 3.0")
-        .isCloseTo(3.0, org.assertj.core.api.Assertions.within(0.001));
+        .as("high/low ratio reflects the plan-scaled tail multiplier for this shape")
+        .isCloseTo(2.55, org.assertj.core.api.Assertions.within(0.001));
     assertThat(est.credits()).as("at least 1 credit").isGreaterThanOrEqualTo(1);
     assertThat(est.hardCapUsd())
         .as("hardCap is credits × USD_PER_CREDIT (5)")

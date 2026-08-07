@@ -188,6 +188,12 @@ class AsyncAllowlistTest {
               // §8 (E1.8/9/10 bundle).
               "ActivityEventEmitter#emit",
 
+              // 2026-08-05 live residual — same profile as ActivityEventEmitter#emit (primitive
+              // args only, entity built in-method, internal try/catch swallows persist failure);
+              // adds a String human-actor fallback id for non-UUID principals so a plan-gate
+              // decision never projects actorType=SYSTEM.
+              "ActivityEventEmitter#emitWithActor",
+
               // E1.5 — bootstrap PR flow. Loads ProjectRepo by id (no eager
               // collection nav — it has no @OneToMany relations) and saves
               // back primitive field updates. Outer try/catch wraps the whole
@@ -235,6 +241,12 @@ class AsyncAllowlistTest {
               "RunActivityFeedListener#onGateOpened",
               "RunActivityFeedListener#onRunCompleted",
               "RunActivityFeedListener#onRunFailed",
+              // 2026-08-05 approval auditability — AFTER_COMMIT bridge from the V348 plan-gate
+              // decision to the activity feed / audit chain. Consumes an immutable record event
+              // carrying only String/enum fields (no JPA entity, no lazy collection) and delegates
+              // to the already-allowlisted ActivityEventEmitter#emit. Same decoupled profile as
+              // the RunActivityFeedListener entries above.
+              "PlanGateDecisionActivityListener#onDecisionCommitted",
 
               // RL-2026-05-041 (audit #2) — GcsTaskCheckpointService checkpoints the workspace to
               // GCS at each task boundary for mid-run durability. Reads the run row +

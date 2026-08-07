@@ -42,6 +42,20 @@ public class PullRequestController {
    */
   static final int SNAPSHOT_MAX_DIFF_CHARS = 20_000;
 
+  /**
+   * Stable value for {@link PrSummary#ciStatusReason} when {@code ciStatus} is UNKNOWN because the
+   * backing repo record proves no PR webhook is installed. The frontend pairs it with {@code
+   * repoId} to offer {@code POST /api/repos/{repoId}/webhook} as the fix.
+   */
+  static final String CI_STATUS_REASON_WEBHOOK_NOT_INSTALLED = "WEBHOOK_NOT_INSTALLED";
+
+  /**
+   * Additive fields (2026-08-05, webhook-onboarding surfacing): {@code ciStatusReason} explains an
+   * UNKNOWN {@code ciStatus} — value {@code WEBHOOK_NOT_INSTALLED} only when the repo record shows
+   * the webhook is provably not installed; null otherwise (including when install state is
+   * unknown). {@code repoId} is the ProjectRepo UUID so the client can call {@code POST
+   * /api/repos/{repoId}/webhook}; null when the record carries no repo linkage.
+   */
   public record PrSummary(
       String repoFullName,
       Integer prNumber,
@@ -53,8 +67,19 @@ public class PullRequestController {
       String mergedAt,
       String ciStatus,
       Integer ciFailingCount,
-      String ciCheckedAt) {
+      String ciCheckedAt,
+      String ciStatusReason,
+      String repoId) {
     static PrSummary from(PullRequestRecord r) {
+      return from(r, null);
+    }
+
+    static PrSummary from(PullRequestRecord r, Boolean webhookInstalled) {
+      String ciStatus = r.getCiStatus() != null ? r.getCiStatus().name() : "UNKNOWN";
+      String ciStatusReason =
+          "UNKNOWN".equals(ciStatus) && Boolean.FALSE.equals(webhookInstalled)
+              ? CI_STATUS_REASON_WEBHOOK_NOT_INSTALLED
+              : null;
       return new PrSummary(
           r.getRepoFullName(),
           r.getPrNumber(),
@@ -64,9 +89,11 @@ public class PullRequestController {
           r.getBaseBranch(),
           r.getCreatedAt() != null ? r.getCreatedAt().toString() : null,
           r.getMergedAt() != null ? r.getMergedAt().toString() : null,
-          r.getCiStatus() != null ? r.getCiStatus().name() : "UNKNOWN",
+          ciStatus,
           r.getCiFailingCount() != null ? r.getCiFailingCount() : 0,
-          r.getCiCheckedAt() != null ? r.getCiCheckedAt().toString() : null);
+          r.getCiCheckedAt() != null ? r.getCiCheckedAt().toString() : null,
+          ciStatusReason,
+          r.getRepoId() != null ? r.getRepoId().toString() : null);
     }
   }
 
@@ -79,7 +106,21 @@ public class PullRequestController {
     // which repos is itself a useful signal for an attacker. Tighten to a
     // proper org-scoped check.
     runAccessGuard.requireRunAccess(runId, userDetails);
-    List<PrSummary> out = service.listForRun(runId).stream().map(PrSummary::from).toList();
+    // 2026-08-05 — resolve webhook-install state per distinct repoId (verified against the durable
+    // project_repo.webhook_installed column) so an UNKNOWN ciStatus can carry an actionable
+    // WEBHOOK_NOT_INSTALLED reason instead of an unexplained blank.
+    java.util.Map<java.util.UUID, Boolean> webhookByRepo = new java.util.HashMap<>();
+    List<PrSummary> out =
+        service.listForRun(runId).stream()
+            .map(
+                r ->
+                    PrSummary.from(
+                        r,
+                        r.getRepoId() == null
+                            ? null
+                            : webhookByRepo.computeIfAbsent(
+                                r.getRepoId(), service::webhookInstalled)))
+            .toList();
     return ResponseEntity.ok(out);
   }
 

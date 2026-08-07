@@ -47,6 +47,9 @@ class RunDetailEffectiveRouteTest {
       mock(ManagedAiUsageEventRepository.class);
   private final RunStepUsageRepository usageRepository = mock(RunStepUsageRepository.class);
   private final RunCostTracker runCostTracker = mock(RunCostTracker.class);
+  private final com.navneet.executespec.billing.repository.RunQuotaRefundRepository
+      runQuotaRefundRepository =
+          mock(com.navneet.executespec.billing.repository.RunQuotaRefundRepository.class);
 
   private RunMapper mapper() {
     when(integrationRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.empty());
@@ -64,7 +67,8 @@ class RunDetailEffectiveRouteTest {
         null,
         runCostTracker,
         new ObjectMapper(),
-        null);
+        null,
+        runQuotaRefundRepository);
   }
 
   private static RunStepUsage success(String provider, String model) {
@@ -215,6 +219,50 @@ class RunDetailEffectiveRouteTest {
     assertThat(detail.getEffectiveRouteAttribution()).isEqualTo("UNATTRIBUTED");
     assertThat(detail.getEffectiveProvider()).isNull();
     assertThat(detail.getRouteDiverged()).isFalse();
+  }
+
+  @Test
+  void failedRunWithDurableRefundRowExposesCreditsRefundedOnDetailAndTerminalOutcome() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
+    when(runQuotaRefundRepository.existsById(RUN_ID)).thenReturn(true);
+    PipelineRun failed = run("anthropic", null);
+    failed.setStatus("FAILED");
+    failed.setStatusReason("FINAL_BUILD_FAILED");
+
+    RunDetail detail = mapper().toDetail(failed, List.of());
+
+    assertThat(detail.getCreditsRefunded()).isTrue();
+    assertThat(detail.getTerminalOutcome().impact().creditsRefunded()).isTrue();
+    assertThat(detail.getTerminalOutcome().customerMessage())
+        .contains("The run credit charged for this run was refunded.");
+  }
+
+  @Test
+  void terminalFailedRunWithoutRefundEvidenceIsExplicitlyNotRefunded() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
+    when(runQuotaRefundRepository.existsById(RUN_ID)).thenReturn(false);
+    PipelineRun failed = run("anthropic", null);
+    failed.setStatus("FAILED");
+    failed.setStatusReason("FINAL_BUILD_FAILED");
+
+    RunDetail detail = mapper().toDetail(failed, List.of());
+
+    assertThat(detail.getCreditsRefunded()).isFalse();
+    assertThat(detail.getTerminalOutcome().impact().creditsRefunded()).isFalse();
+  }
+
+  @Test
+  void successfulRunLeavesRefundStateNotApplicableAndNeverConsultsTheLedger() {
+    when(usageRepository.findByRunIdOrderByCreatedAtAsc(RUN_ID)).thenReturn(List.of());
+    PipelineRun complete = run("anthropic", null);
+    complete.setStatus("COMPLETE");
+    complete.setStatusReason("CLEAN_COMPLETION");
+
+    RunDetail detail = mapper().toDetail(complete, List.of());
+
+    assertThat(detail.getCreditsRefunded()).isNull();
+    assertThat(detail.getTerminalOutcome().impact().creditsRefunded()).isNull();
+    verify(runQuotaRefundRepository, never()).existsById(RUN_ID);
   }
 
   @Test

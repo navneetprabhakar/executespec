@@ -37,6 +37,75 @@ class RunTerminalOutcomeContractTest {
   }
 
   @Test
+  void routePinnedNamesThePinAndTheUnpinActionInsteadOfClaimingRecoveryRan() {
+    // Dev run 322919af. The pin forbade the escalation that IS the recovery, so the old copy —
+    // "bounded recovery could not produce an approvable plan" — described work never attempted.
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            "PLANNER_RECOVERY_POLICY_BLOCKED",
+            "ROUTE_PINNED: planner recovery policy blocked: ROUTE_PINNED (exact run route forbids"
+                + " escalation)",
+            0.81,
+            null,
+            null);
+
+    assertThat(outcome.customerTitle()).contains("exact model pin");
+    assertThat(outcome.customerMessage()).contains("pinned an exact model", "forbids switching");
+    assertThat(outcome.customerMessage()).doesNotContain("bounded recovery");
+    assertThat(outcome.nextAction().label()).contains("without the exact model pin");
+    // Unpinning makes this run retryable; reporting it as terminal was the second false claim.
+    assertThat(outcome.retryable()).isTrue();
+    assertThat(outcome.code()).isEqualTo("PLANNER_RECOVERY_POLICY_BLOCKED");
+    assertThat(outcome.impact().codeChanged()).isFalse();
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "CONFIRMATION_REQUIRED,Confirm model upgrades",
+    "BENCHMARK_EVIDENCE_REQUIRED,Require benchmark evidence",
+  })
+  void policyLeversNameTheExactSettingTheCustomerCanChange(String blockCode, String setting) {
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED", "PLANNER_RECOVERY_POLICY_BLOCKED", blockCode + ": blocked", 0.4, null, null);
+
+    assertThat(outcome.nextAction().label()).contains(setting);
+    assertThat(outcome.retryable()).isTrue();
+  }
+
+  @Test
+  void genuineExhaustionKeepsTheOriginalNonRetryablePolicyWording() {
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            "PLANNER_RECOVERY_POLICY_BLOCKED",
+            "NO_QUALITY_STEP_UP: bounded planner escalation was exhausted",
+            0.4,
+            null,
+            null);
+
+    assertThat(outcome.customerMessage()).contains("failed deterministic validation");
+    assertThat(outcome.retryable()).isFalse();
+  }
+
+  @Test
+  void anUnrecognisedBlockTokenIsNotTreatedAsProofThatALeverExists() {
+    // A future or malformed token must not invent an "unpin your model" instruction.
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            "PLANNER_RECOVERY_POLICY_BLOCKED",
+            "SOMETHING_NEW: unrecognised",
+            0.4,
+            null,
+            null);
+
+    assertThat(outcome.retryable()).isFalse();
+    assertThat(outcome.customerMessage()).contains("failed deterministic validation");
+  }
+
+  @Test
   void cancellationIsNeutralAndNotAPlatformFailure() {
     RunTerminalOutcome outcome = project("CANCELLED", null, "Cancelled by user", 0.01, 1.0, null);
 
@@ -253,6 +322,51 @@ class RunTerminalOutcomeContractTest {
         projectExpectedPublication("PARTIAL", "LOCAL_EXECUTION", null, null);
 
     assertThat(outcome.customerMessage()).doesNotContain("pull request was not created");
+  }
+
+  @Test
+  void refundedFailureStatesTheCreditRefundInMessageAndImpact() {
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "FAILED",
+            "FINAL_BUILD_FAILED",
+            null,
+            0.0,
+            1.0,
+            null,
+            false,
+            true);
+
+    assertThat(outcome.impact().creditsRefunded()).isTrue();
+    assertThat(outcome.customerMessage())
+        .contains("The run credit charged for this run was refunded.");
+  }
+
+  @Test
+  void unrefundedFailureCarriesAnExplicitFalseWithoutClaimingARefund() {
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "123e4567-e89b-12d3-a456-426614174000",
+            "FAILED",
+            "FINAL_BUILD_FAILED",
+            null,
+            0.0,
+            1.0,
+            null,
+            false,
+            false);
+
+    assertThat(outcome.impact().creditsRefunded()).isFalse();
+    assertThat(outcome.customerMessage()).doesNotContain("refunded");
+  }
+
+  @Test
+  void legacyProjectionsLeaveRefundStateUnresolvedRatherThanFalse() {
+    RunTerminalOutcome outcome = project("FAILED", "FINAL_BUILD_FAILED", null, 0.0, 1.0, null);
+
+    assertThat(outcome.impact().creditsRefunded()).isNull();
+    assertThat(outcome.customerMessage()).doesNotContain("refunded");
   }
 
   @Test

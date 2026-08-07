@@ -1,0 +1,304 @@
+/* Version B — orgbilling surfaces. Scoped rules for this lane only.
+   Shared grammar lives in ide.css; do not duplicate it here.
+
+   Owned surfaces: /billing · /plans · /runs · /account · /deployments ·
+   /provider-keys · /api-keys · /org-members · /org/settings · /integrations ·
+   /admin. Every class here is `ob-*` so it cannot collide with another lane. */
+
+/* ── List rows ────────────────────────────────────────────────────────────
+ *
+ * One row grammar for every list in this lane (invoices, members, invites,
+ * integrations, tokens, deployments, provider keys). The row is:
+ *
+ *     [ identity (flex:1, min-width:0) ] [ status column ] [ actions ]
+ *
+ * The status column is FIXED WIDTH, not an inline chip. "Connected" and
+ * "Status unavailable" are different lengths, so a shrink-to-fit badge pushed
+ * every row's action button to a different x — the same alignment defect the
+ * Work list already fixed for its leading badge.
+ */
+.ide-root .ob-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  padding: var(--ide-s3) var(--ide-s4);
+}
+.ide-root .ob-row + .ob-row {
+  border-top: 1px solid var(--ide-border);
+}
+.ide-root .ob-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.ide-root .ob-row-title {
+  font-size: var(--ide-t-body);
+  font-weight: 600;
+  color: var(--ide-fg-bright);
+  overflow-wrap: anywhere;
+}
+.ide-root .ob-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--ide-s2);
+  margin-top: 2px;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  overflow-wrap: anywhere;
+}
+/* Fixed status column — badges align on one x, so the actions beside them do
+   too. `justify-content: flex-start` keeps the pill left-aligned inside the
+   column instead of drifting with its own label width. */
+.ide-root .ob-status {
+  flex: 0 0 var(--ob-status-w, 116px);
+  display: flex;
+  justify-content: flex-start;
+}
+.ide-root .ob-status-wide {
+  --ob-status-w: 132px;
+}
+.ide-root .ob-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s2);
+  flex-shrink: 0;
+}
+/* When every row carries exactly one action of a different label width
+   ("Set token" vs "Connect"), a shrink-to-fit action column drags the status
+   column left with it. Reserving the column keeps both on one x. */
+.ide-root .ob-actions-fixed {
+  min-width: var(--ob-actions-w, 104px);
+  justify-content: flex-end;
+}
+.ide-root .ob-actions-wide {
+  --ob-actions-w: 138px;
+}
+
+/* ── Split row: description on the left, one control on the right ─────────
+ * Used by the org-profile toggle, the GDPR/DSAR/erasure rows, and the
+ * account/settings cards that pair prose with a single action.
+ */
+.ide-root .ob-split {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ide-s3);
+}
+.ide-root .ob-split-main {
+  min-width: 0;
+  flex: 1;
+}
+.ide-root .ob-split-action {
+  flex-shrink: 0;
+}
+
+/* ── Stat strip ──────────────────────────────────────────────────────────
+ * The billing summary numbers. auto-fit so it degrades to one column on a
+ * phone without a media query of its own.
+ */
+.ide-root .ob-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: var(--ide-s3);
+  padding-top: var(--ide-s3);
+  border-top: 1px solid var(--ide-border);
+}
+.ide-root .ob-stat-label {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  margin-bottom: 2px;
+}
+.ide-root .ob-stat-value {
+  font-size: var(--ide-t-h3);
+  font-weight: 700;
+  color: var(--ide-fg-bright);
+}
+
+/* ── Plans grid ──────────────────────────────────────────────────────────
+ * Cards in one row match height and their CTA sits on a shared baseline at the
+ * bottom, so the ladder reads as a comparison instead of five ragged boxes.
+ */
+.ide-root .ob-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+  gap: var(--ide-s3);
+  align-items: stretch;
+}
+.ide-root .ob-plan-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ide-s2);
+}
+.ide-root .ob-plan-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--ide-s2);
+}
+.ide-root .ob-plan-tier {
+  font-size: var(--ide-t-h3);
+  font-weight: 700;
+  color: var(--ide-fg-bright);
+}
+.ide-root .ob-plan-price {
+  font-size: var(--ide-t-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ide-fg-bright);
+  white-space: nowrap;
+}
+.ide-root .ob-plan-unit {
+  font-size: var(--ide-t-body);
+  font-weight: 400;
+  color: var(--ide-fg-muted);
+}
+.ide-root .ob-plan-note {
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+.ide-root .ob-plan-note-accent {
+  color: var(--ide-accent);
+  font-weight: 600;
+}
+.ide-root .ob-plan-features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--ide-s2);
+  font-size: var(--ide-t-body);
+  /* Takes the slack so every CTA in the row lands on the same baseline. */
+  flex: 1;
+  align-content: start;
+}
+.ide-root .ob-plan-features li.ob-muted {
+  color: var(--ide-fg-muted);
+}
+.ide-root .ob-plan-cta {
+  width: 100%;
+  margin-top: var(--ide-s2);
+}
+/* State is a quiet pill, never a repainted card body. */
+.ide-root .ob-plan-flag {
+  position: absolute;
+  top: calc(var(--ide-s2) * -1 - 1px);
+  right: var(--ide-s3);
+  padding: 0 var(--ide-s2);
+  min-height: 18px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--ide-r-pill);
+  font-size: var(--ide-t-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: var(--ide-accent-fill);
+  color: var(--ide-accent-fg);
+}
+.ide-root .ob-plan-flag-current {
+  background: var(--ide-green);
+  color: var(--ide-bg-editor);
+}
+
+/* ── Model matrix (ENTERPRISE org routing grid) ──────────────────────────
+ * Desktop: a fixed provider column so all six pickers start at the same x.
+ * Phone: the fixed column ate a quarter of a 375px row and every model name
+ * truncated mid-word, so the row stacks and the picker takes the full width.
+ */
+.ide-root .ob-matrix-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+}
+.ide-root .ob-matrix-row + .ob-matrix-row {
+  margin-top: var(--ide-s2);
+}
+.ide-root .ob-matrix-provider {
+  flex: 0 0 96px;
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+}
+/* ModelPicker takes no className prop, so the picker is sized from its row. */
+.ide-root .ob-matrix-row .ide-model-picker {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Field label ─────────────────────────────────────────────────────────── */
+.ide-root .ob-field {
+  margin-bottom: var(--ide-s3);
+}
+.ide-root .ob-field-label {
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  color: var(--ide-fg-muted);
+  margin-bottom: var(--ide-s1);
+}
+
+/* ── Key row (personal + org provider keys) ─────────────────────────────── */
+.ide-root .ob-key-controls {
+  display: flex;
+  gap: var(--ide-s2);
+}
+.ide-root .ob-key-controls .ide-input {
+  flex: 1;
+  min-width: 0;
+}
+.ide-root .ob-key-controls .ide-btn {
+  flex-shrink: 0;
+}
+
+/* ── Phone (<=600px) ─────────────────────────────────────────────────────
+ * The type ramp already steps down globally. What phones needed here was
+ * LAYOUT: two- and three-column rows that were still trying to be columns
+ * inside 375px, and one fixed-width label column that could not shrink.
+ */
+@media (max-width: 600px) {
+  .ide-root .ob-row {
+    flex-wrap: wrap;
+    row-gap: var(--ide-s2);
+  }
+  .ide-root .ob-row-main {
+    flex: 1 0 100%;
+  }
+  .ide-root .ob-status {
+    flex: 0 0 auto;
+  }
+  .ide-root .ob-actions {
+    margin-left: auto;
+  }
+  .ide-root .ob-split {
+    flex-wrap: wrap;
+  }
+  .ide-root .ob-split-main {
+    flex: 1 0 100%;
+  }
+  .ide-root .ob-split-action {
+    margin-left: auto;
+  }
+  .ide-root .ob-matrix-row {
+    display: block;
+  }
+  .ide-root .ob-matrix-provider {
+    margin-bottom: var(--ide-s1);
+  }
+  .ide-root .ob-matrix-row .ide-model-picker {
+    width: 100%;
+  }
+  .ide-root .ob-key-controls {
+    flex-wrap: wrap;
+  }
+  .ide-root .ob-key-controls .ide-input {
+    flex: 1 0 100%;
+  }
+  .ide-root .ob-key-controls .ide-btn {
+    flex: 1;
+  }
+  /* Long emails, key placeholders and gateway ids truncate instead of forcing
+     the page to scroll sideways. */
+  .ide-root .ob-truncate {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

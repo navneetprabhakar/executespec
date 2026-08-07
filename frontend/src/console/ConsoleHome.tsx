@@ -177,8 +177,8 @@ export default function ConsoleHome() {
       key: 'org',
       label: hasTeamOrg ? 'Team org ready' : 'Create team org',
       detail: hasTeamOrg
-        ? `${org?.name || 'Org'} can hold shared projects, seats, keys, and billing.`
-        : 'Convert the personal workspace into the company/team account before inviting people.',
+        ? `${org?.name || 'Org'} holds shared projects, seats, keys, and billing.`
+        : 'Convert this personal workspace before inviting anyone.',
       done: hasTeamOrg,
       action: hasTeamOrg ? 'Open settings' : 'Create org',
       to: '/org/settings',
@@ -191,7 +191,7 @@ export default function ConsoleHome() {
           ? `${teammateCount} teammate${teammateCount === 1 ? '' : 's'} added.`
           : pendingInvites.length > 0
             ? `${pendingInvites.length} pending invite${pendingInvites.length === 1 ? '' : 's'} waiting.`
-            : 'Add developers, product, UX, and EM stakeholders before the first serious migration run.',
+            : 'Add the people who will review plans and PRs.',
       done: teammateCount > 0 || pendingInvites.length > 0,
       action: 'Manage members',
       to: '/org-members',
@@ -201,8 +201,8 @@ export default function ConsoleHome() {
       label: projects.length > 0 ? 'Project context ready' : 'Create project',
       detail:
         projects.length > 0
-          ? `${projects.length} project context${projects.length === 1 ? '' : 's'} available for runs, docs, and memory.`
-          : 'Create the first project so runs, repo context, architecture, and sharing do not stay scattered.',
+          ? `${projects.length} project${projects.length === 1 ? '' : 's'} available for runs, docs, and memory.`
+          : 'Give runs a home for repos, architecture, and memory.',
       done: projects.length > 0,
       action: projects.length > 0 ? 'View projects' : 'Create project',
       to: '/projects',
@@ -212,7 +212,7 @@ export default function ConsoleHome() {
       label: user?.preferredAiProvider ? 'Provider preference set' : 'Review provider default',
       detail: user?.preferredAiProvider
         ? `${user.preferredAiProvider} is your default across clients.`
-        : 'Set or confirm the provider default so web, CLI, and VS Code stay predictable.',
+        : 'Pick one default for web, CLI, and VS Code.',
       done: !!user?.preferredAiProvider,
       action: 'Provider settings',
       to: '/org/settings',
@@ -225,29 +225,39 @@ export default function ConsoleHome() {
       <div className='con-cockpit'>
         <div className='con-hero'>
           <div>
-            <div className='con-hero-kicker'>ExecuteSpec</div>
-            <h1 className='con-hero-title'>Spec-driven coding, verified before it ships.</h1>
+            {/* The kicker repeated the brand mark sitting two rows above it. */}
+            <h1 className='con-hero-title'>Spec in, verified pull request out.</h1>
             <div className='con-hero-sub'>
-              Turn a product or engineering spec into planned code changes, review the plan gate,
-              track execution, and inspect the verified result from one control plane.
+              You approve the plan. Execution, tests, and the PR follow from there.
             </div>
           </div>
-          <button type='button' className='con-newrun lg' onClick={() => navigate('/compose')}>
+          {/* Ghost, not accent. The top bar's Start is the surface's one
+              accent-filled commit action and it goes to the same place; two
+              filled buttons to one destination is the accent-discipline
+              violation, not a second entry point. This stays as an affordance
+              for anyone reading the hero rather than the chrome. */}
+          <button
+            type='button'
+            className='con-newrun lg is-quiet'
+            onClick={() => navigate('/compose')}
+          >
             <PlusIcon size={16} />
             Start work
           </button>
         </div>
+        {/* Short labels are load-bearing: they are what lets this be a real
+            three-up strip on a 375px phone instead of three full-width rows. */}
         <div className='con-cockpit-metrics'>
           <button type='button' className='con-metric-card' onClick={() => navigate('/decisions')}>
-            <span className='con-metric-label'>Awaiting decisions</span>
+            <span className='con-metric-label'>Decisions</span>
             <strong>{gate.length}</strong>
           </button>
           <button type='button' className='con-metric-card' onClick={() => navigate('/runs')}>
-            <span className='con-metric-label'>Live work</span>
+            <span className='con-metric-label'>Live</span>
             <strong>{active.length}</strong>
           </button>
           <button type='button' className='con-metric-card' onClick={() => navigate('/projects')}>
-            <span className='con-metric-label'>Project contexts</span>
+            <span className='con-metric-label'>Projects</span>
             <strong>{projects.length}</strong>
           </button>
         </div>
@@ -267,45 +277,43 @@ export default function ConsoleHome() {
           <PlusIcon size={16} />
           <span>
             <strong>Submit a spec</strong>
-            <small>Describe the change, choose project context, and confirm the run budget.</small>
+            <small>Describe the change and set the budget.</small>
           </span>
         </button>
         <button type='button' className='con-product-card' onClick={() => navigate('/decisions')}>
           <CommandIcon size={16} />
           <span>
             <strong>Approve the plan</strong>
-            <small>Human review stays at the plan gate before automated execution starts.</small>
+            <small>Nothing runs until you say so.</small>
           </span>
         </button>
         <button type='button' className='con-product-card' onClick={() => navigate('/runs')}>
           <RunsIcon size={16} />
           <span>
             <strong>Verify the result</strong>
-            <small>
-              Follow live work, review evidence, and open the PR when the score is ready.
-            </small>
+            <small>Read the evidence, then open the PR.</small>
           </span>
         </button>
         <button type='button' className='con-product-card' onClick={() => navigate('/projects')}>
           <ProjectsIcon size={16} />
           <span>
             <strong>Ground it in projects</strong>
-            <small>Connect repos, docs, architecture, memory, and team access.</small>
+            <small>Repos, docs, architecture, and access.</small>
           </span>
         </button>
       </section>
 
       <section className='con-section con-section-priority'>
         <div className='con-section-title attn'>
-          Attention queue
+          Needs you
           <button type='button' className='con-section-link' onClick={() => navigate('/decisions')}>
-            View decisions
+            All decisions
           </button>
         </div>
         {loading ? (
-          <div className='con-empty'>Loading work…</div>
+          <div className='con-empty'>Loading…</div>
         ) : attention.length === 0 ? (
-          <div className='con-empty'>No blockers. Start work or inspect project health.</div>
+          <div className='con-empty'>Nothing is waiting on you.</div>
         ) : (
           attention.map((r) => {
             const action = nextAction(r, prPending[r.runId] || 0);
@@ -370,7 +378,7 @@ export default function ConsoleHome() {
           </div>
           {projects.length === 0 ? (
             <div className='con-empty'>
-              No project contexts yet —{' '}
+              No projects yet —{' '}
               <button
                 type='button'
                 className='con-inline-link'
@@ -378,7 +386,7 @@ export default function ConsoleHome() {
               >
                 create one
               </button>{' '}
-              to connect repos, architecture, memory, and chat.
+              to connect repos and architecture.
             </div>
           ) : (
             <div className='con-proj-grid compact'>

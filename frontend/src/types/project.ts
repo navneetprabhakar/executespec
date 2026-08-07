@@ -146,6 +146,13 @@ export interface PrSummary {
   ciFailingCount?: number;
   /** ISO-8601 timestamp of the last successful check-runs poll; null pre-poll. */
   ciCheckedAt?: string | null;
+  /**
+   * Server-explained cause for an UNKNOWN ciStatus (e.g. `WEBHOOK_NOT_INSTALLED`). Absent on
+   * older servers; the UI must render unchanged when missing.
+   */
+  ciStatusReason?: string | null;
+  /** Linked repository id for webhook installation. Absent on older servers. */
+  repoId?: string | null;
 }
 
 export interface TaskSummary {
@@ -185,6 +192,12 @@ export interface ProjectCostBreakdown {
 export interface ProjectDashboardDTO {
   activeRuns: number;
   completedRuns: number;
+  /**
+   * Runs whose customer-facing display status is PARTIAL (persisted PARTIAL plus
+   * persisted-COMPLETE runs with unproven goal evidence). Optional: older servers omit it, so
+   * consumers must stay null-safe.
+   */
+  partialRuns?: number;
   failedRuns: number;
   avgScore: number;
   /** Reports rejected by deterministic validity checks and omitted from avgScore. */

@@ -150,25 +150,25 @@ public class OutlinePlannerAgent {
   private static final int OUTLINE_MAX_TOKENS_SKELETON = 8_192;
 
   /**
-   * [D-02] (coverage Sprint 3, 2026-05-01) — wall-clock timeout for the synchronous planner LLM
-   * call. Was: a stalled provider socket would leave the whole pipeline in PLANNING forever (Spring
-   * AI's default RestClient retry could compound on top of network hangs). Cap is 8 minutes — well
-   * above the observed-good MEDIUM Express run's 4m36s but below any reasonable user expectation
-   * for a "the planner has wedged" heuristic. The phase 2 expander pool already enforces a 20-min
-   * wall timeout; this closes the matching gap on phase 1.
-   *
-   * <p>Hits raise an IllegalStateException so callers (RunOrchestrator) can fall back to the legacy
-   * planner OR mark the run FAILED with a clear reason instead of hanging indefinitely.
-   */
-  private static final long PLANNER_LLM_WALL_TIMEOUT_SECONDS = 8 * 60;
-
-  /**
    * Per-call HTTP read-timeout override propagated through {@code LlmRequest.readTimeoutSeconds}.
    * Honoured by Gemini and every OpenAI-wire route; Anthropic retains its configured Spring AI
    * client timeout. 240s (4 minutes) gives thinking models enough headroom for a single multi-task
-   * plan call while staying well under the wall timeout (480s).
+   * plan call — a healthy dev outline on a reasoning model measured 220s.
    */
   private static final int PLANNER_HTTP_READ_TIMEOUT_SECONDS = 240;
+
+  /**
+   * [D-02] Wall-clock timeout for the synchronous planner call; a hit raises IllegalStateException
+   * so RunOrchestrator fails the run instead of hanging in PLANNING forever.
+   *
+   * <p>It MUST fit a retry after one socket burns the full read timeout. A flat 8 minutes against a
+   * 240s read timeout meant two attempts came to exactly the wall, so a retry could never finish
+   * (dev run 350fd2fc: one outline call hung the full 240s returning zero bytes; the run died at
+   * 490s with no plan). Derived from the read timeout so that cannot silently break again: three
+   * read windows (attempt, retry, one slow coherence/repair) plus assembly overhead.
+   */
+  private static final long PLANNER_LLM_WALL_TIMEOUT_SECONDS =
+      PLANNER_HTTP_READ_TIMEOUT_SECONDS * 3L + 120L;
 
   /** v2.5.11 — gates strict v3 planner behaviour (requirement enumeration + validation). */
   private static final String FLAG_V3_STRICT = "validation.v3-strict";

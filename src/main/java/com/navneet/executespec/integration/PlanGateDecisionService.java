@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * The single database transaction that decides a plan gate.
@@ -37,11 +38,26 @@ import lombok.RequiredArgsConstructor;
  * state-transition ownership. No executor, workspace, SSE, Redis, provider, or other external side
  * effect is invoked here. The committed READY event is consumed by an {@code AFTER_COMMIT}
  * dispatcher.
+ *
+ * <p>Structural partial state (a missing gate/continuation row, a gate/continuation identity or
+ * digest mismatch, an invalid continuation payload, or a missing immutable plan artifact — e.g.
+ * after an interrupted rolling deploy) is typed through {@link BrokenPlanGateStateException} and
+ * resolved deterministically: APPROVE refuses with the stable {@code
+ * PLAN_GATE_STATE_UNRECOVERABLE[code]} 409 and a cancel-and-resubmit remediation, while REJECT and
+ * pre-approval CANCEL fence the run to a terminal cancelled state with a typed reason. The
+ * broken-state fence never fabricates an APPROVE receipt, never mutates a resolved gate, and leaves
+ * a structurally broken PENDING gate row byte-untouched because no valid canonical receipt can be
+ * written against corrupt rows.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PlanGateDecisionService {
   static final int ADMISSION_CONTRACT_VERSION = DecisionEvidenceV1.SCHEMA_VERSION;
+
+  /** Stable machine-readable prefix for decisions refused on structurally broken gate state. */
+  public static final String UNRECOVERABLE_CODE = "PLAN_GATE_STATE_UNRECOVERABLE";
+
   private static final String PLAN_GATE_TYPE = "PLAN";
 
   private final PipelineRunRepository runRepository;
@@ -115,8 +131,27 @@ public class PlanGateDecisionService {
     }
     validateResolutionSource(kind, resolutionSource, actor);
 
-    LockedDecisionRows rows = lockDecisionRows(runId);
-    PipelineRun run = rows.run();
+    PipelineRun run =
+        runRepository
+            .findByIdForPlanGateOpen(runId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
+    try {
+      return decideWithLockedRun(run, kind, command, actor, resolutionSource, resolutionReason);
+    } catch (BrokenPlanGateStateException broken) {
+      return resolveBrokenGateState(run, kind, resolutionSource, resolutionReason, broken);
+    }
+  }
+
+  private DecisionResult decideWithLockedRun(
+      PipelineRun run,
+      DecisionKind kind,
+      PlanApprovalService.Command command,
+      AppUserDetails actor,
+      String resolutionSource,
+      String resolutionReason) {
+    String runId = run.getRunId();
+    LockedGateRows rows = lockGateRows(runId);
     GateRecord gate = rows.gate();
     PlanGateResumeOutbox outbox = rows.outbox();
     String actualPlanFingerprint = PlanGateDecisionEvidence.requireExactPlan(run);
@@ -215,32 +250,127 @@ public class PlanGateDecisionService {
     if (kind == DecisionKind.APPROVE) {
       eventPublisher.publishEvent(new PlanGateResumeReadyCommitted(runId));
     }
+    // Approval auditability — publish the FIRST-TIME customer APPROVE/REJECT for the AFTER_COMMIT
+    // activity/audit listener. Replays return from replay() above and never reach this line, so an
+    // exact replayed decision cannot append a duplicate activity event. CANCEL is a distinct
+    // decision kind and deliberately not a customer plan decision event.
+    if (kind == DecisionKind.APPROVE || kind == DecisionKind.REJECT) {
+      eventPublisher.publishEvent(decisionCommitted(run, kind, actorEvidence, lockedActor));
+    }
     return new DecisionResult(run, kind, evidence, false);
   }
 
-  private LockedDecisionRows lockDecisionRows(String runId) {
-    PipelineRun run =
-        runRepository
-            .findByIdForPlanGateOpen(runId)
-            .orElseThrow(
-                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found: " + runId));
+  /**
+   * Builds the post-commit decision event carrying the REAL human decider. APPROVE/REJECT always
+   * have a human actor ({@code actorEvidence} rejects system principals for those kinds), so the
+   * user id is non-null here; email/display are best-effort profile evidence for audit surfaces.
+   */
+  private static PlanGateDecisionCommitted decisionCommitted(
+      PipelineRun run,
+      DecisionKind kind,
+      PlanGateDecisionEvidence.ActorEvidence actorEvidence,
+      AppUserDetails lockedActor) {
+    com.navneet.executespec.auth.entity.AppUser user =
+        lockedActor == null ? null : lockedActor.getUser();
+    String email = user == null ? null : user.getEmail();
+    String displayName = user == null ? null : displayName(user.getFirstName(), user.getLastName());
+    return new PlanGateDecisionCommitted(
+        run.getRunId(),
+        run.getProjectId(),
+        kind,
+        actorEvidence.userId(),
+        email,
+        displayName,
+        run.getRunTitle());
+  }
+
+  private static String displayName(String firstName, String lastName) {
+    String first = firstName == null ? "" : firstName.trim();
+    String last = lastName == null ? "" : lastName.trim();
+    String joined = (first + " " + last).trim();
+    return joined.isEmpty() ? null : joined;
+  }
+
+  private LockedGateRows lockGateRows(String runId) {
     String gateKey = "gate:plan:" + runId;
     GateRecord gate =
         gateRepository
             .findByIdForPlanGateOpen(gateKey)
             .orElseThrow(
                 () ->
-                    new ResponseStatusException(
-                        HttpStatus.CONFLICT, "The durable plan gate is missing."));
+                    new BrokenPlanGateStateException(
+                        BrokenPlanGateStateException.Code.GATE_ROW_MISSING,
+                        "The durable plan gate is missing."));
     PlanGateResumeOutbox outbox =
         outboxRepository
             .findByIdForUpdate(runId)
             .orElseThrow(
                 () ->
-                    new ResponseStatusException(
-                        HttpStatus.CONFLICT, "The durable plan continuation is missing."));
+                    new BrokenPlanGateStateException(
+                        BrokenPlanGateStateException.Code.CONTINUATION_ROW_MISSING,
+                        "The durable plan continuation is missing."));
     verifyGateIdentity(runId, gateKey, gate, outbox);
-    return new LockedDecisionRows(run, gate, outbox);
+    return new LockedGateRows(gate, outbox);
+  }
+
+  /**
+   * Deterministic resolution for structurally broken durable gate state.
+   *
+   * <p>APPROVE must never execute over corrupt authority, so it refuses with the stable
+   * machine-readable conflict. REJECT and pre-approval CANCEL succeed by fencing the run (and any
+   * surviving continuation row) to a terminal cancelled state with the typed reason — a customer
+   * can always stop a broken run. No receipt is fabricated: a broken PENDING gate row is left
+   * untouched because a canonical {@link DecisionEvidenceV1} cannot be truthfully constructed from
+   * corrupt or missing rows, and a resolved gate's immutable receipt is never rewritten.
+   */
+  private DecisionResult resolveBrokenGateState(
+      PipelineRun run,
+      DecisionKind kind,
+      String resolutionSource,
+      String resolutionReason,
+      BrokenPlanGateStateException broken) {
+    String typedReason = UNRECOVERABLE_CODE + "[" + broken.code() + "]: " + broken.getMessage();
+    if (kind == DecisionKind.APPROVE) {
+      log.warn(
+          "Plan gate approve refused on broken durable state: run={} code={}",
+          run.getRunId(),
+          broken.code());
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          typedReason
+              + " Approval cannot safely authorize execution from this state. Cancel the run and"
+              + " resubmit the spec.");
+    }
+    if (!"AWAITING_APPROVAL".equals(run.getStatus())) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          typedReason + " Plan decision cannot be made from the run's current state.");
+    }
+    log.warn(
+        "Fencing run with broken plan-gate state to CANCELLED: run={} code={} source={}",
+        run.getRunId(),
+        broken.code(),
+        resolutionSource);
+    Instant now = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    outboxRepository
+        .findByIdForUpdate(run.getRunId())
+        .ifPresent(
+            outbox -> {
+              clearLease(outbox);
+              outbox.setStatus("CANCELLED");
+              outbox.setCompletedAt(now);
+              outbox.setLastError(UNRECOVERABLE_CODE + "[" + broken.code() + "]");
+              outboxRepository.save(outbox);
+            });
+    String failureReason =
+        typedReason + (resolutionReason == null ? "" : " (" + resolutionReason + ")");
+    if (failureReason.length() > 512) failureReason = failureReason.substring(0, 512);
+    run.setStatus("CANCELLED");
+    run.setCurrentGate(null);
+    run.setCompletedAt(now);
+    run.setFailureReason(failureReason);
+    runRepository.saveAndFlush(run);
+    return new DecisionResult(run, DecisionKind.CANCEL, null, false);
   }
 
   private BoundEvidence lockBoundEvidence(
@@ -355,8 +485,9 @@ public class PlanGateDecisionService {
             && Objects.equals(
                 outbox.getPayloadSha256(), DecisionEvidenceV1.sha256(outbox.getPayload()));
     if (!valid) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "The durable plan gate and continuation identity do not match.");
+      throw new BrokenPlanGateStateException(
+          BrokenPlanGateStateException.Code.GATE_CONTINUATION_IDENTITY_MISMATCH,
+          "The durable plan gate and continuation identity do not match.");
     }
     try {
       PlanGateContinuation continuation = PlanGateContinuation.parse(outbox.getPayload());
@@ -365,8 +496,10 @@ public class PlanGateDecisionService {
         throw new IllegalArgumentException("unsupported continuation schema");
       }
     } catch (IllegalArgumentException invalid) {
-      throw new ResponseStatusException(
-          HttpStatus.CONFLICT, "The durable plan continuation payload is invalid.", invalid);
+      throw new BrokenPlanGateStateException(
+          BrokenPlanGateStateException.Code.CONTINUATION_PAYLOAD_INVALID,
+          "The durable plan continuation payload is invalid.",
+          invalid);
     }
   }
 
@@ -420,8 +553,7 @@ public class PlanGateDecisionService {
   public record DecisionResult(
       PipelineRun run, DecisionKind decision, DecisionEvidenceV1 evidence, boolean replayed) {}
 
-  private record LockedDecisionRows(
-      PipelineRun run, GateRecord gate, PlanGateResumeOutbox outbox) {}
+  private record LockedGateRows(GateRecord gate, PlanGateResumeOutbox outbox) {}
 
   private record BoundEvidence(
       PlanContractGateReport contractReport, RunRequirementContract requirementContract) {}

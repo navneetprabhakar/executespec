@@ -168,8 +168,58 @@ byte-stable document assembled from decoded exact-revision `SetupAuthority`. Eac
 gets one exact clone block and each projected command gets its own fenced block; Node engine facts
 are retained, while environment, service-order, health, and troubleshooting gaps are stated as
 unknown. The assembled document is safety-scanned and passes the unchanged strict validator.
-Canonicality is required for cache reuse and publication dedupe. The provider call remains for the
-current durable-job dispatch/accounting contract; removing it is a separate job-contract change.
+Canonicality is required for cache reuse and publication dedupe.
+
+**Empty-projection SETUP is zero-provider (2026-08-05).** When
+`ProjectSetupOperationalGrounding.hasEmptyCommandProjection` proves that the valid setup authority
+projects no non-clone command for any linked repository, `generateOnce` skips the provider lane
+entirely: `ProjectDocValidatedGeneration.assembleDeterministicSetup` builds the clone-only
+document, safety-scans it, and runs the unchanged strict validator — no execution context, no
+provider dispatch fence, zero token spend, `inputTokens=outputTokens=0`. This closes the live dev
+defect (project 7238a44d, job ce2751c3): a fresh project with no derivable package.json scripts or
+Makefile targets has an EMPTY projection, so the model (DeepSeek) kept emitting conventional
+`npm test`-style steps, every attempt fail-closed as `SETUP_COMMAND_UNAUTHORIZED`, and the durable
+job repeatedly terminated `NEEDS_CONFIRMATION` even after confirm-retry. Because the fence is never
+marked on this path, a deterministic validation failure is an honest `FAILED` with its exact
+`INVALID_GENERATED_DOCUMENT_<SUBCODE>`, never the uncertain-outcome confirmation barrier. A
+non-empty projection keeps the existing provider→validate→corrective lane byte-identical. The
+provider-dispatch lane itself (messages, bounded execution reference, validated loop) lives in
+`ProjectGeneratedDocAssembly.dispatchProviderGeneration` so `ProjectDocGeneratorService` stays
+under the 600-line new-class gate.
+
+**Multi-repo command attribution (2026-08-05, dev project 7238a44d).** The strict SETUP validator
+attributes each fenced command block to a repository from the text between the PREVIOUS fenced
+block and the block itself (`SetupAuthority.presentedRepository`: last `##`–`######` heading in
+that window, then exactly one linked-repository mention). The deterministic assembly emitted the
+`### <repo>` heading once per repository in `## First-run per repo` and then bare labels
+(`Test:` / `Start:`), so in a multi-repository project every repository's SECOND and later command
+blocks had a context with no heading and no repository mention — attribution `null` →
+`authorizes(null, command)` → `SETUP_COMMAND_UNAUTHORIZED` even though the command was projected
+for that exact repository. Three scripts-bearing repos therefore terminated `NEEDS_CONFIRMATION`
+on every attempt. Producer-side fix in `ProjectSetupOperationalGrounding.appendFirstRun`: every
+command label now names the exact repository (`Test for `<repo>`:`), matching the convention the
+full-stack section already used (`Evidenced start command for `<repo>`:`), so each block's
+immediately-preceding context carries exactly one repository mention. The validator is byte-
+unchanged; wrong-repo and unattributable commands still fail closed
+(`ProjectSetupMultiRepoLiveShapeTest`, which builds the envelopes through the real
+`DeterministicProjectFactEvidence.render`). Canonicality follows `assemble`, so pre-fix cached
+SETUP documents simply read as non-canonical and regenerate.
+
+**Known gap — projection ignores V362 run command evidence.** The
+`#### Safe deterministic command projection` is rendered at codemap-generation time
+(`CodeMapGenerator` → `SpringHttpArchitectureEvidenceRenderer` →
+`DeterministicProjectFactEvidence.renderSetupCommandSources`) and derives commands ONLY from
+exact-revision repository files: `package.json` `scripts` and `Makefile` targets. It never reads
+the V362 `validation_report.build_command` / `test_command` evidence persisted by COMPLETE runs, so
+a project whose runs proved exact build/test commands still shows an empty projection. Wiring it is
+deliberately deferred as a larger change: (a) the renderer is a static exact-revision boundary with
+no repository/report access; (b) V362 evidence is run-scoped (one build/test command per report)
+and attributes to a repository only via workspace working directories, which needs an explicit
+mapping model for multi-repo runs; (c) the `EXECUTESPEC_SETUP_SOURCES_V2` envelope is bound to one
+exact 40-hex source revision, while run evidence binds to the run's own workspace generation
+(V361), so admitting run-derived commands honestly requires a new versioned evidence envelope plus
+validator/producer compatibility, not string injection into the existing revision-bound block. The
+clone-only fallback above keeps SETUP generatable and honest until that envelope exists.
 Text is concatenated across every non-empty
 provider generation because Anthropic may return multiple generations; reading only the first can
 misclassify a paid, complete response as empty. New document rows use `saveAndFlush` before the

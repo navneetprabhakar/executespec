@@ -32,6 +32,22 @@ admission, and goal-doneness consumers must use its product diff rather than wor
 `ValidationReportValidityService` is the single fail-closed predicate for project score aggregates;
 invalid reports are excluded and counted separately.
 
+## Run-DTO truthfulness batch (2026-08-05)
+
+- `ValidationReportDTO` gains additive `modelsUsed` (distinct successful models from the canonical
+  `run_step_usage` ledger via `RunEffectiveRouteService.distinctSuccessfulModelsForRun`,
+  first-seen order) and `routeAttribution` (`LEDGER` | `MIXED` | `UNATTRIBUTED`; null only when
+  the route seam is unavailable to a bare test construction). The legacy `modelUsed` field carries
+  the literal `"MIXED"` when the run's physical attribution is MIXED instead of an arbitrary
+  single model; on single-route or unattributed runs it retains its historical value (the model
+  that generated the report markdown). Scoring is untouched.
+- `GoalDonenessDecision` gains additive `independentProofGapOnly` (boolean, default false via
+  compatibility constructors). `ValidationReportGoalProofEvaluator` sets it true exactly on the
+  UNCERTAIN/STOP_BLOCKED branch where the ONLY remaining run-goal gap is the
+  independent-functional-scope gap (deterministic workspace or legacy execution-verified suite
+  passed, everything else proven). Derived from the gap set, never from reason text, so customer
+  surfaces can render the clean-run advisory distinctly from a defect.
+
 ## Evidence contract
 
 - V361 persists `validation_report.workspace_generation`, the SHA-256 of the canonical Git trees
@@ -211,3 +227,23 @@ invalid reports are excluded and counted separately.
 - `V367__validation_report_runtime_surface.sql` adds nullable `runtime_surface`. New reports bind
   endpoint applicability to the persisted plan surface; null remains historical/unknown and is
   never interpreted as non-HTTP.
+
+## Not-applicable evidence and the sole-independent-gap state (2026-08-05)
+
+`ValidationReportGoalProofEvaluator` skips optional ledger rows whose status is explicitly `N/A` /
+`NOT_APPLICABLE` (V367 runtime-surface applicability — e.g. endpoint coverage on a
+LIBRARY/CLI/STATIC_WEB run) when deriving unproven gaps. Declared-not-measurable evidence is not a
+missing proof; before this, "Endpoint coverage is n/a" demoted every non-HTTP clean run from the
+sole-independent-gap advisory state (`independentProofGapOnly=true`) to a generic UNCERTAIN that
+recommended more provider work. Pinned by
+`ValidationReportGoalProofEvaluatorTest.explicitlyNotApplicableEvidenceDoesNotBlockTheSoleIndependentGapState`.
+
+## Informational disclosures do not gate pipelineResult (2026-08-05)
+
+`SYNTH-HTTP-STACK-UNPROVABLE` (exact-route proof unavailable on a non-Spring stack) stays visible
+in the report/ledger but is excluded from the NEEDS_ATTENTION derivation: a run whose only issue is
+that disclosure remains PASSED. Before this, the note demoted clean Node-stack runs to
+`PARTIAL/VALIDATION_REPORT_LOW_QUALITY` — recreating, one notch softer, the false failure the
+unprovable state was introduced to prevent. `isInformationalDisclosure` (review-issue id) and
+`isInformationalDisclosureDescription` (DTO description, no id available) are the twin filters;
+pinned by `ValidationReportServiceR09Test.httpStackUnprovableDisclosureDoesNot{Gate,Mask}...`.

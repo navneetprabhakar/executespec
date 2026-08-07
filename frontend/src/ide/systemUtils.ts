@@ -95,6 +95,70 @@ export function notificationDotColor(n: api.NotificationItem): string {
   return 'var(--ide-green)';
 }
 
+/**
+ * The state stripe / dot colour maps onto the four row states the CSS knows
+ * about. Kept next to `notificationDotColor` so the two never disagree.
+ */
+export function notificationRowState(n: api.NotificationItem): 'ok' | 'warn' | 'bad' | 'info' {
+  const colour = notificationDotColor(n);
+  if (colour.includes('red')) return 'bad';
+  if (colour.includes('yellow')) return 'warn';
+  if (colour.includes('green')) return 'ok';
+  return 'info';
+}
+
+/**
+ * Compact age label for list rows.
+ *
+ * The lists previously rendered `new Date(ts).toLocaleString()` — `06/08/2026,
+ * 09:20:58`. At 375px that column claimed roughly 45% of the row and every
+ * notification title truncated to about eighteen characters. Seconds are never
+ * decision-relevant in these lists; the exact instant stays reachable through
+ * the row's `title` attribute.
+ *
+ * Returns an empty string for a missing or unparseable timestamp so callers
+ * render nothing rather than `Invalid Date`.
+ */
+export function shortAge(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const secs = Math.floor((now - t) / 1000);
+  if (secs < 0) return 'just now';
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  return new Date(t).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+}
+
+/** The full instant, for the `title` tooltip behind `shortAge`. */
+export function exactTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? '' : new Date(t).toLocaleString();
+}
+
+/** Which audit category a row belongs to — drives its leading stripe colour. */
+export function auditRowState(l: api.AuditLogEntry): 'ok' | 'warn' | 'bad' | 'info' {
+  const action = auditAction(l).toLowerCase();
+  if (action.includes('delete') || action.includes('revoke') || action.includes('suspend')) {
+    return 'bad';
+  }
+  if (action.includes('billing') || action.includes('subscription') || action.includes('payment')) {
+    return 'warn';
+  }
+  if (action.includes('login') || action.includes('logout') || action.includes('oauth')) {
+    return 'info';
+  }
+  return 'ok';
+}
+
 export function notificationTarget(n: api.NotificationItem): string {
   const nAny = n as unknown as {link?: string | null; type?: string; category?: string};
   if (nAny.link) return nAny.link;

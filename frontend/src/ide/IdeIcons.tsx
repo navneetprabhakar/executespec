@@ -1,9 +1,10 @@
 /**
  * IdeIcons — the IDE chrome's icon set. Two families live in this file:
  *
- *  1. Monochrome UI icons (activity bar / nav / toolbar). Hand-authored SVG that
- *     strokes/fills with `currentColor` so they inherit the surrounding text
- *     colour and the activity-bar active/hover states from `ide.css` "just work".
+ *  1. Monochrome UI icons (activity bar / nav / toolbar), drawn from `lucide-react`
+ *     — the app's one icon library. They stroke with `currentColor`, so they inherit
+ *     the surrounding text colour and the active/hover states from `ide.css` for
+ *     free, and they share one 24px grid so a row of them reads as a family.
  *  2. Per-language file icons + folder icons — the REAL multi-colour glyphs from
  *     the Material Icon Theme (the same icons millions of VS Code users see),
  *     surfaced through `fileIcon(path)` / `fileIconFor(path)` / `FolderOpenIcon`
@@ -25,6 +26,28 @@
  * Every component takes the same `IconProps` so callers can size them inline.
  */
 import type {CSSProperties} from 'react';
+import {
+  ArrowLeftRight,
+  Bell,
+  CircleUser,
+  Command,
+  FilePlus2,
+  Files,
+  FolderTree,
+  GitBranch,
+  ListChecks,
+  type LucideIcon,
+  Menu,
+  Monitor,
+  Moon,
+  PanelLeft,
+  PlayCircle,
+  Plus,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sun,
+} from 'lucide-react';
 
 export type IconProps = {
   /** Square px size for both width + height. Defaults to 16. */
@@ -33,232 +56,80 @@ export type IconProps = {
   style?: CSSProperties;
 };
 
-// Shared <svg> wrapper. `tone` decides whether the icon paints with the
-// inherited text colour (monochrome UI icons) or keeps its own language colour.
-function Svg({
-  size = 16,
-  className,
-  style,
-  children,
-  viewBox = '0 0 24 24',
-  title,
-}: IconProps & {
-  children: React.ReactNode;
-  viewBox?: string;
-  title?: string;
-}) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={viewBox}
+// ── Chrome icons ────────────────────────────────────────────────────────────
+//
+// Backed by `lucide-react`, the app's ONE icon library. These were hand-authored
+// SVG paths; each carried its own optical weight and terminal treatment, so a row
+// of them read as near-misses rather than a family. Lucide is drawn on a single
+// 24px grid with consistent joinery.
+//
+// The file-type glyphs BELOW are deliberately NOT lucide: they are the multi-colour
+// Material Icon Theme marks that carry file identity by colour the way VS Code does.
+// Monochrome strokes would lose that. Two families, two jobs, one boundary.
+
+/** One stroke weight for every chrome glyph in the app. */
+export const ICON_STROKE = 1.75;
+
+/**
+ * Wraps a lucide component in the existing `IconProps` contract so no call site
+ * changes: `size` sets both dimensions, `title` promotes the glyph to `role="img"`
+ * with a label, and everything else stays decorative (`aria-hidden`).
+ */
+function chrome(Glyph: LucideIcon): (p: IconProps & {title?: string}) => React.ReactElement {
+  const Wrapped = ({size = 16, className, style, title}: IconProps & {title?: string}) => (
+    <Glyph
+      size={size}
       className={className}
       style={style}
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={1.6}
-      strokeLinecap='round'
-      strokeLinejoin='round'
+      strokeWidth={ICON_STROKE}
       role={title ? 'img' : undefined}
-      aria-hidden={title ? undefined : true}
       aria-label={title}
+      aria-hidden={title ? undefined : true}
       focusable='false'
-    >
-      {children}
-    </svg>
+    />
   );
+  Wrapped.displayName = `chrome(${Glyph.displayName ?? 'icon'})`;
+  return Wrapped;
 }
 
-// All monochrome — stroke = currentColor so they pick up active/hover colour.
-
-/** Workspace / files — stacked document sheets (VS Code "Explorer"). */
-export function WorkspaceIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z' />
-      <path d='M14 3v5h5' />
-    </Svg>
-  );
-}
-
-/** New work — document with a plus badge. */
-export function NewSpecIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8' />
-      <path d='M14 3v5h5' />
-      <path d='M18 2.5v5M15.5 5h5' />
-    </Svg>
-  );
-}
-
-/** Work — play inside a circle. */
-export function RunsIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx='12' cy='12' r='9' />
-      <path d='M10 8.5l5 3.5-5 3.5z' fill='currentColor' stroke='none' />
-    </Svg>
-  );
-}
-
-/** Projects — folder-tree (a folder with branch lines). */
-export function ProjectsIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M3 6a1 1 0 0 1 1-1h4l2 2h6a1 1 0 0 1 1 1v3' />
-      <path d='M3 6v11a1 1 0 0 0 1 1h5' />
-      <path d='M13 14h3M16 14v6M16 17h4' />
-      <circle cx='13' cy='14' r='0.6' fill='currentColor' stroke='none' />
-      <circle cx='20' cy='17' r='0.6' fill='currentColor' stroke='none' />
-    </Svg>
-  );
-}
-
-/** Admin — shield. */
-export function AdminIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z' />
-      <path d='M9 12l2 2 4-4' />
-    </Svg>
-  );
-}
-
-/** Account — user bust. */
-export function AccountIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx='12' cy='8' r='4' />
-      <path d='M4 20c0-3.5 3.5-6 8-6s8 2.5 8 6' />
-    </Svg>
-  );
-}
-
-/** Notifications — bell. */
-export function BellIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9' />
-      <path d='M13.73 21a2 2 0 0 1-3.46 0' />
-    </Svg>
-  );
-}
-
-/** Decisions — inbox tray with a check. */
-export function DecisionsIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M4 5h16v10l-3 4H7l-3-4z' />
-      <path d='M4 15h5l1.5 2h3l1.5-2h5' />
-      <path d='M8.5 10.5l2 2 4-4' />
-    </Svg>
-  );
-}
-
-/** Settings — gear. */
-export function SettingsIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx='12' cy='12' r='3' />
-      <path d='M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1' />
-    </Svg>
-  );
-}
-
-/** Search — magnifier. */
-export function SearchIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx='11' cy='11' r='7' />
-      <path d='M16 16l5 5' />
-    </Svg>
-  );
-}
-
-/** Sidebar toggle — split panel. */
-export function SidebarIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <rect x='3' y='4' width='18' height='16' rx='2' />
-      <path d='M9 4v16' />
-    </Svg>
-  );
-}
-
-/** Plus — bare add affordance (used for the create-project header button). */
-export function PlusIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M12 5v14M5 12h14' />
-    </Svg>
-  );
-}
-
-/** Hamburger — mobile menu trigger. */
-export function MenuIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M4 7h16M4 12h16M4 17h16' />
-    </Svg>
-  );
-}
-
-/** Command palette — terminal-prompt chevron + line. */
-export function CommandIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <rect x='3' y='4' width='18' height='16' rx='2' />
-      <path d='M7 9l3 3-3 3M13 15h4' />
-    </Svg>
-  );
-}
-
-// Theme glyphs — sun / moon / monitor (for the status-bar theme cycle).
-export function SunIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx='12' cy='12' r='4' />
-      <path d='M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19' />
-    </Svg>
-  );
-}
-export function MoonIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z' />
-    </Svg>
-  );
-}
-export function MonitorIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <rect x='3' y='4' width='18' height='12' rx='2' />
-      <path d='M9 20h6M12 16v4' />
-    </Svg>
-  );
-}
-
-/** Swap / switch-UI — two opposed arrows. */
-export function SwapIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d='M7 7h12l-3-3M17 17H5l3 3' />
-    </Svg>
-  );
-}
-
-/** Branch — git branch (status bar). */
-export function BranchIcon(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <circle cx='7' cy='5' r='2.2' />
-      <circle cx='7' cy='19' r='2.2' />
-      <circle cx='17' cy='8' r='2.2' />
-      <path d='M7 7v10M17 10c0 4-4 3-7 4' />
-    </Svg>
-  );
-}
+/** Workspace / files. */
+export const WorkspaceIcon = chrome(Files);
+/** New work. */
+export const NewSpecIcon = chrome(FilePlus2);
+/** Work / runs. */
+export const RunsIcon = chrome(PlayCircle);
+/** Projects. */
+export const ProjectsIcon = chrome(FolderTree);
+/** Operator / admin. */
+export const AdminIcon = chrome(ShieldCheck);
+/** Account. */
+export const AccountIcon = chrome(CircleUser);
+/** Notifications. */
+export const BellIcon = chrome(Bell);
+/** Decisions awaiting a human. */
+export const DecisionsIcon = chrome(ListChecks);
+/** Settings. */
+export const SettingsIcon = chrome(Settings);
+/** Search. */
+export const SearchIcon = chrome(Search);
+/** Sidebar toggle. */
+export const SidebarIcon = chrome(PanelLeft);
+/** Add. */
+export const PlusIcon = chrome(Plus);
+/** Mobile menu. */
+export const MenuIcon = chrome(Menu);
+/** Command palette. */
+export const CommandIcon = chrome(Command);
+/** Light theme. */
+export const SunIcon = chrome(Sun);
+/** Dark theme. */
+export const MoonIcon = chrome(Moon);
+/** System theme. */
+export const MonitorIcon = chrome(Monitor);
+/** Swap / switch. */
+export const SwapIcon = chrome(ArrowLeftRight);
+/** Git branch. */
+export const BranchIcon = chrome(GitBranch);
 
 // Material Icon Theme — file + folder glyphs
 // The REAL Material Icon Theme SVGs (MIT — see the file header for the full

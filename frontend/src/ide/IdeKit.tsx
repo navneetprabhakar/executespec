@@ -1,3 +1,4 @@
+import {ChevronDown, ChevronRight, ChevronUp} from 'lucide-react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {fileIconFor, FolderClosedIcon, FolderOpenIcon} from '@/ide/IdeIcons';
@@ -13,7 +14,7 @@ export function IdeBadge({
   kind,
   children,
 }: {
-  kind: 'ok' | 'warn' | 'bad';
+  kind: 'ok' | 'warn' | 'bad' | 'info';
   children: React.ReactNode;
 }) {
   return <span className={`ide-badge ${kind}`}>{children}</span>;
@@ -225,14 +226,14 @@ export function IdeCodeViewer({
               aria-label='Previous changed hunk'
               onClick={() => jumpHunk(-1)}
             >
-              ↑
+              <ChevronUp size={14} strokeWidth={1.75} aria-hidden='true' />
             </button>
             <button
               className='ide-status btn'
               aria-label='Next changed hunk'
               onClick={() => jumpHunk(1)}
             >
-              ↓
+              <ChevronDown size={14} strokeWidth={1.75} aria-hidden='true' />
             </button>
           </span>
         )}
@@ -477,7 +478,13 @@ export function IdeFileTree({
             style={{paddingLeft: 8 + depth * 12}}
             onClick={() => toggle(n.path)}
           >
-            <span className='ide-tree-chev'>{collapsed.has(n.path) ? '▸' : '▾'}</span>
+            <span className='ide-tree-chev' aria-hidden='true'>
+              {collapsed.has(n.path) ? (
+                <ChevronRight size={12} strokeWidth={1.75} />
+              ) : (
+                <ChevronDown size={12} strokeWidth={1.75} />
+              )}
+            </span>
             <FolderIcon open={!collapsed.has(n.path)} />
             {n.name}
           </button>

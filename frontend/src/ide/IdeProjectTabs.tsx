@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
+import {ChevronDown, ExternalLink, FolderGit2, HardDrive, Plus} from 'lucide-react';
 import * as api from '@/lib/api';
 import type {
   ArchitectureJob,
@@ -20,6 +21,7 @@ import {runTitleFor, repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {
   codeSearchCapabilitiesLabel,
+  codeIndexActionLabel,
   codeIndexRefreshNotice,
   normalizeScmRepoQuery,
   repoSupports,
@@ -29,6 +31,8 @@ import {
   syncBadge,
 } from '@/ide/projectRepoUi';
 import {openPrsFromDashboard} from '@/ide/projectMoreUtils';
+import {PrCiWebhookNotice} from '@/ide/PrCiWebhook';
+import {prCiBadge} from '@/ide/prCiUtils';
 
 type Dash = Record<string, unknown>;
 const numOf = (s: Dash, k: string): number | undefined =>
@@ -82,6 +86,17 @@ const archStatusColor = (status: string): string => {
   if (s === 'GENERATED') return 'var(--ide-green)';
   return 'var(--ide-fg-muted)';
 };
+
+/**
+ * Display-only casing for a run status. Same status, same meaning — it just stops
+ * shouting a 19-character SCREAMING_SNAKE token in a fixed-width status column.
+ * Mirrors the humanisation `agentState.ts` and `projectSettingsUtils.ts` already use.
+ */
+export function runStatusLabel(status?: string | null): string {
+  const s = (status || '').trim();
+  if (!s) return '—';
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase().replace(/_/g, ' ');
+}
 
 const LIVE = new Set(['CLASSIFYING', 'PLANNING', 'EXECUTING', 'AWAITING_APPROVAL', 'RUNNING']);
 const isLive = (s?: string) => LIVE.has((s || '').toUpperCase());
@@ -163,7 +178,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
           ? members.value.length
           : undefined;
       const totalRuns = d
-        ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0)
+        ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.partialRuns ?? 0) + (d.failedRuns ?? 0)
         : undefined;
       const debtTotal =
         debt.status === 'fulfilled'
@@ -227,7 +242,7 @@ export function ProjectTabs({projectId}: {projectId: string}) {
           onClick={() => setMobileOpen((v) => !v)}
         >
           <span>{tabLabel(activeProjectTab)}</span>
-          <span aria-hidden='true'>⌄</span>
+          <ChevronDown size='var(--ide-icon)' strokeWidth={1.75} aria-hidden='true' />
         </button>
         {mobileOpen && (
           <div className='ide-project-mobile-menu' role='menu'>
@@ -278,22 +293,30 @@ export function ProjectTabs({projectId}: {projectId: string}) {
   );
 }
 
-function Metric({label, value}: {label: string; value: string}) {
+/**
+ * A metric tile holds ONE number. The value used to be a 24px literal, so the phone
+ * ramp could not reach it and a two-word value ("81% · review evidence") wrapped at
+ * 24px, dragging every sibling tile taller. The qualifier now drops to a caption
+ * line beneath the number — same words, so the claim is unchanged; it just stops
+ * pretending to be a headline figure.
+ */
+function Metric({label, value, note}: {label: string; value: string; note?: string}) {
   return (
-    <div className='ide-card' style={{flex: 1, minWidth: 130}}>
-      <div style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>{label}</div>
-      <div style={{fontSize: 22, fontWeight: 700, color: 'var(--ide-fg-bright)', marginTop: 4}}>
-        {value}
-      </div>
+    <div className='ide-card ide-project-metric'>
+      <div className='ide-project-metric-label'>{label}</div>
+      <div className='ide-project-metric-value'>{value}</div>
+      {note && <div className='ide-project-metric-note'>{note}</div>}
     </div>
   );
 }
 
+/** State is a 3px leading edge plus a tint — never a whole card repainted red. */
 function Notice({msg, kind}: {msg: string; kind: 'info' | 'bad'}) {
   return (
     <div
-      className='ide-card'
-      style={{marginBottom: 12, color: kind === 'bad' ? 'var(--ide-red)' : 'var(--ide-blue)'}}
+      className={`ide-note ${kind}`}
+      role={kind === 'bad' ? 'alert' : 'status'}
+      style={{marginBottom: 'var(--ide-s3)'}}
     >
       {msg}
     </div>
@@ -376,6 +399,11 @@ export function IdeProjectPulse() {
   // spend is the all-time `totalCostUsd` (relabelled below); merged PRs are counted from the
   // recent-PR list (relabelled "recent", since the list is capped, not a 30-day window).
   const completedRuns = dash ? (numOf(dash, 'completedRuns') ?? 0) : 0;
+  // Run buckets come from the dashboard's display-status counters. `partialRuns` is additive on
+  // the server DTO, so an older backend omits it — render "—" (unknown) rather than a false 0.
+  const failedRuns = dash ? numOf(dash, 'failedRuns') : undefined;
+  const partialRuns = dash ? numOf(dash, 'partialRuns') : undefined;
+  const bucket = (n: number | undefined) => (n != null ? String(n) : '—');
   const rawAvgScore = dash ? numOf(dash, 'avgScore') : undefined;
   const avgScore = completedRuns > 0 ? rawAvgScore : undefined;
   const excludedScoreReports = dash ? (numOf(dash, 'excludedScoreReports') ?? 0) : 0;
@@ -407,9 +435,10 @@ export function IdeProjectPulse() {
           to={`/projects/${projectId}`}
           state={{compose: true}}
           className='ide-btn ghost'
-          style={{textDecoration: 'none', display: 'inline-block'}}
+          style={{textDecoration: 'none'}}
         >
-          ＋ Start work in this project
+          <Plus size='var(--ide-icon)' strokeWidth={1.75} aria-hidden='true' />
+          Start work in this project
         </Link>
       </div>
       {dashFailure ? (
@@ -418,10 +447,14 @@ export function IdeProjectPulse() {
         <IdeLoader label='Loading pulse…' />
       ) : (
         <>
-          <div style={{display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8}}>
+          <div className='ide-project-metrics' style={{marginTop: 'var(--ide-s2)'}}>
+            <Metric label='Runs · completed' value={bucket(completedRuns)} />
+            <Metric label='Runs · partial' value={bucket(partialRuns)} />
+            <Metric label='Runs · failed' value={bucket(failedRuns)} />
             <Metric
               label='Avg score · internal'
-              value={avgScore != null ? `${Math.round(avgScore)}% · review evidence` : '—'}
+              value={avgScore != null ? `${Math.round(avgScore)}%` : '—'}
+              note={avgScore != null ? 'review evidence' : undefined}
             />
             {isSuperAdmin && (
               <Metric
@@ -450,20 +483,18 @@ export function IdeProjectPulse() {
                 const wh = (r as {webhookInstalled?: boolean}).webhookInstalled;
                 const open = numOf(r, 'openPrCount') ?? numOf(r, 'openPrs') ?? 0;
                 return (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      gap: 10,
-                      alignItems: 'center',
-                      padding: '10px 16px',
-                      borderBottom: i < health.length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    }}
-                  >
-                    <span style={{flex: 1, fontWeight: 500}}>{repoDisplayName(r)}</span>
-                    <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
-                    <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook' : 'no webhook'}</IdeBadge>
-                    <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>{open} open PR</span>
+                  <div key={i} className='ide-project-row'>
+                    {/* Fixed leading status cell so repo names start on one x. */}
+                    <span className='ide-project-statuscol'>
+                      <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
+                    </span>
+                    <span className='ide-project-row-body'>
+                      <span className='ide-project-row-title'>{repoDisplayName(r)}</span>
+                    </span>
+                    <span className='ide-project-evidencecol'>
+                      <IdeBadge kind={wh ? 'ok' : 'warn'}>{wh ? 'webhook' : 'no webhook'}</IdeBadge>
+                      <span>{open} open PR</span>
+                    </span>
                   </div>
                 );
               })}
@@ -481,15 +512,19 @@ export function IdeProjectPulse() {
                   const add = numOf(pr, 'additions');
                   const rem = numOf(pr, 'deletions');
                   const url = (pr.prUrl as string) || (pr.htmlUrl as string) || '';
+                  // Additive V186+ CI fields; absent on older servers (null-safe).
+                  const ciFields = pr as Partial<import('@/types/project').PrSummary>;
+                  const ci = prCiBadge(ciFields);
                   return (
                     <div key={`${repo}-${num}-${i}`} className='ide-card'>
                       <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
                         <IdeBadge kind={statusKind(status)}>PR · {status}</IdeBadge>
+                        {ci && <IdeBadge kind={ci.kind}>{ci.label}</IdeBadge>}
                         <span style={{flex: 1}} />
                         {(add != null || rem != null) && (
                           <span
                             className='ide-mono'
-                            style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                            style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                           >
                             {add != null ? `+${add}` : ''} {rem != null ? `−${rem}` : ''}
                           </span>
@@ -508,14 +543,15 @@ export function IdeProjectPulse() {
                       </div>
                       <div
                         className='ide-mono'
-                        style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                        style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                       >
                         {repo}#{String(num ?? '')}
                       </div>
+                      <PrCiWebhookNotice pr={ciFields} onInstalled={loadDash} />
                       {url && (
                         <button
                           className='ide-btn ghost'
-                          style={{marginTop: 10, padding: '4px 10px'}}
+                          style={{marginTop: 'var(--ide-s3)'}}
                           onClick={() => window.open(url, '_blank', 'noopener')}
                         >
                           Open on GitHub
@@ -549,7 +585,7 @@ export function IdeProjectPulse() {
             <div className='ide-empty'>No work yet in this project.</div>
           ) : (
             <div className='ide-card' style={{padding: 0}}>
-              {recent.slice(0, 5).map((r, i) => {
+              {recent.slice(0, 5).map((r) => {
                 const sc = scoreOf(r);
                 const cost = isSuperAdmin ? costOf(r) : undefined;
                 const live = isLive(r.status);
@@ -557,46 +593,29 @@ export function IdeProjectPulse() {
                   <Link
                     key={r.runId}
                     to={live ? `/live/${r.runId}` : `/result/${r.runId}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '11px 16px',
-                      textDecoration: 'none',
-                      color: 'var(--ide-fg)',
-                      borderBottom:
-                        i < recent.slice(0, 5).length - 1 ? '1px solid var(--ide-border)' : 'none',
-                    }}
+                    className='ide-project-row'
+                    style={{textDecoration: 'none', color: 'var(--ide-fg)'}}
                   >
-                    <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
-                    <span
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {runTitleFor(r)}
+                    {/* Fixed leading status cell — COMPLETE / PARTIAL / FAILED /
+                        AWAITING_APPROVAL are different widths, and their content
+                        width used to set where each title began. */}
+                    <span className='ide-project-statuscol'>
+                      <IdeBadge kind={statusKind(r.status)}>{runStatusLabel(r.status)}</IdeBadge>
+                    </span>
+                    <span className='ide-project-row-body'>
+                      <span className='ide-project-row-title'>{runTitleFor(r)}</span>
                     </span>
                     {/* C5 — score badge (verdict-banded) + muted cost, null-guarded. */}
-                    {typeof sc === 'number' ? (
-                      <ScoreBadge score={sc} compact />
-                    ) : (
-                      <span style={{fontSize: 12, color: 'var(--ide-fg-muted)', flexShrink: 0}}>
-                        {live ? 'live' : '—'}
-                      </span>
-                    )}
-                    {typeof cost === 'number' && cost > 0 && (
-                      <span
-                        className='ide-mono'
-                        style={{fontSize: 11, color: 'var(--ide-fg-muted)', flexShrink: 0}}
-                      >
-                        ${cost.toFixed(4)}
-                      </span>
-                    )}
+                    <span className='ide-project-evidencecol'>
+                      {typeof sc === 'number' ? (
+                        <ScoreBadge score={sc} compact />
+                      ) : (
+                        <span>{live ? 'live' : '—'}</span>
+                      )}
+                      {typeof cost === 'number' && cost > 0 && (
+                        <span className='ide-mono'>${cost.toFixed(4)}</span>
+                      )}
+                    </span>
                   </Link>
                 );
               })}
@@ -671,8 +690,8 @@ function RunDetailPanel({
 
   return (
     <div className='ide-card'>
-      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-        <div style={{fontSize: 28, fontWeight: 800, color: 'var(--ide-fg-bright)'}}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 'var(--ide-s3)'}}>
+        <div className='ide-project-metric-value'>
           {score != null ? (
             <ScoreBadge score={score} verificationLedger={report?.verificationLedger} />
           ) : (
@@ -681,10 +700,7 @@ function RunDetailPanel({
         </div>
         <div>
           <IdeBadge kind={statusKind(run.status)}>{verdict}</IdeBadge>
-          <div
-            className='ide-mono'
-            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
-          >
+          <div className='ide-mono ide-project-row-sub' style={{marginTop: 'var(--ide-s1)'}}>
             R-{run.runId.slice(0, 6)} · {run.status?.toLowerCase() || '—'}
           </div>
         </div>
@@ -720,10 +736,8 @@ function RunDetailPanel({
 
       {tasks.length > 0 && (
         <>
-          <div className='ide-h2' style={{fontSize: 13}}>
-            Tasks
-          </div>
-          <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
+          <div className='ide-h2'>Tasks</div>
+          <div style={{display: 'flex', flexDirection: 'column', gap: 'var(--ide-s1)'}}>
             {tasks.slice(0, 8).map((t, i) => {
               const ts = (t.status || '').toUpperCase();
               const k =
@@ -737,18 +751,14 @@ function RunDetailPanel({
               return (
                 <div
                   key={t.taskId || i}
-                  style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5}}
+                  style={{display: 'flex', alignItems: 'center', gap: 'var(--ide-s2)'}}
                 >
-                  <IdeBadge kind={k}>{ts || 'TODO'}</IdeBadge>
-                  <span
-                    style={{
-                      flex: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {t.title || `Task ${i + 1}`}
+                  {/* Same fixed status column as every other list on this surface. */}
+                  <span className='ide-project-statuscol'>
+                    <IdeBadge kind={k}>{ts ? runStatusLabel(ts) : 'To do'}</IdeBadge>
+                  </span>
+                  <span className='ide-project-row-body'>
+                    <span className='ide-project-row-title'>{t.title || `Task ${i + 1}`}</span>
                   </span>
                 </div>
               );
@@ -761,13 +771,12 @@ function RunDetailPanel({
         <Link
           to={`/result/${run.runId}`}
           className='ide-btn ghost'
-          style={{textDecoration: 'none', padding: '5px 12px'}}
+          style={{textDecoration: 'none'}}
         >
           Open full page
         </Link>
         <button
           className='ide-btn ghost'
-          style={{padding: '5px 12px'}}
           disabled={downloadBusy || filesGenerated === 0}
           title={
             filesGenerated === 0
@@ -779,18 +788,13 @@ function RunDetailPanel({
           {downloadBusy ? 'Downloading…' : 'Download code'}
         </button>
         {isLive(run.status) && (
-          <Link
-            to={`/live/${run.runId}`}
-            className='ide-btn'
-            style={{textDecoration: 'none', padding: '5px 12px'}}
-          >
+          <Link to={`/live/${run.runId}`} className='ide-btn' style={{textDecoration: 'none'}}>
             Watch live
           </Link>
         )}
         {prUrl && (
           <button
             className='ide-btn ghost'
-            style={{padding: '5px 12px'}}
             onClick={() => window.open(prUrl, '_blank', 'noopener')}
           >
             Open PR on GitHub
@@ -1066,7 +1070,11 @@ function IdeProjectRunsInner() {
           ) : (
             <div
               // C9.3 — stacks to one column under 600px (ide-stack-mobile in ide.css).
-              className='ide-stack-mobile'
+              // `ide-project-run-split` re-floors that phone track at minmax(0,1fr):
+              // the shared rule's `1fr` keeps an auto (min-content) minimum, and a
+              // non-wrapping run title pushed the track to 731px inside a 345px grid,
+              // which is what made this tab scroll sideways at 375px.
+              className='ide-stack-mobile ide-project-run-split'
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(280px, 1fr) minmax(0, 1.2fr)',
@@ -1084,63 +1092,37 @@ function IdeProjectRunsInner() {
                     <button
                       key={r.runId}
                       onClick={() => setSelectedRunId(r.runId)}
+                      // Selection is a 3px leading edge plus a tint, not a repaint.
+                      className={`ide-project-row${selected ? ' is-selected' : ''}`}
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
                         width: '100%',
                         textAlign: 'left',
-                        padding: '11px 14px',
-                        background: selected ? 'var(--ide-bg-sidebar)' : 'transparent',
+                        background: 'transparent',
                         border: 'none',
-                        borderLeft: `2px solid ${selected ? 'var(--ide-accent)' : 'transparent'}`,
-                        color: 'var(--ide-fg)',
-                        cursor: 'pointer',
                         borderBottom:
                           i < filtered.length - 1 ? '1px solid var(--ide-border)' : 'none',
+                        color: 'var(--ide-fg)',
+                        cursor: 'pointer',
                       }}
                     >
-                      <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
-                      <span style={{flex: 1, minWidth: 0}}>
-                        <span
-                          style={{
-                            display: 'block',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            fontWeight: 500,
-                          }}
-                        >
-                          {runTitleFor(r)}
-                        </span>
-                        <span
-                          className='ide-mono'
-                          style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
-                        >
+                      <span className='ide-project-statuscol'>
+                        <IdeBadge kind={statusKind(r.status)}>{runStatusLabel(r.status)}</IdeBadge>
+                      </span>
+                      <span className='ide-project-row-body'>
+                        <span className='ide-project-row-title'>{runTitleFor(r)}</span>
+                        <span className='ide-project-row-sub ide-mono'>
                           R-{r.runId.slice(0, 6)} · {relTime(r.startedAt)}
                         </span>
                       </span>
                       {/* C5 — score badge (verdict-banded) + muted cost, null-guarded. */}
-                      <span
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-end',
-                          gap: 2,
-                          fontSize: 12,
-                          color: 'var(--ide-fg-muted)',
-                          flexShrink: 0,
-                        }}
-                      >
+                      <span className='ide-project-evidencecol'>
                         {typeof sc === 'number' ? (
                           <ScoreBadge score={sc} compact />
                         ) : live ? (
                           <span>live</span>
                         ) : null}
                         {typeof cost === 'number' && cost > 0 && (
-                          <span className='ide-mono' style={{fontSize: 11}}>
-                            ${cost.toFixed(4)}
-                          </span>
+                          <span className='ide-mono'>${cost.toFixed(4)}</span>
                         )}
                       </span>
                     </button>
@@ -1216,7 +1198,7 @@ function IdeProjectRunsInner() {
                       <IdeBadge kind={statusKind(status)}>PR · {status}</IdeBadge>
                       <span style={{flex: 1}} />
                       {!!(pr.mergedAt || pr.openedAt) && (
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                           {relTime(String(pr.mergedAt || pr.openedAt))}
                         </span>
                       )}
@@ -1234,7 +1216,7 @@ function IdeProjectRunsInner() {
                     </div>
                     <div
                       className='ide-mono'
-                      style={{fontSize: 11.5, color: 'var(--ide-fg-muted)', marginTop: 4}}
+                      style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
                     >
                       {repo}#{num}
                     </div>
@@ -1250,13 +1232,13 @@ function IdeProjectRunsInner() {
                       {add != null && (
                         <span
                           className='ide-mono'
-                          style={{fontSize: 11, color: 'var(--ide-green)'}}
+                          style={{fontSize: 12, color: 'var(--ide-green)'}}
                         >
                           +{add}
                         </span>
                       )}
                       {rem != null && (
-                        <span className='ide-mono' style={{fontSize: 11, color: 'var(--ide-red)'}}>
+                        <span className='ide-mono' style={{fontSize: 12, color: 'var(--ide-red)'}}>
                           −{rem}
                         </span>
                       )}
@@ -1269,7 +1251,7 @@ function IdeProjectRunsInner() {
                       )}
                       {verdict && <IdeBadge kind='warn'>{verdict}</IdeBadge>}
                       {comments > 0 && (
-                        <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                        <span style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}>
                           {comments} comment{comments === 1 ? '' : 's'}
                         </span>
                       )}
@@ -1278,7 +1260,6 @@ function IdeProjectRunsInner() {
                       {url && (
                         <button
                           className='ide-btn ghost'
-                          style={{padding: '4px 10px'}}
                           onClick={() => window.open(url, '_blank', 'noopener')}
                         >
                           Open on GitHub
@@ -1287,7 +1268,6 @@ function IdeProjectRunsInner() {
                       {repo && num > 0 && linkedRepoId && (
                         <button
                           className='ide-btn ghost'
-                          style={{padding: '4px 10px'}}
                           onClick={() => setReviewOpen((k) => (k === key ? null : key))}
                         >
                           {reviewOpen === key ? 'Hide AI review' : 'Review with AI'}
@@ -1295,7 +1275,6 @@ function IdeProjectRunsInner() {
                       )}
                       <button
                         className='ide-btn ghost'
-                        style={{padding: '4px 10px'}}
                         disabled={prBusy === key || !linkedRepoId}
                         // C8 — credit-spending dispatch goes through a confirm modal.
                         onClick={() => setAutofixFor({prNumber: num, repo, repoId: linkedRepoId})}
@@ -1558,13 +1537,14 @@ export function IdeProjectRepos() {
   return (
     <div className='ide-pane'>
       <ProjectTabs projectId={projectId} />
-      <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
+      <div className='ide-project-toolbar'>
         <h1 className='ide-h1' style={{margin: 0}}>
           Repos
         </h1>
-        <span style={{flex: 1}} />
+        <span className='ide-project-toolbar-spacer' />
         <button className='ide-btn' onClick={openLinkPanel}>
-          + Link repo
+          <Plus size='var(--ide-icon)' strokeWidth={1.75} aria-hidden='true' />
+          Link repo
         </button>
       </div>
 
@@ -1629,15 +1609,14 @@ export function IdeProjectRepos() {
                     gap: 10,
                     padding: '8px 12px',
                     background: 'var(--ide-bg-sidebar)',
-                    borderRadius: 6,
+                    borderRadius: 'var(--ide-r-control)',
                   }}
                 >
-                  <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
+                  <span className='ide-mono' style={{flex: 1, fontSize: 12}}>
                     {attachableTypedSlug}
                   </span>
                   <button
                     className='ide-btn ghost'
-                    style={{padding: '3px 12px'}}
                     disabled={isBusy(`link${attachableTypedSlug}`)}
                     onClick={() =>
                       link({
@@ -1670,15 +1649,14 @@ export function IdeProjectRepos() {
                       gap: 10,
                       padding: '8px 12px',
                       background: 'var(--ide-bg-sidebar)',
-                      borderRadius: 6,
+                      borderRadius: 'var(--ide-r-control)',
                     }}
                   >
-                    <span className='ide-mono' style={{flex: 1, fontSize: 12.5}}>
+                    <span className='ide-mono' style={{flex: 1, fontSize: 12}}>
                       {r.fullName}
                     </span>
                     <button
                       className='ide-btn ghost'
-                      style={{padding: '3px 12px'}}
                       disabled={linked || isBusy(`link${r.fullName}`)}
                       onClick={() => link(r)}
                     >
@@ -1759,14 +1737,24 @@ export function IdeProjectRepos() {
               (h as {architectureStatus?: string}).architectureStatus ||
               ((h as {isStale?: boolean}).isStale === true ? 'STALE' : undefined);
             return (
-              <div key={id} className='ide-card'>
-                <div style={{fontWeight: 600, color: 'var(--ide-fg-bright)', marginBottom: 8}}>
-                  {isLocal ? '⌂' : '▤'} {name}
+              <div key={id} className='ide-card ide-project-kv-stack'>
+                <div className='ide-project-cardhead'>
+                  <span className='ide-project-cardicon' aria-hidden='true'>
+                    {isLocal ? (
+                      <HardDrive size='var(--ide-icon)' strokeWidth={1.75} />
+                    ) : (
+                      <FolderGit2 size='var(--ide-icon)' strokeWidth={1.75} />
+                    )}
+                  </span>
+                  <span className='ide-project-cardhead-name' title={name}>
+                    {name}
+                  </span>
                 </div>
-                <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
+                <div className='ide-project-chips'>
                   {isLocal ? (
                     <>
-                      <IdeBadge kind='ok'>Local folder</IdeBadge>
+                      {/* Source identity, not a measured state — stays neutral. */}
+                      <IdeBadge kind='info'>Local folder</IdeBadge>
                       <IdeBadge kind={localOnline ? 'ok' : 'warn'}>
                         {localOnline ? 'connector online' : 'connector offline'}
                       </IdeBadge>
@@ -1779,7 +1767,10 @@ export function IdeProjectRepos() {
                     </>
                   ) : (
                     <>
-                      <IdeBadge kind='ok'>
+                      {/* Which SCM hosts this repo is identity, not health. It used to
+                          be green, so a card with one real problem still read as a
+                          wall of six equally loud pass badges. */}
+                      <IdeBadge kind='info'>
                         {scmProvider === 'BITBUCKET' ? 'Bitbucket Cloud' : 'GitHub'}
                       </IdeBadge>
                       <IdeBadge kind={sync.kind}>{sync.label}</IdeBadge>
@@ -1800,11 +1791,14 @@ export function IdeProjectRepos() {
                                 : 'setup optional'}
                         </IdeBadge>
                       )}
+                      {/* The tick was redundant with the badge's own green, and its
+                          glyph box made this one pill taller than every neighbour. */}
                       {canWebhook && (
                         <IdeBadge kind={wh ? 'ok' : 'warn'}>
-                          {wh ? 'webhook ✓' : 'no webhook'}
+                          {wh ? 'webhook' : 'no webhook'}
                         </IdeBadge>
                       )}
+                      {/* A PR count is a fact, not a pass — neutral. */}
                       {canPrLink && fullName.includes('/') ? (
                         <a
                           href={`https://github.com/${fullName}/pulls`}
@@ -1813,10 +1807,13 @@ export function IdeProjectRepos() {
                           style={{textDecoration: 'none'}}
                           title='View pull requests on GitHub'
                         >
-                          <IdeBadge kind='ok'>{open} open PR ↗</IdeBadge>
+                          <IdeBadge kind='info'>
+                            {open} open PR
+                            <ExternalLink size='0.85em' strokeWidth={1.75} aria-hidden='true' />
+                          </IdeBadge>
                         </a>
                       ) : canPrLink ? (
-                        <IdeBadge kind='ok'>{open} open PR</IdeBadge>
+                        <IdeBadge kind='info'>{open} open PR</IdeBadge>
                       ) : null}
                     </>
                   )}
@@ -1889,7 +1886,7 @@ export function IdeProjectRepos() {
                     <Link
                       to={`/projects/${projectId}/architecture`}
                       className='ide-btn ghost'
-                      style={{padding: '4px 10px', textDecoration: 'none'}}
+                      style={{textDecoration: 'none'}}
                     >
                       View architecture
                     </Link>
@@ -1897,7 +1894,6 @@ export function IdeProjectRepos() {
                   {!isLocal && canSync && (
                     <button
                       className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
                       disabled={repoBusy(id)}
                       title='Fast metadata refresh (stack, HEAD SHA) — no code regeneration'
                       onClick={() => act(`sync${id}`, () => api.syncRepo(id), 'Synced.')}
@@ -1908,7 +1904,6 @@ export function IdeProjectRepos() {
                   {!isLocal && canArchitecture && (
                     <button
                       className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
                       disabled={repoBusy(id)}
                       title='Regenerate this repo codemap + architecture (LLM call — can take a minute)'
                       onClick={() =>
@@ -1928,9 +1923,8 @@ export function IdeProjectRepos() {
                   {!isLocal && semanticIndex?.status !== 'READY' && (
                     <button
                       className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
                       disabled={repoBusy(id) || semanticIndex?.status === 'INDEXING'}
-                      title='Resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
+                      title='Build or resume the source-SHA-bound semantic chunk index. Exact ripgrep search remains available.'
                       onClick={() =>
                         act(
                           `index${id}`,
@@ -1940,13 +1934,12 @@ export function IdeProjectRepos() {
                         )
                       }
                     >
-                      {isBusy(`index${id}`) ? '…' : 'Resume semantic index'}
+                      {isBusy(`index${id}`) ? '…' : codeIndexActionLabel(semanticIndex)}
                     </button>
                   )}
                   {!isLocal && canWebhook && !wh && (
                     <button
                       className='ide-btn ghost'
-                      style={{padding: '4px 10px'}}
                       disabled={repoBusy(id)}
                       title='Installs a pull_request webhook so PR status + CI results update automatically'
                       onClick={() =>
@@ -1956,9 +1949,10 @@ export function IdeProjectRepos() {
                       {isBusy(`wh${id}`) ? '…' : 'Install webhook'}
                     </button>
                   )}
+                  {/* Destructive is a ghost that reddens on hover, not a permanently
+                      red label competing with the rest of the action row. */}
                   <button
-                    className='ide-btn ghost'
-                    style={{padding: '4px 10px', color: 'var(--ide-red)'}}
+                    className='ide-btn danger'
                     disabled={repoBusy(id)}
                     onClick={() => confirmUnlink(id, name)}
                   >

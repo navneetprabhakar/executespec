@@ -22,6 +22,15 @@ import lombok.RequiredArgsConstructor;
  * <p>This intentionally accepts only explicit {@code METHOD /path} requirements. Ambiguous prose
  * remains advisory rather than being guessed into a release-blocking contract. Non-HTTP plans and
  * HTTP plans with no exact route requirement are not applicable.
+ *
+ * <p>The "actual" surface comes exclusively from {@link SpringHttpSurfaceExtractor}, whose evidence
+ * class covers Spring MVC mapping annotations only. Per the V367 applicability principle, a
+ * deterministic {@code missing} / {@code presentForbidden} / {@code unprovenMethodRejections}
+ * verdict may be claimed only when at least one inspected repository root actually contains a
+ * Spring-recognizable HTTP source. When exact routes are required but NO inspected root has such a
+ * source (Node/Express, FastAPI, Go, plain {@code http.createServer}, …), the verification is
+ * {@link Verification#unprovableForStack()}: an honest "exact-route proof is unavailable for this
+ * stack" state that must not terminate the run as a failure.
  */
 @Component
 @RequiredArgsConstructor
@@ -37,12 +46,21 @@ class DeterministicHttpRequirementVerifier {
       return Verification.notApplicable();
     }
     Set<RouteKey> actual = new LinkedHashSet<>();
+    boolean springSurfacePresent = false;
     if (repositoryRoots != null) {
-      repositoryRoots.stream()
-          .filter(java.util.Objects::nonNull)
-          .map(extractor::extract)
-          .flatMap(snapshot -> snapshot.keys().stream())
-          .forEach(actual::add);
+      for (Path root : repositoryRoots) {
+        if (root == null) continue;
+        SpringHttpSurfaceExtractor.WorkspaceExtraction extraction =
+            extractor.extractWithApplicability(root);
+        springSurfacePresent |= extraction.springMvcMappingSourcePresent();
+        actual.addAll(extraction.snapshot().keys());
+      }
+    }
+    if (!springSurfacePresent) {
+      // No inspected root contains a Spring MVC mapping source, so this extractor cannot prove OR
+      // refute the exact-route contract. Fail-closed "missing by construction" would be a false
+      // failure for every non-Spring HTTP deliverable; return the honest unprovable state instead.
+      return Verification.unprovableForStack(constraints.required(), constraints.forbidden());
     }
     List<RouteKey> missing =
         constraints.required().stream()
@@ -64,6 +82,7 @@ class DeterministicHttpRequirementVerifier {
             .toList();
     return new Verification(
         true,
+        false,
         constraints.required(),
         constraints.forbidden(),
         Set.copyOf(actual),
@@ -76,22 +95,36 @@ class DeterministicHttpRequirementVerifier {
     return verify(plan, originalRequest, List.of(workspaceRoot));
   }
 
-  void assertSatisfied(Plan plan, String originalRequest, Path workspaceRoot) {
-    assertSatisfied(verify(plan, originalRequest, workspaceRoot));
+  /**
+   * Verifies and throws on a deterministic violation. Returns the verification so callers can
+   * record an {@link Verification#unprovableForStack()} outcome as evidence (a note that
+   * exact-route proof is unavailable for this stack) rather than a failure.
+   */
+  Verification assertSatisfied(Plan plan, String originalRequest, Path workspaceRoot) {
+    Verification verification = verify(plan, originalRequest, workspaceRoot);
+    assertSatisfied(verification);
+    return verification;
   }
 
-  void assertSatisfied(
+  Verification assertSatisfied(
       Plan plan, String originalRequest, CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    assertSatisfied(
+    Verification verification =
         verify(
             plan,
             originalRequest,
             checkpoint.repositories().stream()
                 .map(CorrectionWorkspaceTransaction.RepositoryCheckpoint::repository)
-                .toList()));
+                .toList());
+    assertSatisfied(verification);
+    return verification;
   }
 
   private static void assertSatisfied(Verification verification) {
+    if (verification.unprovableForStack()) {
+      // No Spring-recognizable HTTP source exists in any inspected root: this evidence class
+      // cannot decide the contract, so it must not fail the run. Callers record the state.
+      return;
+    }
     if (!verification.applicable() || verification.missing().isEmpty()) {
       if (!verification.presentForbidden().isEmpty()) {
         throw new IllegalStateException(
@@ -169,8 +202,16 @@ class DeterministicHttpRequirementVerifier {
         .orElse("(unknown)");
   }
 
+  /**
+   * @param applicable exact route constraints exist and the plan's runtime surface is HTTP
+   * @param unprovableForStack constraints exist, but no inspected repository root contains a
+   *     Spring-recognizable HTTP source, so this evidence class can neither prove nor refute them.
+   *     In this state the verdict lists are deliberately empty and {@code assertSatisfied} never
+   *     throws; callers must surface the state as evidence, not failure.
+   */
   record Verification(
       boolean applicable,
+      boolean unprovableForStack,
       Set<RouteKey> required,
       Set<RouteKey> forbidden,
       Set<RouteKey> actual,
@@ -188,7 +229,13 @@ class DeterministicHttpRequirementVerifier {
     }
 
     static Verification notApplicable() {
-      return new Verification(false, Set.of(), Set.of(), Set.of(), List.of(), List.of(), List.of());
+      return new Verification(
+          false, false, Set.of(), Set.of(), Set.of(), List.of(), List.of(), List.of());
+    }
+
+    static Verification unprovableForStack(Set<RouteKey> required, Set<RouteKey> forbidden) {
+      return new Verification(
+          true, true, required, forbidden, Set.of(), List.of(), List.of(), List.of());
     }
   }
 

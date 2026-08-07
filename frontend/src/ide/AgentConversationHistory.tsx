@@ -1,3 +1,5 @@
+import {CloseIcon} from '@/ide/agentIcons';
+
 export function ConversationHistoryRow({
   title,
   meta,
@@ -33,7 +35,7 @@ export function ConversationHistoryRow({
         disabled={archived || !!closeDisabledReason}
         onClick={onClose}
       >
-        ×
+        <CloseIcon size={14} />
       </button>
     </div>
   );
@@ -53,7 +55,16 @@ export function ConversationHistoryPager({
   if (!hasEarlier && !error) return null;
   return (
     <div className='agent-load-earlier'>
-      {error && <span role='alert'>{error}</span>}
+      {/* `.agent-load-earlier` paints its children with `var(--ide-danger)`, a
+          token that does not exist in this palette — so a paging failure inherited
+          the surrounding colour and read as ordinary text. The failure carries its
+          own stripe instead of relying on an undefined variable, and the container
+          is no longer tinted when there is nothing wrong. */}
+      {error && (
+        <span className='ide-note bad gf-inline-note' role='alert'>
+          {error}
+        </span>
+      )}
       <button type='button' className='ide-btn ghost' disabled={loading} onClick={onLoad}>
         {loading ? 'Loading earlier messages…' : 'Load earlier messages'}
       </button>

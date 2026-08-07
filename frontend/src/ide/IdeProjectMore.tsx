@@ -1,3 +1,4 @@
+import {Check, Circle} from 'lucide-react';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
@@ -415,12 +416,7 @@ export function IdeProjectChat() {
           >
             Compact
           </button>
-          <button
-            className='ide-btn ghost'
-            onClick={() => setConfirmClear(true)}
-            disabled={gated}
-            style={{color: 'var(--ide-red)'}}
-          >
+          <button className='ide-btn danger' onClick={() => setConfirmClear(true)} disabled={gated}>
             Clear
           </button>
         </div>
@@ -448,22 +444,11 @@ export function IdeProjectChat() {
           <Banner err={err} />
           <div className='ide-project-chat-scroll'>
             {gated ? (
-              <div className='ide-card' style={{borderColor: 'var(--ide-blue)'}}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: 'var(--ide-blue)',
-                    letterSpacing: '0.14em',
-                    textTransform: 'uppercase',
-                    marginBottom: 6,
-                  }}
-                >
-                  Project chat is a TEAM+ feature
-                </div>
-                <div style={{fontSize: 13, lineHeight: 1.5}}>
-                  The agent uses project context, code maps, and linked docs to answer questions.
-                  This is gated to TEAM and ENTERPRISE plans.{' '}
+              <div className='ide-note info'>
+                <strong>Project chat is a TEAM+ feature</strong>
+                <div>
+                  The agent answers from project context, code maps, and linked docs. Gated to TEAM
+                  and ENTERPRISE plans.{' '}
                   <a href='/plans' style={{color: 'var(--ide-accent)'}}>
                     Compare plans →
                   </a>
@@ -624,7 +609,7 @@ export function IdeProjectChat() {
               >
                 Prepare code review
               </button>
-              <div className='muted' style={{fontSize: 11}}>
+              <div className='muted' style={{fontSize: 12}}>
                 Semantic search, subagents, and plan mutations are not confirmable from project
                 chat.
               </div>
@@ -1171,25 +1156,28 @@ export function IdeProjectCode() {
               No code issues found yet. Start a review scan to surface risks.
             </div>
           ) : (
-            debtCats.map((c) => (
-              <div key={c.name} className='ide-card' style={{marginBottom: 8}}>
-                <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-                  <span style={{flex: 1, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
-                    {c.name}
+            // One card, one row per category — an accent button on every row is N
+            // competing commit actions, so the row action is a ghost.
+            <div className='ide-card' style={{padding: 0}}>
+              {debtCats.map((c) => (
+                <div key={c.name} className='ide-project-row'>
+                  <span className='ide-project-statuscol'>
+                    <IdeBadge kind='warn'>{c.count}</IdeBadge>
                   </span>
-                  <IdeBadge kind='warn'>{c.count}</IdeBadge>
+                  <span className='ide-project-row-body'>
+                    <span className='ide-project-row-title'>{c.name}</span>
+                  </span>
                   <button
-                    className='ide-btn'
-                    style={{padding: '4px 10px'}}
+                    className='ide-btn ghost'
                     disabled={busy === `fix-${c.name}`}
                     // C8 — credit-spending dispatch goes through a confirm modal.
                     onClick={() => setFixFor({category: c.name, count: c.count})}
                   >
-                    {busy === `fix-${c.name}` ? 'Starting…' : `Start fix work · ${c.count}`}
+                    {busy === `fix-${c.name}` ? 'Starting…' : 'Start fix work'}
                   </button>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -1244,7 +1232,7 @@ export function IdeProjectCode() {
                       </div>
                       <div
                         className='ide-mono'
-                        style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}
+                        style={{fontSize: 12, color: 'var(--ide-fg-muted)'}}
                       >
                         {(r.currentOriginSha || '').slice(0, 7) || '—'}{' '}
                         {drift ? '· stale vs origin' : syncKnown ? '· in sync' : '· status unknown'}
@@ -1258,23 +1246,14 @@ export function IdeProjectCode() {
                       <Link
                         to={`/projects/${projectId}/repos`}
                         className='ide-btn ghost'
-                        style={{padding: '3px 10px', fontSize: 12, textDecoration: 'none'}}
+                        style={{textDecoration: 'none'}}
                         title='Open Repos to sync metadata or refresh the system map'
                       >
                         Sync / Refresh →
                       </Link>
                     )}
                   </div>
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 10,
-                      paddingTop: 10,
-                      borderTop: '1px solid var(--ide-border)',
-                      fontSize: 12.5,
-                    }}
-                  >
+                  <div className='ide-project-cardstats'>
                     <div>
                       <MetaLabel>Branch</MetaLabel>
                       <div className='ide-mono' style={{fontWeight: 600}}>
@@ -1298,7 +1277,11 @@ export function IdeProjectCode() {
                           color: r.webhookInstalled ? 'var(--ide-green)' : 'var(--ide-red)',
                         }}
                       >
-                        {r.webhookInstalled ? '✓' : '○'}
+                        {r.webhookInstalled ? (
+                          <Check size={14} strokeWidth={2.25} aria-label='Webhook installed' />
+                        ) : (
+                          <Circle size={14} strokeWidth={1.75} aria-label='Webhook not installed' />
+                        )}
                       </div>
                     </div>
                     <div>
@@ -1322,20 +1305,11 @@ export function IdeProjectCode() {
             <IdeLoader label='Loading standards compliance…' />
           ) : (
             <>
-              <div className='ide-card' style={{marginBottom: 12, borderColor: 'var(--ide-blue)'}}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: 'var(--ide-blue)',
-                    letterSpacing: '0.14em',
-                    textTransform: 'uppercase',
-                    marginBottom: 6,
-                  }}
-                >
-                  Org standards · last 30 days
-                </div>
-                <div style={{fontSize: 13, lineHeight: 1.5}}>
+              {/* Context, not state — a tinted 3px edge, not a fully re-stroked card
+                  with a tracked-out uppercase kicker. */}
+              <div className='ide-note info' style={{marginBottom: 'var(--ide-s3)'}}>
+                <strong>Org standards · last 30 days</strong>
+                <div>
                   Naming conventions, lint rules, coverage SLAs and other policies your org has set.
                 </div>
               </div>
@@ -1422,20 +1396,19 @@ export function IdeProjectCode() {
             (docs || []).map((d) => (
               <div
                 key={d.docType}
-                className='ide-card'
-                style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6}}
+                className='ide-card ide-project-row'
+                style={{marginBottom: 'var(--ide-s2)'}}
               >
-                <span className='ide-mono' style={{flex: 1}}>
+                <span className='ide-mono ide-project-row-body ide-project-row-title'>
                   {d.docType}.md
                 </span>
-                <span style={{fontSize: 11, color: 'var(--ide-fg-muted)'}}>
+                <span className='ide-project-evidencecol'>
                   {d.generatedAt
                     ? `updated ${new Date(d.generatedAt).toLocaleDateString()}`
                     : 'fresh'}
                 </span>
                 <button
                   className='ide-btn ghost'
-                  style={{padding: '4px 10px'}}
                   disabled={busy === `dl-${d.docType}`}
                   onClick={() => dlDoc(d.docType)}
                 >
@@ -1443,7 +1416,6 @@ export function IdeProjectCode() {
                 </button>
                 <button
                   className='ide-btn ghost'
-                  style={{padding: '4px 10px'}}
                   disabled={busy === `gen-${d.docType}` || !!genPending[d.docType]}
                   onClick={() => genDoc(d.docType)}
                 >
@@ -2170,7 +2142,7 @@ export function IdeProjectArchitecture() {
                 <div style={{flex: 1}}>
                   <div
                     style={{
-                      fontSize: 11,
+                      fontSize: 12,
                       fontWeight: 700,
                       color: 'var(--ide-fg-muted)',
                       letterSpacing: '0.14em',
@@ -2179,7 +2151,7 @@ export function IdeProjectArchitecture() {
                   >
                     System map
                   </div>
-                  <div style={{fontSize: 15, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
+                  <div style={{fontSize: 14, fontWeight: 600, color: 'var(--ide-fg-bright)'}}>
                     {arch?.version ? `v${arch.version}` : 'Latest'}
                   </div>
                 </div>
@@ -2329,7 +2301,7 @@ export function IdeProjectArchitecture() {
                           <div key={pr.repoFullName} style={{marginBottom: 8}}>
                             <div
                               className='ide-mono'
-                              style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginBottom: 4}}
+                              style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginBottom: 4}}
                             >
                               {pr.repoFullName}
                             </div>
@@ -2555,7 +2527,6 @@ export function IdeProjectArchitecture() {
                         </div>
                         <button
                           className='ide-btn ghost'
-                          style={{padding: '4px 10px'}}
                           disabled={contractBusy === `scan-${repoId}`}
                           onClick={() => rescanCoverage(repoId)}
                         >
@@ -2563,7 +2534,6 @@ export function IdeProjectArchitecture() {
                         </button>
                         <button
                           className='ide-btn ghost'
-                          style={{padding: '4px 10px'}}
                           disabled={contractBusy === `drift-${repoId}`}
                           onClick={() => drift(repoId)}
                         >
@@ -2623,7 +2593,6 @@ export function IdeProjectArchitecture() {
                         <div style={{display: 'flex', gap: 6, marginTop: 8}}>
                           <button
                             className='ide-btn ghost'
-                            style={{padding: '3px 9px', fontSize: 12}}
                             disabled={contractBusy === `refresh-${driftIds[0]}`}
                             onClick={() => refreshContract(driftIds[0])}
                           >
@@ -2633,7 +2602,6 @@ export function IdeProjectArchitecture() {
                           </button>
                           <button
                             className='ide-btn ghost'
-                            style={{padding: '3px 9px', fontSize: 12}}
                             disabled={contractBusy === `dismiss-${driftIds[0]}`}
                             onClick={() => setDismissFor(driftIds[0])}
                           >

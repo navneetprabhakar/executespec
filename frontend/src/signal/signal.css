@@ -1664,9 +1664,23 @@ body {
   color: var(--signal-coral-text);
   font-weight: 600;
 }
+/* The status dot was a literal `●` in the markup. A dot is a shape, not a word:
+   drawing it here keeps it perfectly round at any font, sizes it to the text,
+   and leaves the accessible name as just "open". */
 .signal-pr-card .pr-meta .ci-ok {
   color: var(--signal-mint-text-on-light);
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.signal-pr-card .pr-meta .ci-ok::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
 }
 .signal-pr-card .pr-actions {
   display: flex;
@@ -1900,7 +1914,30 @@ body {
 .signal-kv-list .kv {
   display: flex;
   justify-content: space-between;
+  /* A label and a value that both wrap must not be allowed to touch:
+     `space-between` with no gap rendered "BackupsDaily · 30d retention" as one
+     word on the trust page at 375px. */
+  gap: 12px;
   font-size: 14px;
+}
+.signal-kv-list .kv .k {
+  flex-shrink: 0;
+}
+.signal-kv-list .kv .v {
+  text-align: right;
+  min-width: 0;
+}
+/* Below 600px a two-column key/value row leaves each side about 18 characters.
+   Stack instead: the label reads as a label, the value gets the full measure. */
+@media (max-width: 600px) {
+  .signal-app .signal-kv-list .kv {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .signal-app .signal-kv-list .kv .v {
+    text-align: left;
+  }
 }
 .signal-kv-list .kv .k {
   color: var(--signal-text-dim);
@@ -2025,6 +2062,18 @@ body {
 .signal-splash .footer-link a {
   color: var(--signal-coral);
   font-weight: 600;
+}
+
+/* "Forgot password?" is a STANDALONE target on its own line, so WCAG 2.5.8's
+   inline-in-a-sentence exemption does not cover it — measured 14px tall on the
+   deployed login page. Padding plus equal negative margin grows the tappable
+   box to 32px without moving the text or disturbing the form's rhythm.
+   The "Create workspace" link in .footer-link is deliberately NOT given this:
+   it sits inside the sentence "New here? Create workspace" and is exempt. */
+.signal-splash .hint a {
+  display: inline-block;
+  padding: 9px 4px;
+  margin: -9px -4px;
 }
 
 /* ─────────── Rails (desktop) ─────────── */
@@ -2196,8 +2245,10 @@ body {
 }
 .signal-app .welcome-step .step-indicator {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--signal-text-mute);
+  /* 11px/--signal-text-mute measured 4.41:1 on the dark ground and 2.89:1 on
+     the light one; both fail AA, and 11px is under the app's 12px floor. */
+  font-size: 12px;
+  color: var(--signal-text-dim);
   letter-spacing: 0.1em;
   margin-bottom: 14px;
 }
@@ -2273,8 +2324,9 @@ body {
 .signal-app .preset-card .meta {
   margin-top: 12px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--signal-text-mute);
+  /* Same as .step-indicator above — these run/cost chips are real content. */
+  font-size: 12px;
+  color: var(--signal-text-dim);
   display: flex;
   gap: 12px;
 }
@@ -2794,11 +2846,17 @@ body {
   display: grid;
   gap: 10px;
 }
+/* Alignment is a column: the dot sits on the FIRST line's optical centre, not
+   the vertical centre of the whole item. `align-items: center` put the third
+   bullet's dot halfway down its two-line label, so the marker column visibly
+   zig-zagged. */
 .signal-app .auth-brand-bullets li {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
   font-size: 14px;
+  line-height: 1.5;
   color: var(--signal-hero-text);
 }
 .signal-app .auth-brand-bullets li .dot {
@@ -2806,6 +2864,7 @@ body {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 0.45em;
 }
 .signal-app .auth-brand-bullets li .dot.teal,
 .signal-app .auth-brand-bullets li .dot.mint {
@@ -3082,9 +3141,24 @@ body {
     grid-template-columns: repeat(4, 1fr);
   }
 }
+/* `cols-4-xl` was used by the pricing page but never DEFINED, so five tiers
+   laid out 2 + 2 + 1 at every desktop width and left ENTERPRISE orphaned in a
+   half-empty row. The feed caps at 960px, so four real columns would be ~220px
+   each — three is the honest maximum here. */
+@media (min-width: 1024px) {
+  .signal-app .signal-grid.cols-4-xl {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+}
 /* When a grid wraps Cards, drop their per-card bottom margin so the gap rules. */
 .signal-app .signal-grid .signal-card {
   margin-bottom: 0;
+}
+/* Cards in a grid stretch to the row height so their trailing action lands on
+   one baseline instead of wherever that tier's feature list happened to end. */
+.signal-app .signal-grid {
+  align-items: stretch;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -3233,4 +3307,255 @@ body {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Version B — public pricing + legal surfaces.
+
+   These render OUTSIDE the protected chrome and use `--signal-*`, not
+   `--ide-*`. The design intent is the same as the app: one accent-filled
+   commit action per surface, state as a stripe, one visible edge per box, and
+   a phone layout that a prospect can actually read.
+   ───────────────────────────────────────────────────────────── */
+
+/* A tier card is a column so its CTA can be pushed to the bottom edge; the
+   grid stretches the row, so the five CTAs land on one baseline. */
+.signal-app .signal-price-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.signal-app .signal-price-card .signal-price-cta {
+  margin-top: auto;
+  padding-top: 14px;
+}
+.signal-app .signal-price-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.signal-app .signal-price-tier {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.signal-app .signal-price-amount {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.signal-app .signal-price-unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--signal-text-dim);
+}
+.signal-app .signal-price-sub {
+  font-size: 12px;
+  color: var(--signal-text-dim);
+  margin-bottom: 12px;
+}
+.signal-app .signal-price-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.signal-app .signal-price-features li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+/* The tick is a fixed column, so a feature that wraps to two lines keeps its
+   continuation aligned with the first line instead of under the marker. */
+.signal-app .signal-price-features li::before {
+  content: '✓';
+  color: var(--signal-mint);
+  line-height: 1.45;
+}
+
+/* Recommended is a 3px leading stripe, not a repainted border. A full
+   `border-color` swap made the card read as a selected/error state and gave
+   the row two competing edge treatments. */
+.signal-app .signal-price-card.is-best {
+  border-left: 3px solid var(--signal-ink);
+  /* The stripe replaces a 1px edge, so trim the padding by the 2px difference
+     and the card's contents stay on the same x as its neighbours. */
+  padding-left: 14px;
+}
+.signal-app .signal-price-flag {
+  position: absolute;
+  top: -10px;
+  right: 14px;
+  background: var(--signal-y);
+  /* NOT --signal-y-text: that token is amber FOR a dark ground and flips to
+     #fbbf24 in dark mode, while --signal-y (#b88700) does not change — so the
+     pill became bright amber on dark amber at 1.93:1, effectively invisible on
+     a pricing page. The fill is constant, so a fixed dark ink is right in both
+     schemes (5.75:1). White is not an option here; it only reaches 3.23. */
+  color: #1a1200;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.signal-app .signal-price-note {
+  font-size: 13px;
+  color: var(--signal-text-dim);
+  line-height: 1.6;
+}
+
+/* Phone density. Founder note: "mobile view dimensions don't make sense, fonts
+   too big, they take up a lot of space." JetBrains Mono at 13px runs about 40
+   characters across 375px, so the win is in padding, control height and line
+   count — not in shrinking body copy below its legible floor. */
+@media (max-width: 600px) {
+  .signal-app .signal-card {
+    padding: 13px;
+  }
+  .signal-app .signal-btn {
+    padding: 10px 16px;
+    border-radius: 12px;
+  }
+  .signal-app .signal-btn.ghost {
+    padding: 10px 0;
+  }
+  .signal-app .signal-price-amount {
+    font-size: 21px;
+  }
+  .signal-app .signal-price-features {
+    gap: 6px;
+  }
+  .signal-app .signal-price-card .signal-price-cta {
+    padding-top: 12px;
+  }
+  .signal-app .signal-grid {
+    gap: 10px;
+  }
+  /* A wide table on a narrow phone scrolls inside its own box; the page body
+     must never scroll sideways. */
+  .signal-app .signal-feed table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* ─────────── Legal pages (terms / privacy / DPA) ───────────
+   The legal WORDING is not a design surface and is deliberately untouched.
+   This block only replaces the per-page inline <style> element those pages
+   used to inject, so the reading measure, heading rhythm and phone gutters are
+   consistent and themable. */
+.signal-legal {
+  min-height: 100dvh;
+  background: var(--signal-bg);
+  color: var(--signal-ink);
+}
+.signal-legal-inner {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+.signal-legal-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--signal-text-dim);
+  text-decoration: none;
+  margin-bottom: 28px;
+}
+.signal-legal-back:hover {
+  color: var(--signal-ink);
+}
+.signal-legal h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+.signal-legal-updated {
+  font-size: 13px;
+  color: var(--signal-text-dim);
+  margin: 0 0 24px;
+}
+.signal-legal-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--signal-ink);
+}
+.signal-legal-body h3 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 26px 0 6px;
+}
+.signal-legal-body h3:first-child {
+  margin-top: 0;
+}
+.signal-legal-body p {
+  margin: 0 0 14px;
+}
+.signal-legal-body a {
+  color: var(--signal-coral);
+  text-decoration: underline;
+}
+@media (max-width: 600px) {
+  .signal-legal-inner {
+    padding: 24px 16px 64px;
+  }
+  .signal-legal h1 {
+    font-size: 22px;
+  }
+  .signal-legal-body {
+    line-height: 1.65;
+  }
+}
+
+/* ─────────── Trust page ───────────
+   Hanging bullets: a wrapped clause must line up under the first word, not
+   under the marker. The list markers were also invisible at 375px because the
+   18px inline padding put the disc outside the card's own padding box. */
+.signal-app .signal-trust-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.signal-app .signal-trust-list li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+.signal-app .signal-trust-list li::before {
+  content: '·';
+  color: var(--signal-text-mute);
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: center;
+}
+.signal-app .signal-trust-note {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--signal-text-dim);
+}
+.signal-app .signal-trust-count {
+  color: var(--signal-ink);
+  font-size: 14px;
+  font-weight: 600;
 }

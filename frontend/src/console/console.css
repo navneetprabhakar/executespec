@@ -1,6 +1,7 @@
 /*
  * Console shell layout (RL-2026-05-052, web control-plane reframe).
- * ExecuteSpec product shell: black-green canvas, bright green actions, quiet
+ * ExecuteSpec product shell, Version B: slate-biased grounds, ONE merge-rail
+ * blue accent held apart from the green/amber/red semantic family, quiet
  * borders, and editor/terminal affordances preserved inside work surfaces.
  * It exposes the existing --ide-* token names so protected surfaces can render
  * unchanged while the global chrome stays distinct from the in-editor IDE.
@@ -19,76 +20,117 @@
   --es-pistachio: #aacbc4;
   --es-stone: #6f7d7d;
   --es-white: #f1f7f7;
-  --ide-bg-editor: var(--es-black);
-  --ide-bg-sidebar: var(--es-dark-green);
-  --ide-bg-activitybar: var(--es-dark-green);
-  --ide-bg-panel: var(--es-dark-green);
-  --ide-bg-input: #052827;
-  --ide-bg-tab-active: var(--es-pine);
-  --ide-bg-tab-inactive: var(--es-dark-green);
-  --ide-bg-statusbar: #021211;
-  --ide-bg-widget: #052827;
-  --ide-fg: #d7e7e4;
-  --ide-fg-muted: var(--es-pistachio);
-  --ide-fg-bright: var(--es-white);
-  --ide-fg-statusbar: var(--es-white);
-  --ide-border: rgba(170, 203, 196, 0.16);
-  --ide-border-strong: rgba(170, 203, 196, 0.28);
-  --ide-accent: var(--es-action-green);
-  --ide-accent-fg: var(--es-black);
-  --ide-hover: var(--es-pine);
-  --ide-list-active: color-mix(in srgb, var(--es-brand-green) 62%, var(--es-black));
-  --ide-list-inactive: var(--es-pine);
-  --ide-green: var(--es-action-green);
-  --ide-yellow: #f5c451;
-  --ide-red: #ff7c7c;
-  --ide-blue: var(--es-mountain-meadow);
-  --ide-add: rgba(0, 223, 130, 0.18);
-  --ide-del: rgba(128, 23, 23, 0.4);
+  /* ── Version B palette ───────────────────────────────────────────────────
+   *
+   * This block previously derived the whole app palette from the `--es-*`
+   * green ramp, and set `--ide-accent` and `--ide-green` to the SAME token
+   * (`--es-action-green`). That is the defect this palette exists to fix: in a
+   * product whose entire job is reporting verified/unverified evidence, the
+   * button you press to spend money looked identical to a "passed" verdict.
+   *
+   * The accent is now the merge-rail blue. It is deliberately NOT in the
+   * green/amber/red family, so an accent can never be misread as a semantic
+   * result, and a result can never be misread as something to click. Grounds
+   * are slate-biased rather than neutral grey — a flat grey reads as unfinished
+   * at this density.
+   *
+   * `--es-*` values are retained above because the brand mark and the marketing
+   * site still use them; they are simply no longer the source of UI colour.
+   */
+  --ide-bg-editor: #0c0f14;
+  --ide-bg-sidebar: #151a23;
+  --ide-bg-activitybar: #141922;
+  --ide-bg-panel: #151a23;
+  --ide-bg-input: #12161e;
+  --ide-bg-tab-active: #0c0f14;
+  --ide-bg-tab-inactive: #141922;
+  --ide-bg-statusbar: #0a0d12;
+  --ide-bg-widget: #151a23;
+  --ide-fg: #e9edf3;
+  --ide-fg-muted: #8d99ab;
+  --ide-fg-bright: #ffffff;
+  --ide-fg-statusbar: #e9edf3;
+  --ide-border: rgba(255, 255, 255, 0.075);
+  --ide-border-strong: rgba(255, 255, 255, 0.16);
+  --ide-accent: #5b8cff;
+  /* Ink for text/glyphs sitting ON --ide-accent and the light semantic fills
+     (--ide-blue, --ide-red): the org avatar, the user chat bubble, the unread
+     badge. Those grounds are LIGHT in this theme, so the ink is near-black
+     (6.4-6.8:1). Do NOT set this to white to fix a filled button — filled
+     controls sit on the always-dark --ide-accent-fill and take
+     --ide-accent-fill-fg instead. This block wraps every protected route, so it,
+     not ide.css's own value, is what the app resolves. */
+  --ide-accent-fg: #05070c;
+  --ide-hover: rgba(255, 255, 255, 0.045);
+  --ide-list-active: rgba(91, 140, 255, 0.14);
+  --ide-list-inactive: rgba(255, 255, 255, 0.028);
+  /* semantics: a separate family from the accent, each with a subtle pair */
+  --ide-green: #3fbf8f;
+  --ide-yellow: #e5a93c;
+  --ide-red: #f06b6b;
+  --ide-blue: #7ba3ff;
+  --ide-add: rgba(63, 191, 143, 0.13);
+  --ide-del: rgba(240, 107, 107, 0.13);
   --ide-shadow: rgba(0, 0, 0, 0.46);
 
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--ide-bg-editor);
+  /* Version B atmosphere: one very low-opacity accent wash from the top-left,
+     over the flat ground. It is the only decorative gradient in the app and it
+     must stay subtle enough that it never competes with the single accent-filled
+     commit action on the surface. */
+  background:
+    radial-gradient(
+      120% 80% at 12% -10%,
+      color-mix(in srgb, var(--ide-accent) 7%, transparent),
+      transparent 60%
+    ),
+    var(--ide-bg-editor);
+  background-attachment: fixed;
   color: var(--ide-fg);
-  font-family:
-    'JetBrains Mono',
-    ui-monospace,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    system-ui,
-    sans-serif;
+  /* The shell used to force JetBrains Mono on every word of UI prose. Monospace
+     is now opt-in per element (`.ide-mono`, code, ids, aligned numbers) — see
+     the token block in ide.css. `.con-root` is imported after `ide.css`, so this
+     declaration is what actually decides the protected app's face. */
+  font-family: var(--ide-font-ui);
+  font-size: var(--ide-t-body);
+  line-height: 1.5;
   overflow: hidden;
 }
 
 [data-theme='light'] .con-root {
-  --ide-bg-editor: var(--es-white);
+  /* Version B light. Not an inversion of the dark ramp — the accent darkens to
+     hold contrast on white, and the semantics darken with it. */
+  --ide-bg-editor: #f7f8fa;
   --ide-bg-sidebar: #ffffff;
   --ide-bg-activitybar: #ffffff;
   --ide-bg-panel: #ffffff;
   --ide-bg-input: #ffffff;
   --ide-bg-tab-active: #ffffff;
-  --ide-bg-tab-inactive: #e7efed;
-  --ide-bg-statusbar: var(--es-black);
+  --ide-bg-tab-inactive: #eef0f4;
+  --ide-bg-statusbar: #171c24;
   --ide-bg-widget: #ffffff;
-  --ide-fg: #0c2927;
-  --ide-fg-muted: #4f6662;
-  --ide-fg-bright: var(--es-black);
-  --ide-border: #cbdbd7;
-  --ide-border-strong: #9bb8b1;
-  --ide-hover: #e5f0ed;
-  --ide-list-active: #d8eee8;
-  --ide-list-inactive: #e7efed;
-  --ide-accent: var(--es-brand-green);
-  --ide-accent-fg: var(--es-white);
-  --ide-green: #08724f;
-  --ide-yellow: #b88700;
-  --ide-red: #d14b4b;
-  --ide-blue: var(--es-frog);
-  --ide-add: rgba(3, 98, 76, 0.14);
-  --ide-del: rgba(209, 75, 75, 0.12);
+  --ide-fg: #171c24;
+  --ide-fg-muted: #5d6875;
+  --ide-fg-bright: #05070c;
+  --ide-border: rgba(12, 15, 20, 0.1);
+  --ide-border-strong: rgba(12, 15, 20, 0.2);
+  --ide-hover: rgba(12, 15, 20, 0.04);
+  --ide-list-active: rgba(47, 95, 216, 0.1);
+  --ide-list-inactive: rgba(12, 15, 20, 0.026);
+  --ide-accent: #2f5fd8;
+  --ide-accent-fg: #ffffff;
+  /* Each semantic is also the ink of a badge whose ground is a tint OF ITSELF
+     (.ide-badge mixes ~12% of the token into the surface). The previous values
+     read 3.38-4.03:1 against those tints at 12px — under AA. These are darkened
+     so each clears 4.5:1 on both its own tint and plain white. */
+  --ide-green: #0f6a4a;
+  --ide-yellow: #8a5c0a;
+  --ide-red: #b03532;
+  --ide-blue: #244fbc;
+  --ide-add: rgba(23, 132, 94, 0.11);
+  --ide-del: rgba(196, 67, 63, 0.1);
   --ide-shadow: rgba(17, 19, 24, 0.12);
 }
 
@@ -101,7 +143,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 16px;
-  font-size: 12.5px;
+  font-size: var(--ide-t-caption);
   line-height: 1.45;
   background: var(--ide-list-active);
   color: var(--ide-fg-bright);
@@ -135,10 +177,10 @@
   height: 32px;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg-muted);
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   line-height: 1;
   cursor: pointer;
 }
@@ -150,40 +192,50 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 32px;
-  padding: 5px 12px;
+  gap: var(--ide-s2);
+  min-height: var(--ide-control-h);
+  padding: var(--ide-s1) var(--ide-s3);
   color: var(--ide-fg-bright);
   background: color-mix(in srgb, var(--ide-red) 14%, var(--ide-bg-widget));
   border-bottom: 1px solid color-mix(in srgb, var(--ide-red) 42%, var(--ide-border));
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
 }
-.con-api-error-retry {
-  padding: 3px 9px;
+/* Ghost grammar + the shared control metric. It was a 3px-padded chip, which is
+   both below the app's touch target and visibly smaller than every other
+   button in the chrome. */
+.ide-root .con-api-error-retry {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ide-control-h);
+  padding: 0 var(--ide-s3);
   border: 1px solid color-mix(in srgb, var(--ide-red) 55%, var(--ide-border));
-  border-radius: 4px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg-bright);
   background: transparent;
   cursor: pointer;
-  font-weight: 650;
+  font: inherit;
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 120ms var(--ide-ease);
 }
-.con-api-error-retry:hover {
+.ide-root .con-api-error-retry:hover {
   background: var(--ide-hover);
 }
-@media (max-width: 640px) {
+/* Canonical phone breakpoint (was 640px). */
+@media (max-width: 600px) {
   .con-root .con-banner {
-    padding: 7px 12px;
-    font-size: 12px;
-    gap: 8px;
+    padding: var(--ide-s2) var(--ide-s3);
+    gap: var(--ide-s2);
   }
 }
 
 .con-topbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ide-s2);
   height: 46px;
-  padding: 0 12px;
+  padding: 0 var(--ide-s3);
   flex-shrink: 0;
   background: color-mix(in srgb, var(--ide-bg-sidebar) 96%, var(--ide-bg-editor));
   border-bottom: 1px solid var(--ide-border);
@@ -198,7 +250,7 @@
   align-items: center;
   padding: 0 12px;
   border: 1px solid var(--ide-accent);
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   background: var(--ide-bg-widget);
   color: var(--ide-accent);
   text-decoration: none;
@@ -216,7 +268,7 @@
   gap: 9px;
   min-height: 32px;
   font-weight: 650;
-  font-size: 14px;
+  font-size: var(--ide-t-body-lg);
   color: var(--ide-fg-bright);
   text-decoration: none;
   letter-spacing: 0;
@@ -228,7 +280,7 @@
   height: 24px;
   flex: 0 0 24px;
   display: block;
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--ide-border-strong) 72%, transparent),
     0 4px 12px -8px var(--ide-shadow);
@@ -236,32 +288,50 @@
 .con-topbar-spacer {
   flex: 1;
 }
+/* The shell's primary CTA uses the same metric as every other button. */
 .ide-root .con-newrun {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  background: var(--ide-accent);
-  color: var(--ide-accent-fg);
-  border: none;
-  border-radius: 5px;
-  padding: 6px 11px;
-  font-size: 12px;
-  font-weight: 600;
+  justify-content: center;
+  gap: var(--ide-s2);
+  min-height: var(--ide-control-h);
+  background: var(--ide-accent-fill);
+  color: var(--ide-accent-fill-fg);
+  border: 1px solid transparent;
+  border-radius: var(--ide-r-control);
+  padding: 0 var(--ide-s3);
+  font-size: var(--ide-t-body);
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
   font-family: inherit;
   cursor: pointer;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ide-accent) 22%, transparent);
+  transition: background-color 120ms var(--ide-ease);
 }
 .ide-root .con-newrun:hover {
-  background: color-mix(in srgb, var(--ide-accent) 86%, var(--ide-fg-bright));
-  transform: translateY(-1px);
+  background: var(--ide-accent-fill-hover);
 }
+/* One focus treatment for the whole shell. Anything omitted here fell back to
+   the browser's default ring, which on the dark-green chrome rendered as a
+   bright blue box (founder-visible on the mobile drawer's close button). */
 .ide-root .con-newrun:focus-visible,
 .ide-root .con-icon:focus-visible,
+.con-brand:focus-visible,
 .con-side-collapse:focus-visible,
 .con-navitem:focus-visible,
 .con-runitem:focus-visible,
-.con-tabbar a:focus-visible {
+.con-tabbar a:focus-visible,
+.con-drawer-close:focus-visible,
+.con-root .con-banner-x:focus-visible,
+.con-root .con-banner-link:focus-visible,
+.con-api-error-retry:focus-visible,
+.con-menu-item:focus-visible,
+.con-section-link:focus-visible,
+.con-inline-link:focus-visible,
+.con-runrow:focus-visible,
+.con-setup-item:focus-visible,
+.con-proj-card:focus-visible,
+.con-side-details > summary:focus-visible {
   outline: 2px solid var(--ide-accent);
   outline-offset: 2px;
 }
@@ -275,7 +345,7 @@
   border: none;
   color: var(--ide-fg-muted);
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   text-decoration: none;
 }
 .ide-root .con-icon:hover {
@@ -296,7 +366,7 @@
   flex-direction: column;
   background: color-mix(in srgb, var(--ide-bg-sidebar) 92%, var(--ide-bg-editor));
   border-right: 1px solid var(--ide-border);
-  padding: 12px 8px;
+  padding: var(--ide-s3) var(--ide-s2);
   gap: 2px;
   overflow-y: auto;
 }
@@ -321,7 +391,7 @@
   height: 32px;
   margin: 0 0 6px auto;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--ide-r-control);
   background: transparent;
   color: var(--ide-fg-muted);
   cursor: pointer;
@@ -360,13 +430,16 @@
 .con-navitem {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--ide-s2);
   min-height: 32px;
-  padding: 8px 10px;
-  border-radius: 5px;
+  padding: var(--ide-s2) var(--ide-s3);
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--ide-t-body);
+  transition:
+    background-color 120ms var(--ide-ease),
+    color 120ms var(--ide-ease);
 }
 .con-navitem > svg {
   color: color-mix(in srgb, var(--ide-fg-bright) 78%, var(--ide-fg-muted));
@@ -376,23 +449,29 @@
   background: var(--ide-hover);
   color: var(--ide-fg-bright);
 }
+/* Selection is a fill + strengthened text. The old inset ring drew a second
+   edge inside an item that has no border of its own. */
 .con-navitem.active {
   background: var(--ide-list-active);
   color: var(--ide-fg-bright);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ide-border-strong) 48%, transparent);
+  font-weight: 600;
 }
 .con-navitem.active > svg {
   color: var(--ide-green);
 }
+/* Sentence case, weight-led — the same grammar as `.ide-h2` and
+   `.con-section-title`. Tracked-out capitals made three quiet nav groupings
+   shout at the same volume as the page's own headings. */
 .con-side-section {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  gap: var(--ide-s2);
+  font-size: var(--ide-t-caption);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--ide-fg-muted);
-  padding: 14px 10px 4px;
+  padding: var(--ide-s3) var(--ide-s3) var(--ide-s1);
 }
 .con-side-section svg {
   color: color-mix(in srgb, var(--ide-blue) 68%, var(--ide-fg-muted));
@@ -417,19 +496,19 @@
   border: 1px solid var(--ide-border);
   border-radius: 999px;
   padding: 0 6px;
-  font-size: 10px;
+  font-size: var(--ide-t-caption);
   line-height: 16px;
   color: var(--ide-fg-muted);
 }
 .con-side-empty {
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
 }
 /* RR-1655 — the disclosures now render a retry control in place of a false "you have none"
    message when the underlying read failed. As a button it needs the shell's hit target and
    focus treatment rather than inheriting the plain-text empty-state styling. */
-button.con-side-empty {
+.ide-root button.con-side-empty {
   display: flex;
   align-items: center;
   width: 100%;
@@ -439,10 +518,10 @@ button.con-side-empty {
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
 }
-button.con-side-empty:hover {
+.ide-root button.con-side-empty:hover {
   color: var(--ide-fg);
 }
 button.con-side-empty:focus-visible {
@@ -452,13 +531,16 @@ button.con-side-empty:focus-visible {
 .con-runitem {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ide-s2);
   min-height: 32px;
-  padding: 5px 10px;
-  border-radius: 5px;
+  padding: var(--ide-s1) var(--ide-s3);
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg-muted);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--ide-t-caption);
+  transition:
+    background-color 120ms var(--ide-ease),
+    color 120ms var(--ide-ease);
 }
 .con-runitem svg,
 .con-navitem svg,
@@ -472,18 +554,28 @@ button.con-side-empty:focus-visible {
   background: var(--ide-hover);
   color: var(--ide-fg);
 }
+/* Same selection rule as `.con-navitem.active`: fill + strengthened text, never
+   an extra inset edge inside an item that has no border of its own. */
 .con-runitem.active {
   background: var(--ide-list-active);
   color: var(--ide-fg-bright);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ide-border-strong) 45%, transparent);
+  font-weight: 600;
 }
-.con-runitem-action {
-  margin-top: 3px;
-  border: 1px dashed var(--ide-border);
-  color: var(--ide-fg);
+/* Ghost button grammar, not a dashed placeholder box. */
+.ide-root .con-runitem-action {
+  margin-top: var(--ide-s1);
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-control);
+  color: var(--ide-fg-muted);
   background: transparent;
   width: 100%;
   cursor: pointer;
+  font: inherit;
+  font-size: var(--ide-t-caption);
+}
+.ide-root .con-runitem-action:hover {
+  border-color: var(--ide-border-strong);
+  color: var(--ide-fg-bright);
 }
 .con-runitem-label {
   flex: 1;
@@ -495,13 +587,14 @@ button.con-side-empty:focus-visible {
 .con-side-grow {
   flex: 1;
 }
+/* The tier is a proper noun the server supplies already-uppercased; it does not
+   need typographic shouting on top of that. */
 .con-side-tier {
-  font-size: 10px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
-  padding: 8px 10px;
+  padding: var(--ide-s2) var(--ide-s3);
   border-top: 1px solid var(--ide-border);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
 }
 .con-content {
   flex: 1;
@@ -516,28 +609,45 @@ button.con-side-empty:focus-visible {
   background: var(--ide-bg-editor);
 }
 
-/* ── Home / dashboard ────────────────────────────────────────────────────── */
+/* ── Home / dashboard ──────────────────────────────────────────────────────
+ *
+ * EVERY card on this surface is a `<button>` (they are all navigation targets),
+ * and the Console renders inside the legacy `.signal-app` wrapper, whose
+ * `button { border: 0; background: transparent; color: inherit }` reset is
+ * (0,1,1) — it outranks a bare `.con-*` class (0,1,0), and signal.css is
+ * imported LAST so it also wins ties. So the metric cards, product cards, run
+ * rows, setup items and project cards were all rendering with NO border and NO
+ * background: measured in the browser, `.con-metric-card` computed to
+ * `background: rgba(0,0,0,0); border: 0px none`. That is why this screen read
+ * as loose text with a couple of boxes around it while the two non-button
+ * containers (`.con-hero`, `.con-empty`) kept their edges.
+ *
+ * The fix is the one `.ide-btn` and `.con-newrun` already use: scope anything
+ * that paints a button under `.ide-root` (same element as `.con-root`) so it
+ * wins. Anything below that sets background/border/color on a button MUST keep
+ * that prefix.
+ */
 .con-home {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 24px 28px 52px;
+  padding: var(--ide-s5) var(--ide-s5) 52px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: var(--ide-s5);
 }
 .con-cockpit {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 14px;
+  gap: var(--ide-s4);
 }
 .con-hero {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 22px 24px;
+  gap: var(--ide-s5);
+  padding: var(--ide-s5);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-card);
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--es-brand-green) 34%, var(--ide-bg-sidebar)),
@@ -547,55 +657,53 @@ button.con-side-empty:focus-visible {
 .con-hero > div {
   min-width: 0;
 }
-.con-hero-kicker {
-  margin-bottom: 7px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--ide-accent);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .con-hero-title {
-  font-size: 24px;
+  font-size: var(--ide-t-title);
   line-height: 1.22;
   font-weight: 700;
   color: var(--ide-fg-bright);
-  margin: 0 0 8px;
+  margin: 0 0 var(--ide-s2);
   max-width: 720px;
   overflow-wrap: anywhere;
 }
 .con-hero-sub {
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-size: var(--ide-t-body);
+  line-height: 1.55;
   color: color-mix(in srgb, var(--ide-fg-bright) 80%, var(--ide-fg-muted));
-  max-width: 690px;
+  max-width: 60ch;
 }
 .con-product-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--ide-s3);
 }
-.con-product-card {
+/* The four cards are a secondary explainer sitting directly under the hero. As
+   bordered boxes they read as a second row of primary cards competing with it,
+   which is most of the "boxes drawn with crayons" effect on this screen: one
+   visible edge per box means the hero keeps the edge and these get a tint. The
+   min-height floor is gone — a card is as tall as its own copy. */
+.ide-root .con-product-card {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: var(--ide-icon-lg) minmax(0, 1fr);
   align-items: start;
-  gap: 10px;
-  min-height: 112px;
-  padding: 13px 14px;
+  gap: var(--ide-s3);
+  padding: var(--ide-s3);
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid var(--ide-border);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--ide-bg-sidebar) 72%, var(--ide-bg-editor));
+  border: 1px solid transparent;
+  border-radius: var(--ide-r-card);
+  background: color-mix(in srgb, var(--ide-fg) 4%, transparent);
   color: var(--ide-fg);
   text-align: left;
   font: inherit;
   cursor: pointer;
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease);
 }
-.con-product-card:hover {
+.ide-root .con-product-card:hover {
   background: var(--ide-hover);
-  border-color: var(--ide-border-strong);
-  transform: translateY(-1px);
+  border-color: var(--ide-border);
 }
 .con-product-card:focus-visible {
   outline: 2px solid var(--ide-accent);
@@ -607,52 +715,62 @@ button.con-side-empty:focus-visible {
 }
 .con-product-card strong {
   display: block;
-  margin-bottom: 5px;
+  margin-bottom: var(--ide-s1);
   color: var(--ide-fg-bright);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--ide-t-body);
+  font-weight: 600;
   line-height: 1.3;
 }
 .con-product-card small {
   display: block;
   color: var(--ide-fg-muted);
-  font-size: 11.5px;
+  font-size: var(--ide-t-caption);
   line-height: 1.45;
 }
 .con-cockpit-metrics {
   display: grid;
-  gap: 8px;
+  gap: var(--ide-s2);
 }
-.con-metric-card {
+.ide-root .con-metric-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--ide-s3);
   min-height: 54px;
-  padding: 10px 12px;
+  padding: var(--ide-s3);
   min-width: 0;
   box-sizing: border-box;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-card);
   background: color-mix(in srgb, var(--ide-bg-sidebar) 82%, var(--ide-bg-editor));
   color: var(--ide-fg);
   cursor: pointer;
   text-align: left;
   font: inherit;
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease);
 }
-.con-metric-card:hover {
+.ide-root .con-metric-card:hover {
   background: var(--ide-hover);
   border-color: var(--ide-border-strong);
 }
+.con-metric-card:focus-visible {
+  outline: 2px solid var(--ide-accent);
+  outline-offset: 2px;
+}
 .con-metric-card strong {
-  font-size: 22px;
+  font-size: var(--ide-t-title);
+  font-weight: 700;
+  line-height: 1;
   color: var(--ide-fg-bright);
+  font-variant-numeric: tabular-nums;
 }
 .con-metric-label {
-  font-size: 11px;
+  font-size: var(--ide-t-body);
   color: var(--ide-fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .con-decision-hero {
   display: flex;
@@ -662,54 +780,69 @@ button.con-side-empty:focus-visible {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--ide-border);
 }
-.con-newrun.lg {
-  padding: 10px 16px;
-  font-size: 13px;
+/* `lg` is the large control metric, not a private padding value. */
+.ide-root .con-newrun.lg {
+  min-height: var(--ide-control-h-lg);
+  padding: 0 var(--ide-s4);
+  font-size: var(--ide-t-body);
   white-space: nowrap;
   flex-shrink: 0;
 }
 .con-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ide-s1);
   min-width: 0;
 }
 .con-section-priority {
-  padding: 12px;
+  padding: var(--ide-s3);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-card);
   background: color-mix(in srgb, var(--ide-bg-sidebar) 54%, transparent);
+}
+/* One visible edge per box. Inside the bordered priority section the rows are
+   separated by tint, not by a second stroked box each. */
+.ide-root .con-section-priority .con-runrow {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ide-fg) 4%, transparent);
+}
+.ide-root .con-section-priority .con-runrow:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-border);
 }
 .con-home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
-  gap: 18px;
+  gap: var(--ide-s5);
   align-items: start;
   min-width: 0;
 }
+/* Section headers agree with `.ide-h2`: sentence case, weight-led. Tracked-out
+   muted capitals made every section shout at the same volume as the content. */
 .con-section-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ide-fg-muted);
-  margin-bottom: 4px;
+  gap: var(--ide-s2);
+  font-size: var(--ide-t-body);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ide-fg-bright);
+  margin-bottom: var(--ide-s2);
 }
 .con-section-title.attn {
   color: var(--ide-yellow);
 }
+/* Metrics stay on the bare class (the a11y gate pins the 32px target here). */
 .con-section-link,
 .con-inline-link {
   display: inline-flex;
   align-items: center;
   background: none;
   border: none;
-  color: var(--ide-fg-bright);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--ide-t-caption);
   min-height: 32px;
   padding: 6px 0;
   margin-left: auto;
@@ -718,22 +851,37 @@ button.con-side-empty:focus-visible {
   margin-left: 0;
   text-decoration: underline;
 }
-.con-runrow {
+/* Colour needs the .ide-root prefix: `.signal-app button { color: inherit }` is
+   (0,1,1) and was winning, so a secondary link inside an amber section header
+   ("All decisions" beside "Needs you") rendered in the alert colour and read as
+   part of the alarm rather than as a quiet way out of it. */
+.ide-root .con-section-link,
+.ide-root .con-inline-link {
+  color: var(--ide-fg-bright);
+}
+.ide-root .con-section-link:hover,
+.ide-root .con-inline-link:hover {
+  color: var(--ide-accent);
+}
+.ide-root .con-runrow {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--ide-s3);
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
   text-align: left;
-  padding: 10px 12px;
+  padding: var(--ide-s3);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: color-mix(in srgb, var(--ide-bg-sidebar) 72%, var(--ide-bg-editor));
   cursor: pointer;
   color: var(--ide-fg);
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease);
 }
-.con-runrow:hover {
+.ide-root .con-runrow:hover {
   background: var(--ide-hover);
   border-color: var(--ide-border-strong);
 }
@@ -745,27 +893,78 @@ button.con-side-empty:focus-visible {
   flex: 1;
 }
 .con-runrow-title {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .con-runrow-meta {
-  font-size: 11px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
 }
+/* Fixed trailing column, for the same reason the Work list has a fixed leading
+   one: the next-action label sizes itself ("Approve plan" vs "Fix failure"), so
+   without a column the score badge beside it landed at a different x on every
+   row and the list read as ragged. */
 .con-runrow-action {
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 108px;
+  font-size: var(--ide-t-caption);
   font-weight: 600;
   color: var(--ide-fg-bright);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.con-empty {
-  padding: 16px;
-  font-size: 12.5px;
+.con-runrow > .ide-badge:last-child,
+.con-decision-open > .ide-badge:last-child {
+  flex: 0 0 108px;
+}
+/* A decision row carries two actions — open it, or hide it from the queue — so the row itself is
+   a container and the navigation is a transparent button filling it. It must not paint a second
+   edge or its own background; the row already owns both. */
+.ide-root .con-decision-open {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ide-root .con-decision-row .con-decision-skip {
+  flex: 0 0 auto;
+}
+.ide-root .con-decision-hidden {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ide-s3);
+  flex-wrap: wrap;
+  margin-top: var(--ide-s4);
+  padding: var(--ide-s3);
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
-  border: 1px dashed var(--ide-border);
-  border-radius: 6px;
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-card);
+  background: color-mix(in srgb, var(--ide-bg-sidebar) 72%, var(--ide-bg-editor));
+}
+/* A hairline + tint, not a dashed placeholder. */
+.con-empty {
+  padding: var(--ide-s4);
+  font-size: var(--ide-t-caption);
+  line-height: 1.5;
+  color: var(--ide-fg-muted);
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-card);
+  background: color-mix(in srgb, var(--ide-fg) 3%, transparent);
 }
 .con-setup-progress {
   margin-left: auto;
@@ -774,27 +973,29 @@ button.con-side-empty:focus-visible {
 }
 .con-setup-list {
   display: grid;
-  gap: 7px;
+  gap: var(--ide-s2);
 }
-.con-setup-item {
+.ide-root .con-setup-item {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: var(--ide-s3);
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  min-height: 58px;
-  padding: 10px 12px;
+  padding: var(--ide-s3);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: color-mix(in srgb, var(--ide-bg-sidebar) 76%, var(--ide-bg-editor));
   color: var(--ide-fg);
   cursor: pointer;
   text-align: left;
   font: inherit;
+  transition:
+    background-color 120ms var(--ide-ease),
+    border-color 120ms var(--ide-ease);
 }
-.con-setup-item:hover {
+.ide-root .con-setup-item:hover {
   background: var(--ide-hover);
   border-color: var(--ide-border-strong);
 }
@@ -817,17 +1018,17 @@ button.con-side-empty:focus-visible {
   min-width: 0;
 }
 .con-setup-label {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 600;
   color: var(--ide-fg-bright);
 }
 .con-setup-detail {
-  font-size: 11px;
+  font-size: var(--ide-t-caption);
   line-height: 1.35;
   color: var(--ide-fg-muted);
 }
 .con-setup-action {
-  font-size: 11px;
+  font-size: var(--ide-t-caption);
   font-weight: 650;
   color: var(--ide-accent);
   white-space: nowrap;
@@ -841,7 +1042,7 @@ button.con-side-empty:focus-visible {
 .con-proj-grid.compact {
   grid-template-columns: 1fr;
 }
-.con-proj-card {
+.ide-root .con-proj-card {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -850,22 +1051,22 @@ button.con-side-empty:focus-visible {
   text-align: left;
   padding: 12px 14px;
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   background: color-mix(in srgb, var(--ide-bg-sidebar) 82%, var(--ide-bg-editor));
   cursor: pointer;
   color: var(--ide-fg);
 }
-.con-proj-card:hover {
+.ide-root .con-proj-card:hover {
   background: var(--ide-hover);
   border-color: var(--ide-border-strong);
 }
 .con-proj-name {
-  font-size: 13px;
+  font-size: var(--ide-t-body);
   font-weight: 600;
   color: var(--ide-fg-bright);
 }
 .con-proj-desc {
-  font-size: 11px;
+  font-size: var(--ide-t-caption);
   color: var(--ide-fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -906,36 +1107,66 @@ button.con-side-empty:focus-visible {
   .con-product-strip {
     grid-template-columns: 1fr;
   }
+  /* Three-up, always. The metrics used to become three FULL-WIDTH rows on a
+     phone, each with a label line above a 24px number — about 380px of screen
+     for three integers. Short labels (see ConsoleHome) make a real three-column
+     row fit at 375px, which is what a cockpit strip should be. */
   .con-cockpit-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .con-metric-card {
-    min-height: 64px;
+  /* Stacked on phones, but as a tight label/value pair — the old 64px floor plus
+     `space-between` pushed the number to the bottom of the box and left a dead
+     band between it and its own label. */
+  .ide-root .con-metric-card {
+    min-height: 0;
     flex-direction: column;
     align-items: flex-start;
+    justify-content: flex-start;
+    gap: var(--ide-s1);
+    padding: var(--ide-s2);
+  }
+  .con-metric-card strong {
+    font-size: var(--ide-t-h2);
+  }
+  .con-metric-label {
+    font-size: var(--ide-t-caption);
   }
   .con-hero {
     flex-direction: column;
     align-items: flex-start;
   }
   .con-hero-title {
-    font-size: 21px;
+    font-size: var(--ide-t-title);
   }
   .con-decision-hero {
     flex-direction: column;
     align-items: flex-start;
   }
-  .con-runrow {
-    align-items: flex-start;
+  /* Line 1 keeps the status dot beside the title (the row still LEADS with
+     status, like every other list in the app); score and next action wrap
+     together to line 2 and are right-aligned as a group by a single `auto`
+     margin, rather than the old hand-tuned 20px indent that only lined up for
+     one particular label length. */
+  .ide-root .con-runrow {
+    align-items: center;
     flex-wrap: wrap;
+    row-gap: var(--ide-s1);
   }
+  /* A content-driven wrap rather than a forced `100%`: the title asks for 260px,
+     so the trailing group drops to a second line exactly when the row is
+     genuinely too tight (phones) and stays inline when it is not (tablets).
+     One rule, no third breakpoint. */
   .con-runrow-main {
-    flex-basis: calc(100% - 24px);
+    flex: 1 1 260px;
   }
-  .con-runrow-action {
-    margin-left: 20px;
+  .con-runrow-main + * {
+    margin-left: auto;
   }
-  .con-setup-item {
+  .con-runrow-action,
+  .con-runrow > .ide-badge:last-child {
+    flex: 0 0 auto;
+  }
+  .ide-root .con-setup-item {
     grid-template-columns: 14px minmax(0, 1fr);
     align-items: flex-start;
   }
@@ -953,23 +1184,10 @@ button.con-side-empty:focus-visible {
     transform: translateX(-100%);
     transition: transform 0.2s ease;
   }
-  .con-side-brand {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin: 0 8px 10px;
-    padding: 8px 2px 12px;
-    border-bottom: 1px solid var(--ide-border);
-    color: var(--ide-fg-bright);
-    font-size: 13px;
-    font-weight: 650;
-  }
-  .con-side-brand img {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ide-border-strong) 72%, transparent);
-  }
+  /* The drawer's brand row stays hidden. It only ever rendered on mobile — the
+     one place the top bar's brand mark is guaranteed to be on screen directly
+     above it, because the drawer is positioned BELOW the top bar. It was 60px
+     of exact duplication at the most expensive point in the layout. */
   .con-side.drawer-open {
     transform: translateX(0);
   }
@@ -980,22 +1198,26 @@ button.con-side-empty:focus-visible {
     z-index: 40;
     background: rgba(0, 0, 0, 0.45);
   }
-  .con-drawer-close {
-    display: flex;
+  /* Compact ghost aligned to the drawer's own right edge. It used to be a
+     full-width outlined box with its label pushed right — and, as the drawer's
+     first focusable element, it received focus on open and painted a
+     full-width ring across the top of the panel. */
+  .ide-root .con-drawer-close {
+    display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
-    width: calc(100% - 16px);
-    min-height: 40px;
-    margin: 0 8px 4px;
-    padding: 0 10px;
+    align-self: flex-end;
+    min-height: var(--ide-control-h);
+    margin: 0 var(--ide-s2) var(--ide-s1) auto;
+    padding: 0 var(--ide-s3);
     border: 1px solid var(--ide-border);
-    border-radius: 5px;
+    border-radius: var(--ide-r-control);
     color: var(--ide-fg-muted);
     background: transparent;
-    font-size: 12px;
+    font: inherit;
+    font-size: var(--ide-t-caption);
     cursor: pointer;
   }
-  .con-drawer-close:hover {
+  .ide-root .con-drawer-close:hover {
     color: var(--ide-fg-bright);
     background: var(--ide-hover);
   }
@@ -1016,7 +1238,7 @@ button.con-side-empty:focus-visible {
     gap: 3px;
     min-width: 0;
     padding: 7px 2px 6px;
-    font-size: 10px;
+    font-size: var(--ide-t-caption);
     font-weight: 600;
     color: var(--ide-fg-muted);
     text-decoration: none;
@@ -1025,10 +1247,12 @@ button.con-side-empty:focus-visible {
     background: var(--ide-hover);
     color: var(--ide-fg-bright);
   }
+  /* Selection is a FILL plus strengthened text — never an extra edge. The inset
+     top rule made the active tab read as a fourth border in a bar that already
+     has one. */
   .con-tabbar a.active {
     color: var(--ide-accent);
-    background: color-mix(in srgb, var(--ide-accent) 12%, transparent);
-    box-shadow: inset 0 2px 0 var(--ide-accent);
+    background: color-mix(in srgb, var(--ide-accent) 14%, transparent);
   }
   .con-tabbar .ico {
     display: inline-flex;
@@ -1055,7 +1279,7 @@ button.con-side-empty:focus-visible {
   min-width: 180px;
   background: var(--ide-bg-widget);
   border: 1px solid var(--ide-border);
-  border-radius: 6px;
+  border-radius: var(--ide-r-card);
   box-shadow: 0 10px 24px var(--ide-shadow);
   padding: 4px;
   display: flex;
@@ -1066,25 +1290,29 @@ button.con-side-empty:focus-visible {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--ide-r-control);
   color: var(--ide-fg);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--ide-t-body);
 }
 .con-menu-item:hover {
   background: var(--ide-hover);
   color: var(--ide-fg-bright);
 }
 
-/* "New run" collapses to icon-only on narrow phones — the two-line wrap at
-   375px read as broken. */
+/* KEPT off the canonical scale on purpose: content constraint, not density.
+   The top bar holds a fixed set of controls at a fixed height, and the width at
+   which they stop fitting is a property of that set (~480px), not of "phone".
+   Collapsing at the 600px phone breakpoint would strip the notification bell
+   and account menu from 540px devices where they fit perfectly well. Everything
+   removed here is reachable from the mobile drawer instead. */
 @media (max-width: 480px) {
   .con-topbar {
     gap: 4px;
     padding: 0 8px;
   }
   .con-brand {
-    font-size: 13px;
+    font-size: var(--ide-t-body);
     gap: 7px;
     max-width: 140px;
   }
@@ -1112,7 +1340,18 @@ button.con-side-empty:focus-visible {
   .con-root.agent-active .con-newrun {
     padding: 8px 9px;
   }
-  .con-cockpit-metrics {
-    grid-template-columns: 1fr;
-  }
+}
+
+/* The hero's Start work. The top bar's Start is this surface's one accent-filled
+   commit action and leads to the same place, so the hero's copy of it is a ghost:
+   still a real affordance for someone reading the hero rather than the chrome,
+   but not a second primary competing with the first. */
+.ide-root .con-newrun.is-quiet {
+  background: transparent;
+  color: var(--ide-fg-bright);
+  border-color: var(--ide-border-strong);
+}
+.ide-root .con-newrun.is-quiet:hover {
+  background: var(--ide-hover);
+  border-color: var(--ide-accent);
 }

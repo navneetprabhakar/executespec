@@ -1,3 +1,4 @@
+import {Check, X} from 'lucide-react';
 import {useEffect, useState} from 'react';
 import {Button} from '@/signal/components/Primitives';
 import {ConfirmModal} from '@/signal/components/Modal';
@@ -94,7 +95,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
     ? {marginBottom: 12}
     : {
         border: '1px solid var(--signal-hairline)',
-        borderRadius: 12,
+        borderRadius: 'var(--ide-r-card)',
         padding: 14,
         marginBottom: 12,
         background: 'var(--signal-surface)',
@@ -105,14 +106,14 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
   return (
     <div className={cardCls} style={cardStyle}>
       <div style={{fontWeight: 600, color: heading, marginBottom: 4}}>Cloud deploy credential</div>
-      <div style={{fontSize: 12.5, color: muted, marginBottom: 10}}>
+      <div style={{fontSize: 12, color: muted, marginBottom: 10}}>
         A GCP service-account JSON is required to deploy permanent Cloud Run services.
       </div>
 
       {msg && (
         <div
           style={{
-            fontSize: 12.5,
+            fontSize: 12,
             color: ide ? 'var(--ide-blue)' : 'var(--signal-coral)',
             marginBottom: 8,
           }}
@@ -163,7 +164,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
           {validation && (
             <div
               style={{
-                fontSize: 12.5,
+                fontSize: 12,
                 marginBottom: 8,
                 color: validation.valid
                   ? ide
@@ -174,7 +175,14 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
                     : 'var(--signal-coral)',
               }}
             >
-              {validation.valid ? '✓ Credential valid' : '✗ Issues found'}
+              <span style={{display: 'inline-flex', alignItems: 'center', gap: 5}}>
+                {validation.valid ? (
+                  <Check size={13} strokeWidth={2.25} aria-hidden='true' />
+                ) : (
+                  <X size={13} strokeWidth={2.25} aria-hidden='true' />
+                )}
+                {validation.valid ? 'Credential valid' : 'Issues found'}
+              </span>
               {validation.issues?.length > 0 && (
                 <ul style={{margin: '4px 0 0', paddingLeft: 18}}>
                   {validation.issues.map((iss, i) => (
@@ -230,7 +238,7 @@ export function GcpCredentialPanel({variant}: {variant: 'signal' | 'ide'}) {
             style={{
               width: '100%',
               boxSizing: 'border-box',
-              borderRadius: 8,
+              borderRadius: 'var(--ide-r-card)',
               border: `1px solid ${ide ? 'var(--ide-border)' : 'var(--signal-hairline)'}`,
               background: ide ? 'var(--ide-bg-input)' : 'var(--signal-bg)',
               color: ide ? 'var(--ide-fg)' : 'var(--signal-ink)',

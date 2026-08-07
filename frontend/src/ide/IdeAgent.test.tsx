@@ -328,10 +328,11 @@ describe('IdeAgent', () => {
   it('renders remote-sandbox chrome: top bar + inline gate, with internals behind settings', async () => {
     ({host, root} = await renderAgent('/agent'));
 
-    // Chat-first chrome (no jargon strip / rails in the main view)
+    // Chat-first chrome (no jargon strip / rails in the main view). The legacy
+    // generic "Web agent" title is replaced by a derived first-message title.
     expect(host.textContent).toContain('Conversations');
     expect(host.textContent).toContain('New conversation');
-    expect(host.textContent).toContain('Web agent');
+    expect(host.textContent).toContain('What plans are waiting?');
     expect(host.textContent).toContain('140 tokens');
     expect(host.textContent).toContain('chat included');
     // Pending gate surfaces inline as an action card
@@ -339,7 +340,8 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Add audit logs');
     // RR-839 — the trust panel states only enforced properties, not an unproven
     // credential-scope guarantee.
-    expect(host.textContent).toContain('Runs on a policy-guarded server workspace');
+    // Compressed to a fragment; the load-bearing qualifier survives verbatim.
+    expect(host.textContent).toContain('Policy-guarded server workspace');
     expect(host.textContent).not.toContain('Repo token scoped to selected project');
     // Internals are de-jargoned out of the main view
     expect(host.textContent).not.toContain('chat_answer');
@@ -361,8 +363,10 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('0 of 0 credits left');
     expect(host.textContent).toContain('Run credits');
     expect(host.textContent).toContain('Operator diagnostics');
-    expect(host.textContent).toContain('These settings control conversation replies only');
-    expect(host.textContent).toContain('does not turn the chat model into a run-wide pin');
+    // Compressed: "applies to chat replies only" IS the no-run-wide-pin claim,
+    // so the third sentence restating it was removed rather than shortened.
+    expect(host.textContent).toContain('Applies to chat replies only');
+    expect(host.textContent).toContain('organization model matrix and per-task tier routing');
   });
 
   it('does not advertise an isolated sandbox when the runtime gates are off', async () => {
@@ -514,10 +518,10 @@ describe('IdeAgent', () => {
       'session service unavailable',
     );
     const firstRequest = api.createAgentSession.mock.calls[0]?.[0];
-    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('Retry new session'),
+    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === 'Retry',
     );
-    if (!retry) throw new Error('Retry new session control was not rendered.');
+    if (!retry) throw new Error('Retry control was not rendered.');
 
     await act(async () => retry.click());
     await flush();
@@ -624,7 +628,7 @@ describe('IdeAgent', () => {
     expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(baseline);
     expect(api.listAgentGates.mock.calls.length).toBeGreaterThan(1);
     expect(api.listAgentTurns.mock.calls.length).toBeGreaterThan(1);
-    expect(host.textContent).toContain('Web agent');
+    expect(host.textContent).toContain('What plans are waiting?');
   });
 
   it('renders zero managed-credit policy as an explicit state, not a broken balance', async () => {
@@ -739,28 +743,34 @@ describe('IdeAgent', () => {
 
     ({host, root} = await renderAgent('/projects/p1/agent'));
 
-    expect(host.textContent).toContain('Project agent');
+    // The generic "Project agent" title is superseded by the derived first-message title.
+    expect(host.textContent).toContain('What plans are waiting?');
     expect(api.listAgentTurns).toHaveBeenCalledWith('project-session', {limit: 100});
     expect(api.listAgentTurns).not.toHaveBeenCalledWith('global-session', {limit: 100});
   });
 
-  it('shows the remote sandbox launcher before any historical transcript', async () => {
+  it('shows a compact launcher with the full contract behind a collapsed disclosure', async () => {
     api.listAgentSessions.mockResolvedValue([]);
     api.listAgentGates.mockResolvedValue([]);
     api.listAgentTurns.mockResolvedValue([]);
 
     ({host, root} = await renderAgent('/agent'));
 
-    expect(host.textContent).toContain('Remote sandbox operator');
-    expect(host.textContent).toContain('Run work in a remote sandbox.');
-    expect(host.textContent).toContain('prepare a PR when publication gates pass');
+    // One short honest line + suggestions, not the old multi-panel hero.
+    expect(host.textContent).toContain('you approve the plan and cost before any spend');
     expect(host.textContent).toContain('Create a remote sandbox to add audit logging');
-    expect(host.textContent).toContain('What will happen before spend');
+    expect(host.textContent).toContain('How it works');
+    // The stage/contract/trust detail is retained — unweakened — inside the
+    // disclosure, collapsed by default.
+    const details = host.querySelector<HTMLDetailsElement>('details.agent-operator-details');
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(host.textContent).toContain('A PR is prepared only when publication gates pass');
+    expect(host.textContent).toContain('Before spend');
     expect(host.textContent).toContain('remote clone');
-    // RR-839 — honest trust copy: enforced properties only.
-    expect(host.textContent).toContain(
-      'Run actions and evidence are recorded subject to retention policy',
-    );
+    // RR-839 — honest trust copy: enforced properties only. Compressed to a
+    // fragment; "subject to retention policy" is load-bearing and survives.
+    expect(host.textContent).toContain('Actions and evidence recorded subject to retention policy');
     expect(host.textContent).toContain('BYOK cost caps are optional');
     expect(host.querySelectorAll('.agent-operator-intro').length).toBe(1);
     expect(host.querySelectorAll('.agent-empty').length).toBe(0);
@@ -1470,7 +1480,7 @@ describe('IdeAgent', () => {
     expect(host.textContent).toContain('Add billing audit logs');
     expect(host.textContent).toContain('Create sandbox plan');
     expect(host.textContent).toContain('approval before credits');
-    expect(host.textContent).toContain('What will happen before spend');
+    expect(host.textContent).toContain('Before spend');
     expect(host.textContent).toContain('Branch');
     // RR-839 — the trust panel must NOT claim a secret-hiding or outbound-network
     // policy: neither is enforced by the current policy-guarded host workspace.
@@ -1775,18 +1785,15 @@ describe('IdeAgent', () => {
     expect(api.listAgentSessions.mock.calls.length).toBeGreaterThan(sessionLoads);
   });
 
-  it('shows project recovery, searches existing projects, and binds the selected project', async () => {
+  it('switches project scope via the dropdown without creating a session, preserving the draft', async () => {
     api.listAgentGates.mockResolvedValue([]);
-    api.createAgentSession.mockImplementation(async (request) => ({
-      ...session,
-      id: request.id,
-      projectId: request.projectId,
-      title: 'Project agent',
-    }));
     ({host, root} = await renderAgent('/agent'));
 
-    expect(host.textContent).toContain('No project linked');
-    expect(host.textContent).toContain('continue a general conversation');
+    const select = host.querySelector<HTMLSelectElement>('#agent-project-select');
+    if (!select) throw new Error('Project dropdown was not rendered.');
+    expect(select.value).toBe('');
+    expect([...select.options].map((option) => option.textContent)).toContain('ExecuteSpec');
+
     const composer = host.querySelector<HTMLTextAreaElement>('.agent-composer textarea');
     if (!composer) throw new Error('Agent composer was not rendered.');
     await act(async () => {
@@ -1794,27 +1801,60 @@ describe('IdeAgent', () => {
       setter?.call(composer, 'Keep this unsent draft');
       composer.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    const search = host.querySelector<HTMLInputElement>('#agent-project-search');
-    if (!search) throw new Error('Project search was not rendered.');
+
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(search, 'execute');
-      search.dispatchEvent(new Event('input', {bubbles: true}));
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      setter?.call(select, 'p1');
+      select.dispatchEvent(new Event('change', {bubbles: true}));
     });
-    const project = [
-      ...host.querySelectorAll<HTMLButtonElement>('.agent-project-results button'),
-    ].find((button) => button.textContent?.includes('ExecuteSpec'));
-    if (!project) throw new Error('Matching project was not rendered.');
-    await act(async () => project.click());
     await flush();
 
-    expect(api.createAgentSession).toHaveBeenCalledWith(
-      expect.objectContaining({projectId: 'p1', surface: 'WEB'}),
-    );
-    expect(host.textContent).toContain('Current project');
+    // Lazy sessions: scope switching is navigation only — no POSTed session.
+    expect(api.createAgentSession).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLSelectElement>('#agent-project-select')?.value).toBe('p1');
     expect(host.textContent).toContain('ExecuteSpec');
     expect(host.querySelector<HTMLTextAreaElement>('.agent-composer textarea')?.value).toBe(
       'Keep this unsent draft',
+    );
+  });
+
+  it('creates the scoped session lazily on the first message, titled from that message', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    api.listAgentSessions.mockResolvedValue([]);
+    api.listAgentTurns.mockResolvedValue([]);
+    api.createAgentSession.mockImplementation(async (request) => ({
+      ...session,
+      id: request.id ?? 's-new',
+      projectId: request.projectId ?? null,
+      title: request.title ?? null,
+    }));
+
+    ({host, root} = await renderAgent('/projects/p1/agent'));
+    expect(api.createAgentSession).not.toHaveBeenCalled();
+
+    const composer = host.querySelector<HTMLTextAreaElement>('.agent-composer textarea');
+    if (!composer) throw new Error('Agent composer was not rendered.');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter?.call(composer, 'Add rate limiting to the reservation API');
+      composer.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    const send = [...host.querySelectorAll('button')].find(
+      (button) => button.getAttribute('aria-label') === 'Send',
+    );
+    if (!send) throw new Error('Send button was not rendered.');
+    await act(async () => {
+      send.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+    await flush();
+
+    expect(api.createAgentSession).toHaveBeenCalledTimes(1);
+    expect(api.createAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'p1',
+        surface: 'WEB',
+        title: 'Add rate limiting to the reservation API',
+      }),
     );
   });
 
@@ -1853,12 +1893,10 @@ describe('IdeAgent', () => {
     const createProject = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === 'Create project',
     );
-    const switchProject = host.querySelector<HTMLButtonElement>('.agent-project-results button');
+    const projectSelect = host.querySelector<HTMLSelectElement>('#agent-project-select');
     expect(createProject?.disabled).toBe(true);
-    expect(switchProject?.disabled).toBe(true);
-    expect(host.textContent).toContain(
-      'cannot change while this conversation has an active execution',
-    );
+    expect(projectSelect?.disabled).toBe(true);
+    expect(host.textContent).toContain('Locked while this conversation has an active run');
   });
 
   it('shows project-loading errors and retries without hiding the conversation', async () => {
@@ -1918,16 +1956,14 @@ describe('IdeAgent', () => {
     expect(host.textContent).not.toContain('Load earlier messages');
   });
 
-  it('supports keyboard cancel and visible server errors when closing a conversation', async () => {
+  it('supports keyboard cancel and restores the row with a visible error when close fails', async () => {
     api.listAgentGates.mockResolvedValue([]);
     ({host, root} = await renderAgent('/agent'));
     const conversations = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
       button.textContent?.includes('Conversations'),
     );
     await act(async () => conversations?.click());
-    const close = host.querySelector<HTMLButtonElement>(
-      '[aria-label="Close conversation Web agent"]',
-    );
+    const close = host.querySelector<HTMLButtonElement>('.agent-conversation-close');
     await act(async () => close?.click());
     expect(host.querySelector('[role="dialog"][aria-label="Close conversation?"]')).not.toBeNull();
     expect(document.activeElement?.getAttribute('tabindex')).toBe('-1');
@@ -1937,9 +1973,7 @@ describe('IdeAgent', () => {
     expect(api.closeAgentSession).not.toHaveBeenCalled();
 
     await act(async () => conversations?.click());
-    const closeAgain = host.querySelector<HTMLButtonElement>(
-      '[aria-label="Close conversation Web agent"]',
-    );
+    const closeAgain = host.querySelector<HTMLButtonElement>('.agent-conversation-close');
     await act(async () => closeAgain?.click());
     api.closeAgentSession.mockRejectedValueOnce(new Error('archive service unavailable'));
     const confirm = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
@@ -1950,5 +1984,171 @@ describe('IdeAgent', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toContain(
       'archive service unavailable',
     );
+    // The optimistically removed row is restored after the server rejection
+    // (the drawer stayed open across the failed background archive).
+    expect(host.querySelector('.agent-conversation-close')).not.toBeNull();
+  });
+
+  it('removes a closed conversation optimistically without awaiting the server', async () => {
+    api.listAgentGates.mockResolvedValue([]);
+    let resolveClose: (() => void) | null = null;
+    api.closeAgentSession.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveClose = resolve;
+        }),
+    );
+
+    ({host, root} = await renderAgent('/agent'));
+    const conversations = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Conversations'),
+    );
+    await act(async () => conversations?.click());
+    const close = host.querySelector<HTMLButtonElement>('.agent-conversation-close');
+    if (!close) throw new Error('Close control was not rendered.');
+    await act(async () => close.click());
+    const confirm = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Close conversation',
+    );
+    if (!confirm) throw new Error('Confirm control was not rendered.');
+    await act(async () => confirm.click());
+
+    // The row is gone and the modal is closed while the archive request is
+    // still in flight — removal must not wait on the server round-trip.
+    expect(api.closeAgentSession).toHaveBeenCalledWith('s1');
+    expect(resolveClose).not.toBeNull();
+    expect(host.querySelector('[role="dialog"][aria-label="Close conversation?"]')).toBeNull();
+    expect(host.querySelector('.agent-conversation-close')).toBeNull();
+    // Empty is now a designed state, not a bare sentence.
+    expect(host.textContent).toContain('No conversations yet');
+
+    // Server completion keeps the closed row hidden even if the list still
+    // returns its archived shell.
+    api.listAgentSessions.mockResolvedValue([{...session, status: 'ARCHIVED'}]);
+    await act(async () => {
+      resolveClose?.();
+    });
+    await flush();
+    expect(host.querySelector('.agent-conversation-close')).toBeNull();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+  // ── Phone run card ───────────────────────────────────────────────────────
+  //
+  // On a 375x667 screen the run card used to be taller than the whole
+  // transcript, so a conversation with an active run showed no conversation at
+  // all. Its descriptive rows now sit behind a disclosure on phones ONLY, and a
+  // running paid job must never be able to hide: phase, progress and Stop stay
+  // outside it, and every fact stays in the DOM at both sizes.
+
+  function renderRunCard(): HTMLDivElement {
+    const local = document.createElement('div');
+    document.body.appendChild(local);
+    const localRoot = createRoot(local);
+    root = localRoot;
+    host = local;
+    act(() => {
+      localRoot.render(
+        <AgentConversation
+          messages={[]}
+          streamEvents={[]}
+          streamText=''
+          isBusy={false}
+          visibleAction={null}
+          gates={[]}
+          runCard={
+            {
+              runId: 'run-phone',
+              status: 'WORKING',
+              runTitle: 'Add replay protection',
+              aiProvider: 'OPENAI',
+              verifiedScore: null,
+              tasks: [{status: 'WORKING', title: 'Persist the ledger'}],
+            } as never
+          }
+          runCost={1.2}
+          runStreamStatus='CONNECTED'
+          input=''
+          attachments={[]}
+          uploading={false}
+          endRef={{current: null}}
+          dispatch={vi.fn()}
+          onScroll={vi.fn()}
+          onSend={vi.fn()}
+          onStop={vi.fn()}
+          onAddFiles={vi.fn()}
+          onRemoveAttachment={vi.fn()}
+          onConfirmAction={vi.fn()}
+          onApproveGate={vi.fn()}
+          onRejectGate={vi.fn()}
+          onOpenGate={vi.fn()}
+          onOpenRun={vi.fn()}
+          onStopRun={vi.fn()}
+        />,
+      );
+    });
+    return local;
+  }
+
+  function withPhoneViewport(matches: boolean) {
+    const original = (window as unknown as {matchMedia?: unknown}).matchMedia;
+    (window as unknown as {matchMedia: unknown}).matchMedia = (query: string) => ({
+      matches: matches && /max-width:\s*600px/.test(query),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    return () => {
+      if (original === undefined) delete (window as unknown as {matchMedia?: unknown}).matchMedia;
+      else (window as unknown as {matchMedia: unknown}).matchMedia = original;
+    };
+  }
+
+  it('keeps the run card fully inline when the viewport is not phone-sized', () => {
+    const restore = withPhoneViewport(false);
+    try {
+      const local = renderRunCard();
+      expect(local.querySelector('.agent-runcard-detail')).toBeNull();
+      expect(local.querySelector('.agent-runcard-mode')?.textContent).toContain('plan-gated');
+      expect(local.querySelector('.agent-runcard-kpis')).not.toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('moves only the run card descriptive rows behind a disclosure on a phone', () => {
+    const restore = withPhoneViewport(true);
+    try {
+      const local = renderRunCard();
+      const detail = local.querySelector('.agent-runcard-detail');
+      expect(detail).not.toBeNull();
+      // Every fact survives, inside the disclosure.
+      expect(detail?.querySelector('.agent-runcard-mode')?.textContent).toContain('plan-gated');
+      expect(detail?.querySelector('.agent-runcard-kpis')?.textContent).toContain('route');
+      // Live state and the stop control are never inside it.
+      expect(detail?.querySelector('.agent-runcard-phases')).toBeNull();
+      expect(detail?.querySelector('.agent-runcard-bar')).toBeNull();
+      expect(detail?.querySelector('.agent-runcard-actions')).toBeNull();
+      expect(local.querySelector('.agent-runcard-phases')).not.toBeNull();
+      const stop = [...local.querySelectorAll('.agent-runcard-actions button')].find((button) =>
+        /stop/i.test(button.textContent || ''),
+      );
+      expect(stop).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  it('offers one hint variant per width without dropping the accepted upload types', () => {
+    const restore = withPhoneViewport(false);
+    try {
+      const local = renderRunCard();
+      const hint = local.querySelector('.agent-composer-hint');
+      expect(hint?.querySelector('.agent-hint-full')?.textContent).toBe(
+        'attach image, PDF, Markdown, text',
+      );
+      expect(hint?.querySelector('.agent-hint-brief')?.textContent).toBe('attach files');
+    } finally {
+      restore();
+    }
   });
 });

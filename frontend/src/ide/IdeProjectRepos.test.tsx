@@ -84,8 +84,9 @@ describe('IdeProjectRepos semantic-index honesty', () => {
       await Promise.resolve();
     });
 
+    // The leading "+" is now a lucide <Plus/>, so the button's text is the label alone.
     const open = Array.from(host.querySelectorAll('button')).find(
-      (button) => button.textContent === '+ Link repo',
+      (button) => button.textContent?.trim() === 'Link repo',
     );
     await act(async () => {
       open?.click();

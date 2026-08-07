@@ -19,9 +19,12 @@ export interface Announcement {
  * publish without a redeploy. Set `enabled: false` to hide it.
  */
 export const ANNOUNCEMENT: Announcement = {
+  // Deliberately NOT bumped for the wording-only tightening below: the banner
+  // cost three full lines above the fold on a 375px phone, and re-opening it
+  // for everyone who already dismissed the same news would be worse than the
+  // long copy was. Bump the id for a genuinely new announcement.
   id: '2026-06-models',
   enabled: true,
   severity: 'info',
-  message:
-    'New models in the picker — Claude Opus 4.8, plus Mistral, GLM 5.2, MiniMax & Kimi via OpenRouter and Fireworks (Enterprise).',
+  message: 'New models in the picker — Opus 4.8, GLM 5.2, MiniMax, Kimi, Mistral.',
 };

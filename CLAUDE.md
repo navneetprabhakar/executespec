@@ -75,6 +75,13 @@ is loaded. Exact HTTP acceptance parsing is polarity-aware: an explicit 405/Meth
 constraint is not converted into a required producer route. Planning rejects an executable task
 that declares the forbidden method; final validation requires that method to be absent and another
 method to exist at the path, with methodless `ANY` mappings treated as violations.
+Exact-route verification is also stack-applicability aware (2026-08-05, dev run d7a99bb9): the
+Spring-only surface extractor reports whether any inspected repository root contains a Spring MVC
+mapping source. When exact routes are required but no root does (Node/Express, FastAPI, Go,
+plain-Java), `DeterministicHttpRequirementVerifier` returns the honest `unprovableForStack` state —
+recorded in the report issue ledger as "exact-route proof unavailable for this stack" — instead of
+terminating the run `FAILED / DETERMINISTIC_HTTP_REQUIREMENT_MISSING` by construction. Any root
+with a Spring surface keeps the full fail-closed missing/forbidden/405 semantics unchanged.
 V364 claims the exact persisted proposal with one durable conditional update, so a duplicate while
 CLAIMED conflicts, while QUEUED/COMPLETED duplicates replay one receipt without queueing or spending
 twice. Every server-side
@@ -641,7 +648,7 @@ credentials from the authenticated server-side principal and never cross-send th
 
 Run chat (`chat/ChatService`, the live post-run copilot — `agent/ConversationAgent` is the legacy path): terminal-runs-only Q&A over the run workspace + validation-report block, history on `pipeline_run.chat_history_json` (cap 50). `chat/ChatHistoryCodec` owns transcript JSON and the bounded provider window (newest 16 prior messages within 32k characters), while `RunChatEvidence` owns bounded server-side lifecycle grounding (specific failure reason, effective planner route, aggregate/phase tokens, cost, and plan-artifact presence); this prevents the umbrella `PLANNER_UNAVAILABLE` status or an empty pre-execution workspace from being misreported as provider downtime or proof that no outline was drafted. `ChatService` owns admission, evidence assembly, routing, and the tool loop. Routes through `LlmRouter` (LIGHTWEIGHT tier) with a manual tool loop (cap `MAX_TOOL_ROUNDS=4`) and a **read-only** tool set `chat/RunChatTools` (`list_run_files` / `read_run_file` capped 8k chars / `search_run_files` regex content search, reusing the worker `tool/SearchFilesTool`) so the copilot grounds suggestions in the actual generated code — strictly advisory, NO write/shell/push/re-run tool; code changes flow through "Iterate as new run" / "Apply to Run" which keep their own gates (RL-2026-05-047). Direct and forced-synthesis responses inspect provider finish reasons; output-limit prefixes are labeled `complete=false` / `PROVIDER_OUTPUT_LIMIT` with an actionable retry notice rather than being presented as complete. Phase-6 F12 applies `ContextSanitizer` to both the submitted message and the model reply before persistence/return, so recognized credential patterns cannot survive in chat history or leak through the response.
 
-Multi-repo PR creation: `ScmPushService.pushMultiRepo` handles GitHub per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`. Publication routing is source-authoritative: an explicit/durable GitHub route cannot be overridden by the presence of Bitbucket credentials; ambiguous dual-credential legacy runs fail closed, and selected Bitbucket project sources are rejected until their provider-neutral run/PR implementation exists. Apply-suggestion publication through `pushApplyChanges` is subject to the same canonical `PublicationAdmissionService` freshness/build/test/workflow/exact-route gate as normal push and deployment, followed by a persisted `BrownfieldHttpContractGuard.assertCompatible` comparison before credential lookup or any existing-branch Git call; blocked apply results carry an additive stable code, blocking gate, eligibility state, retry policy, and remediation. **RR-1668 (2026-07-21) — feature-branch pushes are no longer unconditionally forced.** `GitTool.pushToBranch` / `commitAndPushSubdir` / `pushToBranchBitbucket` (RR-900 only covered the default-branch case) replaced `--force` with an EXPLICIT `--force-with-lease=<branch>:<expected-remote-sha>` when `ScmPushService` can prove the run cloned exactly that branch — the expected SHA is the branch's `run_repo_snapshot.commit_sha` captured at clone time, so a commit a human pushed after the clone aborts the push (`stale info`) instead of being overwritten. The explicit `:<sha>` form is mandatory: a bare `--force-with-lease` compares against the local remote-tracking ref, which an intervening fetch poisons. When the run did NOT clone the push branch (a fresh `executespec/<runId>` branch, or a re-run's `branchNamingPattern` output) there is no snapshot and the push is a plain, non-forced push that creates the branch when absent and rejects a divergent remote (non-fast-forward) rather than clobbering it. A re-run over a branch a human advanced now aborts by design. Fails safe: a snapshot-lookup error falls back to the plain non-forced push, never a blind force. PRs persisted to `pull_request_record` (V169 added `project_id` + `kind`; V170 added `ci_auto_fix_attempts`; V186 added `ci_status` columns). Webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `PullRequestSnapshot` carries `headSha` so PR refresh polls CI check-runs alongside merge state.
+Multi-repo PR creation: `ScmPushService.pushMultiRepo` handles GitHub per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`. **2026-08-05 (dev run b4a5f5bc):** each repository's push → PR creation → `pull_request_record` persistence is fault-isolated — an exception on one repo (previously an escaping `recordCreated` failure after the second PR already existed on GitHub) can no longer drop a sibling's durable record, skip the cross-link pass, or abort the loop. Record persistence for a PR that exists on GitHub retries once and otherwise logs a loud `PR RECORD LOST` line + SSE event with the exact URL and surfaces it in the `PushResult` message; the cross-link pass runs over every created PR (best-effort per PR) and is idempotent via `buildCrossLinkedBody`, which strips any existing sibling section before appending. Pinned by `ScmPushServiceMultiRepoRecordFaultIsolationTest`. Publication routing is source-authoritative: an explicit/durable GitHub route cannot be overridden by the presence of Bitbucket credentials; ambiguous dual-credential legacy runs fail closed, and selected Bitbucket project sources are rejected until their provider-neutral run/PR implementation exists. Apply-suggestion publication through `pushApplyChanges` is subject to the same canonical `PublicationAdmissionService` freshness/build/test/workflow/exact-route gate as normal push and deployment, followed by a persisted `BrownfieldHttpContractGuard.assertCompatible` comparison before credential lookup or any existing-branch Git call; blocked apply results carry an additive stable code, blocking gate, eligibility state, retry policy, and remediation. **RR-1668 (2026-07-21) — feature-branch pushes are no longer unconditionally forced.** `GitTool.pushToBranch` / `commitAndPushSubdir` / `pushToBranchBitbucket` (RR-900 only covered the default-branch case) replaced `--force` with an EXPLICIT `--force-with-lease=<branch>:<expected-remote-sha>` when `ScmPushService` can prove the run cloned exactly that branch — the expected SHA is the branch's `run_repo_snapshot.commit_sha` captured at clone time, so a commit a human pushed after the clone aborts the push (`stale info`) instead of being overwritten. The explicit `:<sha>` form is mandatory: a bare `--force-with-lease` compares against the local remote-tracking ref, which an intervening fetch poisons. When the run did NOT clone the push branch (a fresh `executespec/<runId>` branch, or a re-run's `branchNamingPattern` output) there is no snapshot and the push is a plain, non-forced push that creates the branch when absent and rejects a divergent remote (non-fast-forward) rather than clobbering it. A re-run over a branch a human advanced now aborts by design. Fails safe: a snapshot-lookup error falls back to the plain non-forced push, never a blind force. PRs persisted to `pull_request_record` (V169 added `project_id` + `kind`; V170 added `ci_auto_fix_attempts`; V186 added `ci_status` columns). Webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `PullRequestSnapshot` carries `headSha` so PR refresh polls CI check-runs alongside merge state.
 
 Tech debt (`project/techdebt/`): rolls up `validation_report.issues_json` into category / severity / file hotspots / dimension trend. Surfaced on the project Overview tab. The "Fix" button per category dispatches a patch-mode run via `TechDebtFixService` (autofix Phase 2).
 
@@ -926,10 +933,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | GET    | `/api/runs/{id}/events`               | SSE event stream (scoped token). `RunEvent` keeps legacy `payload` and adds `schemaVersion=1` + typed `data`; advisory task waves use `TASK_WAVE_PLAN`; evidence-gated initial route explanations use `INITIAL_ROUTING_DECISION`; goal/continuation decisions use `GOAL_DECISION` and `CONTINUATION_DECISION`; automatic selected-candidate continuation reruns use `CONTINUATION_ACTION`, while limit-blocked rerun recommendations use `CONTINUATION_ACTION_SKIPPED`. Goal/continuation decision/action events also trigger a fresh `RUN_DETAIL` push so the Steps tab sees persisted upgrade proposals live. |
 | GET    | `/api/runs/{id}/sse-token`            | Get scoped SSE token (5-min TTL).                                                                                                                                                                                                                                                           |
 | GET    | `/api/runs/{id}/event-log`            | Persisted run-event replay (24h Redis `sse:replay:{id}`) — backs the IDE run-detail **Logs** tab (RL-2026-05-046). Run-read guarded.                                                                                                                                                        |
-| GET    | `/api/runs/{id}/publication-eligibility` | Read-only deterministic publication preview. Returns ELIGIBLE/BLOCKED plus the exact gate, stable code, remediation, retryability, and evidence/current workspace generations; protected-contract inspection does not rewrite durable comparison evidence. |
+| GET    | `/api/runs/{id}/publication-eligibility` | Read-only deterministic publication preview. Returns ELIGIBLE/BLOCKED plus the exact gate, stable code, remediation, retryability, and evidence/current workspace generations; protected-contract inspection does not rewrite durable comparison evidence. Additive `alreadyPublished` + `publishedPrUrls[]` acknowledge durable created-PR evidence (`pull_request_record` rows, falling back to the run row's persisted PR URL) via `integration/scm/PublicationEligibilityPresenter` without changing the gate verdict, so a BLOCKED re-publication does not contradict a visibly merged PR. |
 | GET    | `/api/executions/{id}/requirement-gate` | Compatibility route resolving the canonical pipeline run after project and run read guards. |
 | POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                                                                                                                                                     |
-| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                                                                                                                                                    |
+| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status. Additive (2026-08-05): `ciStatusReason` (`WEBHOOK_NOT_INSTALLED` only when `ciStatus` is UNKNOWN and `project_repo.webhook_installed` proves no webhook; null when unknown) + `repoId` so the client can offer `POST /api/repos/{repoId}/webhook`. |
 | GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning fields, `schemaVersion=1`, and separate physical/successful/failed attempt counts. Per-attempt `stepCalls[]` detail is ORG_ADMIN/SUPER_ADMIN-only: lower-privileged callers get `stepCallsIncluded=false` + `stepCallsRestrictedReason` + `stepCallsTotal` so the UI can say "withheld", not "none" (RR-1552). |
 | POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                                                                                                                                                     |
 | POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                                                                                                                                               |
@@ -1308,7 +1315,13 @@ same transaction. The receipt binds the exact plan, continuation, RequirementIR 
 resolution source, actor/effective authority, payer, provider/key provenance, managed-AI,
 governance, the run's provider/execution mode, distinct fixed-six-decimal `estimateHighUsd` and
 nullable `hardCapUsd`, expected and confirmed credits, and breaking-change outcomes without
-credential material. When a contract report requires typed acknowledgement, the canonical receipt
+credential material. The six-decimal money strings mirror the integrity trigger's PostgreSQL
+semantics exactly — the exact binary double rounded to 15 significant digits half-even (the
+`float8::numeric` / C `%.15g` cast) before six-decimal half-up scaling — because on shortest-
+representation boundaries such as `0.5961704999999999` the previous `BigDecimal.valueOf` path
+produced `0.596170` while the deferred trigger recomputed `0.596171` and rejected every
+APPROVE/REJECT/CANCEL commit for that run (2026-08-05 dev run e7f599b7; pinned by
+`PlanGateDecisionDecimalParityTest` with live-PostgreSQL-verified vectors). When a contract report requires typed acknowledgement, the canonical receipt
 snapshots and cross-binds the report's exact digest, `requiresTypedAck`, acknowledgement timestamp,
 acknowledging actor, and exact stored text. New acknowledgements persist uppercase `BREAKING`;
 complete pre-V348 acknowledgement tuples remain byte-exact while validity is checked by trimmed,
@@ -1320,6 +1333,30 @@ RequirementIR approval requires one.
 APPROVE atomically moves gate `PENDING → APPROVED`, run `AWAITING_APPROVAL → APPROVAL_RESUMING`,
 and outbox `WAITING → READY`. REJECT and pre-approval CANCEL are distinct decisions and atomically
 cancel the run/outbox; cancellation after approval preserves the immutable APPROVE receipt.
+Approval auditability (2026-08-05): a first-time customer APPROVE/REJECT also publishes
+`PlanGateDecisionCommitted` in-transaction; `activity/PlanGateDecisionActivityListener` consumes it
+AFTER_COMMIT + async and appends dual-surface `RUN_PLAN_APPROVED`/`RUN_PLAN_REJECTED` entries to
+the project activity feed and the append-only `activity_audit` chain carrying the real human
+decider (user id + email/display), so approvals no longer appear actorless/SYSTEM. Replays never
+reach the publish site, so no duplicate event is appended. The polling PR refresh path likewise
+emits transition-guarded `PR_MERGED`/`PR_CLOSED` activity (webhook path already did).
+
+Structurally broken durable gate state (2026-08-05) is a typed outcome, not an opaque failure. A
+missing gate row, missing continuation-outbox row, gate/continuation identity or payload-digest
+mismatch, invalid continuation payload, or missing immutable plan artifact — the partial-state
+class an interrupted rolling deploy can leave behind — is classified by
+`BrokenPlanGateStateException` inside the same decision transaction. APPROVE refuses with a stable
+`409 PLAN_GATE_STATE_UNRECOVERABLE[<code>]` conflict plus a cancel-and-resubmit remediation and
+never bypasses the gate. REJECT and pre-approval CANCEL succeed by fencing the run (and any
+surviving outbox row) to terminal `CANCELLED` with the typed reason persisted in
+`pipeline_run.failure_reason` / `plan_gate_resume_outbox.last_error`, so a customer can always stop
+a broken run. The fence never fabricates a receipt: a broken PENDING gate row is left byte-untouched
+because no canonical `DecisionEvidenceV1` can truthfully be written against corrupt rows, and
+resolved-gate receipts remain immutable. Fencing applies only while the run is `AWAITING_APPROVAL`;
+any other status keeps the prior typed conflict. A scheduled sweep that proactively fences broken
+`AWAITING_APPROVAL` rows older than a bound (with failed-run credit compensation) remains a
+documented follow-up — `PlanGateResumeStore`'s dead-letter sweep only observes outbox rows and
+cannot see a run whose outbox row is missing.
 
 The 400-line transaction coordinator delegates the exact 73-field receipt plus replay verification
 to package-private `PlanGateDecisionEvidence` (478 lines), and locked policy/credential/governance/
@@ -1753,7 +1790,21 @@ evidence, and horizontally scaled JVMs require a shared persistent trajectory ro
 - **Run completion DTO truthfulness** — persisted COMPLETE remains an execution/recovery boundary,
   not sufficient customer proof. If any task has durable non-DONE goal evidence, run detail and
   list DTOs expose the task and run as PARTIAL with `TASK_PROOF_INCOMPLETE` without rewriting
-  recovery state.
+  recovery state. **2026-08-05 batch:** the same fail-closed projection now also covers the
+  single-run summary responses (submit/fork ACK, project reassignment — `RunMapper` loads the
+  task-proof evidence itself for persisted-COMPLETE rows) and the project dashboard's recent-run
+  rows (`ProjectDashboardController` batch-loads tasks and calls `RunMapper.displayRunStatus`).
+  Additive DTO facts: `RunDetail.creditsRefunded` + `RunTerminalOutcome.Impact.creditsRefunded`
+  (durable V300 `run_quota_refund` evidence; null = not applicable/unresolved), report DTO
+  `modelsUsed`/`routeAttribution` with legacy `modelUsed` carrying literal `"MIXED"` on
+  multi-route runs, and `runGoalDecision.independentProofGapOnly` (true exactly when the only
+  remaining goal gap is the independent-functional-scope gap). Terminal-success projections
+  suppress non-structured `failureReason` text (success prose never renders as a failure reason;
+  the `PUBLICATION_BLOCKED[<code>]` marker and `CODE`/`CODE[...]`-shaped values survive), and the
+  operator-grade `TaskSummary.continuationDecision.policy` subtree is withheld from viewers who
+  fail `CostVisibilityPolicy.canViewRawCost` with an explicit `{"included": false,
+  "restrictedReason": "ORG_BILLING_ROLE_REQUIRED"}` marker (SSE `RUN_DETAIL` pushes are
+  fail-closed restricted; the authenticated REST detail passes the viewer).
 - **Multi-task worker scope (2026-07-24)** — worker evidence omits the full original spec, names
   later tasks/files as reserved future scope, and makes the current task description/constraints
   the sole deliverable. Existing generated code/tests are untrusted intermediate output: later

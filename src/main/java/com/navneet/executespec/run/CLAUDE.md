@@ -1,6 +1,34 @@
 # Run admission, idempotency, and iteration
 
-## Terminal outcome and workspace recovery (2026-08-02)
+## Run-DTO truthfulness batch (2026-08-05)
+
+- `RunTerminalOutcome.Impact` gains additive `creditsRefunded` (Boolean, three-valued): the new
+  `RunTerminalOutcomeContract.project(..., Boolean creditsRefunded)` overload appends "The run
+  credit charged for this run was refunded." to the customer message when TRUE and surfaces the
+  fact on the impact record; FALSE states only the impact field; null means unresolved (success
+  outcomes, list projections, legacy callers). The fact is read from the durable V300
+  `run_quota_refund` compensation ledger by `api/RunMapper` for run-detail reads; a PENDING row is
+  refund evidence because the refund worker applies it idempotently.
+- `RunTerminalOutcomeDefinitions` is the package-private factory collaborator extracted from
+  `RunTerminalOutcomeContract` (600-line architecture gate). Pure copy/category/disposition
+  tuples; classification stays in the contract.
+
+## Planner-block copy split (2026-08-07)
+
+`PLANNER_RECOVERY_POLICY_BLOCKED` is one `statusReason` covering NINE distinct
+`PlannerRecoveryPolicyBlockedException.Code` causes, and it was rendered as a single sentence
+claiming "bounded recovery could not produce an approvable plan". That is true for exhaustion codes
+only. Dev run `322919af` stopped on `ROUTE_PINNED`: escalating to a different PLANNING route IS the
+designed recovery, the run's `EXACT_LOCK` pin forbade it, so recovery was never attempted — and the
+derived `retryable=false` was equally false, since resubmitting without the pin proceeds normally.
+
+`run/outcome/PlannerRecoveryOutcomeCopy` recovers the specific code from the leading `"<CODE>: "`
+token `RunPlanningCoordinator` persists in `pipeline_run.failure_reason` and branches the copy:
+`ROUTE_PINNED` / `CONFIRMATION_REQUIRED` / `BENCHMARK_EVIDENCE_REQUIRED` name the exact setting to
+change and stay retryable (`RunTerminalOutcomeDefinitions.resubmitRequired`, `START_NEW_RUN` →
+`/compose`); `NO_AVAILABLE_MATRIX_ROUTE` points at the org model matrix; the two route/config faults
+are a plain retry; every exhaustion code and any UNRECOGNISED token keeps the original non-retryable
+wording, because an unknown token is not evidence that a lever exists. The stop itself is unchanged.
 
 `run/outcome/RunTerminalOutcomeContract` is the additive customer-safe interpretation of terminal
 runs. Persisted forensic fields remain unchanged; API/Web/email/in-app consumers use the safe

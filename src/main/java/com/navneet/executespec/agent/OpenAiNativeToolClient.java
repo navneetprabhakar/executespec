@@ -133,6 +133,7 @@ public class OpenAiNativeToolClient {
   private int configuredReadTimeoutSeconds = (int) READ_TIMEOUT.toSeconds();
 
   private final ObjectMapper objectMapper;
+  private final StreamingTransportPolicy streamingPolicy;
 
   @Value("${spring.ai.openai.api-key:}")
   private String defaultApiKey;
@@ -179,6 +180,26 @@ public class OpenAiNativeToolClient {
     // connection or stalled body never blocks the harness loop indefinitely while keeping TCP/TLS
     // pooling across the many attempts a worker makes.
     RestClient client = resolveClient(effectiveBaseUrl, effectiveReadTimeout(request));
+
+    // Streaming replaces one ambiguous deadline with a time-to-first-token signal that can actually
+    // distinguish "not answering" from "answering slowly". The assembled body is byte-compatible
+    // with the non-streaming shape, so parseResponse and every billing field below are unchanged.
+    if (streamingPolicy != null && streamingPolicy.openAiWireEnabled()) {
+      JsonNode streamed =
+          OpenAiWireStreamTransport.stream(
+              client,
+              completionsPath,
+              apiKey,
+              body,
+              streamingPolicy,
+              effectiveReadTimeout(request),
+              request::signalPhysicalAttemptStarted,
+              request.model(),
+              BOUNDED_RESPONSE_MAPPER,
+              MAX_RESPONSE_BYTES);
+      return parseResponse(streamed, request.model());
+    }
+
     request.signalPhysicalAttemptStarted();
     JsonNode response;
     try {

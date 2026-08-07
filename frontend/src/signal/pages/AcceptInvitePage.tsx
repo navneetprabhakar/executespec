@@ -15,7 +15,7 @@ function FormError({msg}: {msg: string}) {
         background: 'var(--signal-coral-soft)',
         color: 'var(--signal-coral-text)',
         border: '1px solid var(--signal-coral)',
-        borderRadius: 10,
+        borderRadius: 'var(--ide-r-card)',
         padding: '10px 14px',
         marginBottom: 12,
         fontSize: 13,

@@ -24,6 +24,7 @@ class SecurityConfigCorsTest {
             mock(CookieOAuth2AuthorizationRequestRepository.class),
             new SecurityProperties(),
             mock(JsonAuthenticationEntryPoint.class),
+            mock(JsonAccessDeniedHandler.class),
             "none",
             "none");
     ReflectionTestUtils.setField(

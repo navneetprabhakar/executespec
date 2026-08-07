@@ -1,10 +1,11 @@
+import {Check} from 'lucide-react';
 import {useEffect, useState} from 'react';
 import {Link, Navigate, useLocation, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {IdeBadge, IdeLoader, statusKind} from '@/ide/IdeKit';
 import {SpecChat} from '@/signal/components/SpecChat';
 import {repoDisplayName, repoIdFor, relTime} from '@/signal/lib/runUtils';
-import {ProjectTabs} from '@/ide/IdeProjectTabs';
+import {ProjectTabs, runStatusLabel} from '@/ide/IdeProjectTabs';
 import {LoadError} from '@/ide/LoadError';
 import {toLoadFailure, type LoadFailure} from '@/lib/loadState';
 import {isActiveRunStatus} from '@/lib/runStatus';
@@ -309,7 +310,9 @@ export default function IdeProject() {
           <div className='ide-kv' style={{borderBottom: 'none'}}>
             <span>Latest</span>
             <span>
-              {lastRun ? `${lastRun.status} · ${fmtWhen(lastRun.startedAt)}` : 'No work yet'}
+              {lastRun
+                ? `${runStatusLabel(lastRun.status)} · ${fmtWhen(lastRun.startedAt)}`
+                : 'No work yet'}
             </span>
           </div>
         </div>
@@ -376,7 +379,14 @@ export default function IdeProject() {
                     canRun && setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))
                   }
                 >
-                  {on ? '✓ ' : ''}
+                  {on ? (
+                    <Check
+                      size={13}
+                      strokeWidth={2.25}
+                      aria-hidden='true'
+                      style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 4}}
+                    />
+                  ) : null}
                   {repoDisplayName(r)}
                   {!canRun ? ' · browse only' : ''}
                 </button>
@@ -409,7 +419,7 @@ export default function IdeProject() {
           </select>
           <div
             role={selectedProviderReady ? 'status' : 'alert'}
-            style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}
+            style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}
           >
             {providerReadiness.error
               ? 'Provider readiness unavailable; starting work is disabled.'
@@ -429,7 +439,7 @@ export default function IdeProject() {
               options={modelPickerOptions}
               onChange={setModelName}
             />
-            <div style={{fontSize: 11, color: 'var(--ide-fg-muted)', marginTop: 4}}>
+            <div style={{fontSize: 12, color: 'var(--ide-fg-muted)', marginTop: 4}}>
               Overrides this run only
             </div>
           </div>
@@ -503,7 +513,7 @@ export default function IdeProject() {
                 {(r.runTitle || r.userRequest || r.runId).slice(0, 70)}
               </div>
               <div className='ide-run-meta'>
-                <IdeBadge kind={statusKind(r.status)}>{r.status}</IdeBadge>
+                <IdeBadge kind={statusKind(r.status)}>{runStatusLabel(r.status)}</IdeBadge>
                 <span>{fmtWhen(r.startedAt)}</span>
               </div>
             </Link>

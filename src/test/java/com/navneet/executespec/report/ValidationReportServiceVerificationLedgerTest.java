@@ -734,7 +734,8 @@ class ValidationReportServiceVerificationLedgerTest {
             stateStore,
             reviewScoringService,
             flags,
-            events::add);
+            events::add,
+            null);
     PipelineRun run =
         PipelineRun.builder()
             .runId("run-1")
