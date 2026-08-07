@@ -19,8 +19,11 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Periodically emits a progress line as a {@code LOG} SSE event during long pipeline phases, so the
  * live log keeps moving while the worker sits inside a multi-minute LLM call and no other event is
- * flowing. Doubles as a heartbeat that keeps the SSE stream warm on proxies with short idle
- * timeouts.
+ * flowing.
+ *
+ * <p>This is progress copy, NOT the stream keepalive: {@code SseBroadcaster} owns an independent
+ * 15-second heartbeat and a 30-second send-stall watchdog. Pacing here can therefore be chosen for
+ * readability without putting a socket at risk.
  *
  * <p>Call {@link #start(String, String)} when a phase begins (PLANNING / WORKING / REVIEWING /
  * VALIDATING), {@link #stop(String)} when it ends. Safe to start/stop repeatedly per run; each call
@@ -48,7 +51,15 @@ import lombok.extern.slf4j.Slf4j;
 public class PerkyMessenger {
 
   private static final long INITIAL_DELAY_SEC = 12;
-  private static final long INTERVAL_SEC = 15;
+
+  /**
+   * 30s, not 15s. At 15s a long phase produced a wall of lines faster than anyone reads them, which
+   * is what made the log feel like noise even once the bank was large. This is safe as a pure
+   * pacing choice because this messenger is NOT the keepalive of record: {@code SseBroadcaster}
+   * runs its own independent 15-second heartbeat plus a 30-second send-stall watchdog, so a quiet
+   * socket is retired on that clock regardless of what is emitted here.
+   */
+  private static final long INTERVAL_SEC = 30;
 
   private record Phase(String headline, String[] context) {}
 

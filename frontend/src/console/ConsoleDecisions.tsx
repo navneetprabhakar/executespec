@@ -7,6 +7,13 @@ import {StatusDot} from '@/ide/IdeIcons';
 import {relTime, runTitleFor} from '@/signal/lib/runUtils';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {fmtCost} from '@/lib/utils';
+import {
+  loadSkips,
+  skipDecision,
+  unskipDecision,
+  skippedIds,
+  type DecisionSkip,
+} from './decisionSkips';
 
 const TERMINAL = ['COMPLETE', 'COMPLETED', 'FAILED', 'ERROR', 'CANCELLED', 'PARTIAL'];
 const isTerminal = (s?: string | null) => TERMINAL.includes((s || '').toUpperCase());
@@ -33,29 +40,67 @@ function decisionFor(
   return {label: 'Review result', to: `/result/${r.runId}`, tone: 'ok'};
 }
 
-function DecisionRow({r, prPending = 0}: {r: api.RunSummary; prPending?: number}) {
+function DecisionRow({
+  r,
+  prPending = 0,
+  skipped = false,
+  onSkip,
+  onUnskip,
+}: {
+  r: api.RunSummary;
+  prPending?: number;
+  skipped?: boolean;
+  onSkip?: (runId: string) => void;
+  onUnskip?: (runId: string) => void;
+}) {
   const navigate = useNavigate();
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const decision = decisionFor(r, prPending);
+  const title = runTitleFor(r);
   return (
-    <button
-      type='button'
-      className='con-runrow con-decision-row'
-      onClick={() => navigate(decision.to)}
-    >
-      <StatusDot kind={statusKind(r.status)} size={9} />
-      <span className='con-runrow-main'>
-        <span className='con-runrow-title'>{runTitleFor(r)}</span>
-        <span className='con-runrow-meta'>
-          {(r.projectName || 'Standalone') + ' · ' + relTime(r.startedAt)}
-          {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
-            ? ` · ${fmtCost(r.actualCostUsd)}`
-            : ''}
+    // A row, not a button: the skip control is a second action, and a button inside a button is
+    // invalid and unreachable by keyboard.
+    <div className='con-runrow con-decision-row'>
+      <button
+        type='button'
+        className='con-decision-open'
+        onClick={() => navigate(decision.to)}
+        aria-label={`${decision.label}: ${title}`}
+      >
+        <StatusDot kind={statusKind(r.status)} size={9} />
+        <span className='con-runrow-main'>
+          <span className='con-runrow-title'>{title}</span>
+          <span className='con-runrow-meta'>
+            {(r.projectName || 'Standalone') + ' · ' + relTime(r.startedAt)}
+            {isSuperAdmin && r.actualCostUsd != null && r.actualCostUsd > 0
+              ? ` · ${fmtCost(r.actualCostUsd)}`
+              : ''}
+          </span>
         </span>
-      </span>
-      {r.verifiedScore != null && <ScoreBadge score={r.verifiedScore} />}
-      <IdeBadge kind={decision.tone}>{decision.label}</IdeBadge>
-    </button>
+        {r.verifiedScore != null && <ScoreBadge score={r.verifiedScore} />}
+        <IdeBadge kind={decision.tone}>{decision.label}</IdeBadge>
+      </button>
+      {skipped ? (
+        <button
+          type='button'
+          className='ide-btn ghost con-decision-skip'
+          onClick={() => onUnskip?.(r.runId)}
+          title='Show this decision in your queue again'
+        >
+          Restore
+        </button>
+      ) : (
+        <button
+          type='button'
+          className='ide-btn ghost con-decision-skip'
+          onClick={() => onSkip?.(r.runId)}
+          // The run is untouched; be explicit, because "Skip" alone reads like a run action.
+          title='Hide from your queue. The run is not changed, cancelled, or rejected.'
+        >
+          Skip
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -65,6 +110,8 @@ export default function ConsoleDecisions() {
   const [prPending, setPrPending] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [skips, setSkips] = useState<DecisionSkip[]>(() => loadSkips());
+  const [showSkipped, setShowSkipped] = useState(false);
 
   const load = useCallback(() => {
     setLoadError(false);
@@ -101,14 +148,33 @@ export default function ConsoleDecisions() {
     load();
   }, [load]);
 
+  const skippedSet = skippedIds(skips);
+  const visible = (list: api.RunSummary[]) =>
+    showSkipped ? list : list.filter((r) => !skippedSet.has(r.runId));
+
   const gateIds = new Set(gate.map((r) => r.runId));
-  const active = runs.filter((r) => !isTerminal(r.status) && !gateIds.has(r.runId));
-  const pendingPrRuns = runs.filter(
-    (r) => prPending[r.runId] && !gate.some((g) => g.runId === r.runId),
+  const active = visible(runs.filter((r) => !isTerminal(r.status) && !gateIds.has(r.runId)));
+  const pendingPrRuns = visible(
+    runs.filter((r) => prPending[r.runId] && !gate.some((g) => g.runId === r.runId)),
   );
-  const failures = runs.filter((r) => isFailed(r.status) && !gateIds.has(r.runId)).slice(0, 8);
+  const failures = visible(runs.filter((r) => isFailed(r.status) && !gateIds.has(r.runId))).slice(
+    0,
+    8,
+  );
+  const gateVisible = visible(gate);
+  // Count only rows a skip is actually hiding right now, so the notice never claims work is
+  // hidden when the underlying run has already left the queue on its own.
+  const hiddenCount = showSkipped
+    ? 0
+    : [...gate, ...runs].filter((r) => skippedSet.has(r.runId)).length;
   const hasAny =
-    gate.length > 0 || active.length > 0 || pendingPrRuns.length > 0 || failures.length > 0;
+    gateVisible.length > 0 || active.length > 0 || pendingPrRuns.length > 0 || failures.length > 0;
+
+  const rowSkipProps = (runId: string) => ({
+    skipped: skippedSet.has(runId),
+    onSkip: (id: string) => setSkips(skipDecision(id)),
+    onUnskip: (id: string) => setSkips(unskipDecision(id)),
+  });
 
   return (
     <div className='con-home con-decisions'>
@@ -143,11 +209,11 @@ export default function ConsoleDecisions() {
         <div className='con-empty'>Nothing needs attention right now.</div>
       ) : (
         <>
-          {gate.length > 0 && (
+          {gateVisible.length > 0 && (
             <section className='con-section'>
               <div className='con-section-title attn'>Approve plans</div>
-              {gate.map((r) => (
-                <DecisionRow key={r.runId} r={r} />
+              {gateVisible.map((r) => (
+                <DecisionRow key={r.runId} r={r} {...rowSkipProps(r.runId)} />
               ))}
             </section>
           )}
@@ -155,7 +221,7 @@ export default function ConsoleDecisions() {
             <section className='con-section'>
               <div className='con-section-title'>In progress</div>
               {active.map((r) => (
-                <DecisionRow key={r.runId} r={r} />
+                <DecisionRow key={r.runId} r={r} {...rowSkipProps(r.runId)} />
               ))}
             </section>
           )}
@@ -163,7 +229,12 @@ export default function ConsoleDecisions() {
             <section className='con-section'>
               <div className='con-section-title attn'>PR review comments</div>
               {pendingPrRuns.map((r) => (
-                <DecisionRow key={r.runId} r={r} prPending={prPending[r.runId]} />
+                <DecisionRow
+                  key={r.runId}
+                  r={r}
+                  prPending={prPending[r.runId]}
+                  {...rowSkipProps(r.runId)}
+                />
               ))}
             </section>
           )}
@@ -171,11 +242,24 @@ export default function ConsoleDecisions() {
             <section className='con-section'>
               <div className='con-section-title attn'>Failures</div>
               {failures.map((r) => (
-                <DecisionRow key={r.runId} r={r} />
+                <DecisionRow key={r.runId} r={r} {...rowSkipProps(r.runId)} />
               ))}
             </section>
           )}
         </>
+      )}
+
+      {(hiddenCount > 0 || showSkipped) && (
+        <div className='con-decision-hidden'>
+          <span>
+            {showSkipped
+              ? 'Showing decisions you hid from this queue. The runs themselves were never changed.'
+              : `${hiddenCount} decision${hiddenCount === 1 ? '' : 's'} hidden from your queue. The run${hiddenCount === 1 ? ' is' : 's are'} unchanged.`}
+          </span>
+          <button type='button' className='ide-btn ghost' onClick={() => setShowSkipped((v) => !v)}>
+            {showSkipped ? 'Hide them again' : 'Show hidden'}
+          </button>
+        </div>
       )}
     </div>
   );

@@ -918,8 +918,43 @@ button.con-side-empty:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.con-runrow > .ide-badge:last-child {
+.con-runrow > .ide-badge:last-child,
+.con-decision-open > .ide-badge:last-child {
   flex: 0 0 108px;
+}
+/* A decision row carries two actions — open it, or hide it from the queue — so the row itself is
+   a container and the navigation is a transparent button filling it. It must not paint a second
+   edge or its own background; the row already owns both. */
+.ide-root .con-decision-open {
+  display: flex;
+  align-items: center;
+  gap: var(--ide-s3);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ide-root .con-decision-row .con-decision-skip {
+  flex: 0 0 auto;
+}
+.ide-root .con-decision-hidden {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ide-s3);
+  flex-wrap: wrap;
+  margin-top: var(--ide-s4);
+  padding: var(--ide-s3);
+  font-size: var(--ide-t-caption);
+  color: var(--ide-fg-muted);
+  border: 1px solid var(--ide-border);
+  border-radius: var(--ide-r-card);
+  background: color-mix(in srgb, var(--ide-bg-sidebar) 72%, var(--ide-bg-editor));
 }
 /* A hairline + tint, not a dashed placeholder. */
 .con-empty {

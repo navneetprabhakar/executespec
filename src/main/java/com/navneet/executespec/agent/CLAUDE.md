@@ -7,6 +7,36 @@ framework-list prose. `LlmRouter` guarantees positive Anthropic `max_tokens`: ex
 limits win, otherwise the registered limit is used with a bounded fallback. Verify without a live
 Anthropic call.
 
+## Streamed OpenAI-wire transport (2026-08-07, ships OFF)
+
+`StreamingTransportPolicy` + `OpenAiWireStreamTransport` + `OpenAiWireStreamAssembler` add a
+streamed path for the OpenAI-wire providers (OpenAI, OpenRouter, DeepSeek, Fireworks).
+
+**Why.** A non-streaming call yields one bit of information and only when it expires, so "the model
+is generating and will answer at 239s" and "the socket is dead" are indistinguishable until the
+deadline. Dev run `350fd2fc` is what losing that bet looks like: three outline attempts, 240s each,
+zero tokens either direction, twelve minutes to learn nothing. Streaming replaces one deadline with
+time-to-first-token (60s — the only signal that separates "not answering" from "answering slowly"),
+a deliberately loose 180s inter-chunk backstop (Anthropic documents real gaps while a model emits
+tool input, and every call here is a forced tool call), and a 900s total ceiling consumed only while
+tokens actually arrive. `totalFor` may tighten to a caller ceiling, never widen it.
+
+**What it does NOT buy.** Partial recovery. Tool-use blocks cannot be partially recovered, so a
+stream that dies mid-tool is still a total loss of that call. This is FAST DETECTION, not credit.
+
+**Design.** Streaming is a transport concern only: the assembler folds SSE back into the exact
+non-streaming `chat/completions` shape, so `parseResponse` — which owns tool-call normalization, the
+abnormal-finish gate and every billing field — is reused untouched. Tool `arguments` arrive as
+partial JSON keyed by wire `index` and must be concatenated in arrival order; a malformed frame
+fails closed rather than silently truncating them. `stream_options.include_usage` is required or
+every call would look free.
+
+**Shipping OFF (`executespec.llm.streaming.openai-wire.enabled`, default false).** Two things are
+unproven: the 60s TTFT is reasoned rather than measured (no live call has gone through this
+transport), and an interrupted stream reaches the cost tracker with no usage node — absent, not
+recorded-unknown. Turning it on is an explicit decision backed by a live measurement. Gemini and
+Anthropic transports are not written; their flags are placeholders.
+
 ## Prompt authority boundary (2026-07-18)
 
 `PromptTrustBoundary` is the shared repository/project evidence wrapper. It normalizes Unicode

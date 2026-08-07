@@ -13,7 +13,7 @@ class OpenAiNativeToolClientUsageTest {
   @Test
   void exposesNestedReasoningTokensWithoutRetainingProviderPayload() throws Exception {
     ObjectMapper mapper = new ObjectMapper();
-    OpenAiNativeToolClient client = new OpenAiNativeToolClient(mapper);
+    OpenAiNativeToolClient client = new OpenAiNativeToolClient(mapper, null);
     var responseJson =
         mapper.readTree(
             """
@@ -42,7 +42,7 @@ class OpenAiNativeToolClientUsageTest {
   @Test
   void acceptsDeepSeekTopLevelCacheCountersWithoutDoubleCounting() throws Exception {
     ObjectMapper mapper = new ObjectMapper();
-    OpenAiNativeToolClient client = new OpenAiNativeToolClient(mapper);
+    OpenAiNativeToolClient client = new OpenAiNativeToolClient(mapper, null);
     var responseJson =
         mapper.readTree(
             """
