@@ -1,5 +1,13 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import {ArrowLeft, ChevronDown, ChevronRight, ExternalLink, RefreshCw} from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
@@ -123,7 +131,13 @@ function SubChip({status, url}: {status: string; url?: string | null}) {
   const label = `submission: ${status.toLowerCase()}`;
   return url ? (
     <a href={url} target='_blank' rel='noreferrer' className='sysd-sub-chip' style={{color}}>
-      {label} ↗
+      {label}{' '}
+      <ExternalLink
+        size={12}
+        strokeWidth={1.75}
+        aria-hidden='true'
+        style={{display: 'inline-block', verticalAlign: '-0.1em', marginLeft: 4}}
+      />
     </a>
   ) : (
     <span className='sysd-sub-chip' style={{color}}>
@@ -241,7 +255,7 @@ function RunRow({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
       <td className={TD}>k={r.k}</td>
       <td className={TD}>{fmtCost(r.costUsd)}</td>
       <td className={TD} style={{color: MUTED, whiteSpace: 'nowrap'}}>
-        {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
+        {fmtTok(r.inputTokens)} in · {fmtTok(r.outputTokens)} out
       </td>
       <td className={TD} style={{color: MUTED, whiteSpace: 'nowrap'}}>
         {r.activeAttemptCount ? `${r.activeAttemptCount} active · ` : ''}
@@ -305,7 +319,7 @@ function RunCard({r, onOpen}: {r: api.BenchmarkRun; onOpen: () => void}) {
       <div className='ide-benchmark-mobile-metrics'>
         <KV k='Cost'>{fmtCost(r.costUsd)}</KV>
         <KV k='Tokens'>
-          {fmtTok(r.inputTokens)}↑ {fmtTok(r.outputTokens)}↓
+          {fmtTok(r.inputTokens)} in · {fmtTok(r.outputTokens)} out
         </KV>
         <KV k='Attempts'>k={r.k}</KV>
         <KV k='Time'>{dateTime(r.createdAt)}</KV>
@@ -461,7 +475,11 @@ function AttemptPips({attempts, k}: {attempts: api.BenchmarkTaskResult[]; k: num
             style={{color: pass ? 'var(--ide-green)' : 'var(--ide-red)'}}
             title={`attempt ${i + 1}: ${pass ? 'pass' : 'fail'}${extra ? ` · ${extra}` : ''}`}
           >
-            {pass ? '✓' : '✗'}
+            {pass ? (
+              <Check size={12} strokeWidth={2.25} aria-hidden='true' />
+            ) : (
+              <X size={12} strokeWidth={2.25} aria-hidden='true' />
+            )}
           </span>
         );
       })}
@@ -492,9 +510,27 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
               <td className={`${TD} ide-mono`}>{g.taskName}</td>
               <td className={TD}>
                 {g.passed ? (
-                  <span style={{color: 'var(--ide-green)'}}>✓ resolved</span>
+                  <span
+                    style={{
+                      color: 'var(--ide-green)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Check size={12} strokeWidth={2.25} aria-hidden='true' /> resolved
+                  </span>
                 ) : g.done >= k || runDone ? (
-                  <span style={{color: 'var(--ide-red)'}}>✗ failed</span>
+                  <span
+                    style={{
+                      color: 'var(--ide-red)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <X size={12} strokeWidth={2.25} aria-hidden='true' /> failed
+                  </span>
                 ) : (
                   <span style={{color: MUTED}}>
                     … {g.done}/{k}
@@ -516,7 +552,7 @@ function TaskTable({groups, k, runDone}: {groups: TaskGroup[]; k: number; runDon
               </td>
               <td className={TD}>{fmtCost(g.cost)}</td>
               <td className={TD} style={{color: MUTED, whiteSpace: 'nowrap'}}>
-                {fmtTok(g.inTok)}↑ {fmtTok(g.outTok)}↓
+                {fmtTok(g.inTok)} in · {fmtTok(g.outTok)} out
               </td>
               <td className={TD}>
                 {g.runId ? (
@@ -653,7 +689,13 @@ function Detail({d}: {d: api.BenchmarkDetail}) {
           rel='noreferrer'
           style={{display: 'inline-block', marginTop: 12}}
         >
-          View on leaderboard ↗
+          View on leaderboard{' '}
+          <ExternalLink
+            size={12}
+            strokeWidth={1.75}
+            aria-hidden='true'
+            style={{display: 'inline-block', verticalAlign: '-0.1em', marginLeft: 4}}
+          />
         </a>
       )}
       {r.error && (

@@ -1664,9 +1664,23 @@ body {
   color: var(--signal-coral-text);
   font-weight: 600;
 }
+/* The status dot was a literal `●` in the markup. A dot is a shape, not a word:
+   drawing it here keeps it perfectly round at any font, sizes it to the text,
+   and leaves the accessible name as just "open". */
 .signal-pr-card .pr-meta .ci-ok {
   color: var(--signal-mint-text-on-light);
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.signal-pr-card .pr-meta .ci-ok::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
 }
 .signal-pr-card .pr-actions {
   display: flex;

@@ -1,3 +1,4 @@
+import {Check} from 'lucide-react';
 import {useEffect, useState} from 'react';
 import {Link, Navigate, useLocation, useNavigate, useParams} from 'react-router-dom';
 import * as api from '@/lib/api';
@@ -378,7 +379,14 @@ export default function IdeProject() {
                     canRun && setSelected((s) => (on ? s.filter((x) => x !== id) : [...s, id]))
                   }
                 >
-                  {on ? '✓ ' : ''}
+                  {on ? (
+                    <Check
+                      size={13}
+                      strokeWidth={2.25}
+                      aria-hidden='true'
+                      style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 4}}
+                    />
+                  ) : null}
                   {repoDisplayName(r)}
                   {!canRun ? ' · browse only' : ''}
                 </button>
