@@ -50,7 +50,7 @@ import {isProductProvider, productProviderCatalog} from '@/ide/agentModelRouting
 import {fmtCost} from '@/lib/utils';
 import {executeRunMutation} from '@/lib/runMutationAttempt';
 import {isTerminalRunStatus} from '@/lib/runStatus';
-import {liveRunResultPath} from '@/ide/liveRunRouting';
+import {liveRunNavigationPath} from '@/ide/liveRunRouting';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -1548,9 +1548,11 @@ export function IdeLive() {
         if (cost && typeof cost.costUsd === 'number') setLiveCost(cost.costUsd);
         if (cost && (cost.inputTokens != null || cost.outputTokens != null))
           setLiveTokens({in: cost.inputTokens ?? 0, out: cost.outputTokens ?? 0});
-        const resultPath = liveRunResultPath(runId, r.status);
-        if (resultPath) {
-          navigate(resultPath, {replace: true});
+        // Terminal -> Results, plan gate -> the gate. A run parked at AWAITING_APPROVAL is
+        // waiting on THIS person; leaving them on the log is why a gated run looked stuck.
+        const nextPath = liveRunNavigationPath(runId, r.status);
+        if (nextPath) {
+          navigate(nextPath, {replace: true});
           return;
         }
         timer = window.setTimeout(tick, 8000);
