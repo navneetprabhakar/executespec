@@ -82,7 +82,9 @@ describe('IdeBenchmark mobile run cards', () => {
     expect(card?.textContent).toContain('swebench_lite_test');
     expect(card?.textContent).toContain('7/10');
     expect(card?.textContent).toContain('$1.2500');
-    expect(card?.textContent).toContain('12K↑ 678↓');
+    // Was `12K↑ 678↓`. Arrows as unit suffixes were a guess in both directions —
+    // nothing said which way meant input. Now labelled outright.
+    expect(card?.textContent).toContain('12K in · 678 out');
     expect(host.querySelector('[data-testid="benchmark-sync-status"]')?.textContent).toContain(
       'Synced',
     );

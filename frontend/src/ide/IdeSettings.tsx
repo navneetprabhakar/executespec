@@ -1,3 +1,4 @@
+import {ChevronDown, ChevronRight} from 'lucide-react';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import * as api from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -1364,7 +1365,13 @@ function CollapsibleHeader({
         textAlign: 'left',
       }}
     >
-      <span className='ide-tree-chev'>{open ? '▾' : '▸'}</span>
+      <span className='ide-tree-chev' aria-hidden='true'>
+        {open ? (
+          <ChevronDown size={12} strokeWidth={1.75} />
+        ) : (
+          <ChevronRight size={12} strokeWidth={1.75} />
+        )}
+      </span>
       <span>
         {label} · {count}
       </span>

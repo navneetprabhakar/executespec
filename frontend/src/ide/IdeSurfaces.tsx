@@ -7,7 +7,12 @@ import {
   CheckCircle2,
   Circle,
   CircleDot,
+  Clock,
+  ListChecks,
   Play,
+  PlayCircle,
+  Plus,
+  Settings,
   XCircle,
 } from 'lucide-react';
 import * as api from '@/lib/api';
@@ -260,10 +265,22 @@ export function IdeWelcome() {
           </div>
           <div style={{display: 'flex', gap: 8}}>
             <Link className='ide-btn ghost' to={`/plan/${liveRun.runId}`}>
-              ◷ Plan
+              <Clock
+                size={14}
+                strokeWidth={1.75}
+                aria-hidden='true'
+                style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 6}}
+              />
+              Plan
             </Link>
             <Link className='ide-btn' to={`/live/${liveRun.runId}`}>
-              ◉ Watch live
+              <PlayCircle
+                size={14}
+                strokeWidth={1.75}
+                aria-hidden='true'
+                style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 6}}
+              />
+              Watch live
             </Link>
           </div>
         </div>
@@ -271,10 +288,22 @@ export function IdeWelcome() {
 
       <div style={{display: 'flex', gap: 10, marginBottom: 8}}>
         <Link className='ide-btn' to='/compose'>
-          ＋ Start work
+          <Plus
+            size={14}
+            strokeWidth={1.75}
+            aria-hidden='true'
+            style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 6}}
+          />
+          Start work
         </Link>
         <Link className='ide-btn ghost' to='/runs'>
-          ◎ Work
+          <ListChecks
+            size={14}
+            strokeWidth={1.75}
+            aria-hidden='true'
+            style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 6}}
+          />
+          Work
         </Link>
       </div>
 
@@ -316,10 +345,22 @@ export function IdeWelcome() {
           )}
           <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
             <Link className='ide-btn' to='/compose'>
-              ＋ Write my own spec
+              <Plus
+                size={14}
+                strokeWidth={1.75}
+                aria-hidden='true'
+                style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 6}}
+              />
+              Write my own spec
             </Link>
             <Link className='ide-btn ghost' to='/integrations'>
-              ⚙ Connect GitHub for real-repo PRs
+              <Settings
+                size={14}
+                strokeWidth={1.75}
+                aria-hidden='true'
+                style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 6}}
+              />
+              Connect GitHub for real-repo PRs
             </Link>
           </div>
         </div>

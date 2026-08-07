@@ -1,3 +1,4 @@
+import {ChevronDown, ChevronRight} from 'lucide-react';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useLocation, useNavigate, useSearchParams} from 'react-router-dom';
 import * as api from '@/lib/api';
@@ -530,7 +531,13 @@ export function IdeAccount() {
           textAlign: 'left',
         }}
       >
-        <span className='ide-tree-chev'>{contactOpen ? '▾' : '▸'}</span>
+        <span className='ide-tree-chev' aria-hidden='true'>
+          {contactOpen ? (
+            <ChevronDown size={12} strokeWidth={1.75} />
+          ) : (
+            <ChevronRight size={12} strokeWidth={1.75} />
+          )}
+        </span>
         <span>Contact us / Send feedback</span>
       </button>
       {contactOpen && (
@@ -634,7 +641,13 @@ export function IdeAccount() {
           textAlign: 'left',
         }}
       >
-        <span className='ide-tree-chev'>{notifOpen ? '▾' : '▸'}</span>
+        <span className='ide-tree-chev' aria-hidden='true'>
+          {notifOpen ? (
+            <ChevronDown size={12} strokeWidth={1.75} />
+          ) : (
+            <ChevronRight size={12} strokeWidth={1.75} />
+          )}
+        </span>
         <span>Notifications{notifPrefs ? ` · ${notifPrefs.length}` : ''}</span>
       </button>
       {!notifOpen ? null : notifFailure ? (
