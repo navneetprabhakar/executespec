@@ -303,22 +303,19 @@
   color: var(--ide-fg-bright);
 }
 
-/* Tailwind preflight sets `svg { display: block }`. That is right for a glyph
-   in a flex row and WRONG for one sitting inside a run of text: a block svg
-   takes its own line and silently makes the containing chip two rows tall. Now
-   that every chrome glyph is a lucide `<svg>`, add this to any icon that must
-   flow inline with words rather than sit in its own flex/grid cell. */
-.ide-root .ide-inline-icon {
-  display: inline-block;
-  vertical-align: -0.15em;
-  flex-shrink: 0;
-}
-
-/* Numbers that stack into a column must not shift width digit-to-digit. */
-.ide-num,
+/* Numbers that stack into a column must not shift width digit-to-digit.
+   `.ide-num` was here and is referenced by no markup anywhere — so this rule
+   was carrying a selector that could never match while the classes the app
+   ACTUALLY renders numbers into went uncovered. Repointed at those. */
 .ide-root .ide-kv dd,
 .ide-work-score,
-.ide-work-cost {
+.ide-work-cost,
+.ide-root .sysd-kv-value,
+.ide-root .ob-stat-value,
+.ide-root .ide-invoice-number,
+.ide-root .ide-benchmark-count,
+.ide-root .con-side-count,
+.ide-root .agent-runcard-cost {
   font-variant-numeric: tabular-nums;
 }
 
@@ -2635,11 +2632,14 @@
   .ide-pane {
     padding: var(--ide-s4) var(--ide-s4) var(--ide-s6);
   }
+  /* 13px/10px predate the token scale and were never converted — the one
+     surviving off-scale block on this row. s3/s4 land on 12/16 and s2/s3 on
+     8/12, which is a 1-2px move and puts the row back on the ramp. */
   .ide-work-row {
     display: grid;
     grid-template-columns: 1fr auto;
-    gap: 8px 10px;
-    padding: 13px 16px;
+    gap: var(--ide-s2) var(--ide-s3);
+    padding: var(--ide-s3) var(--ide-s4);
   }
   .ide-work-row > .ide-badge:first-child {
     grid-column: 1;
@@ -2973,9 +2973,35 @@
   gap: 12px;
   min-width: 0;
 }
+/* Run setup is a tall rail beside a short main column, so on anything but a
+   generous window its bottom ran off the screen: `position: sticky` alone does
+   NOTHING for an element taller than the viewport — it pins at `top` and the
+   overflow simply extends past the fold. Reaching the last control meant
+   scrolling the whole page, which pushed the spec box and the Create-plan
+   button out of view and left the main column as dead space. Bounding the rail
+   to the viewport and giving it its own scrollbar means the PAGE stops
+   scrolling entirely at ordinary heights, so the primary action stays put.
+
+   The offset is the 46px top bar plus the 16px sticky inset and 16px of
+   breathing room at the bottom. `dvh`, not `vh`, so mobile browser chrome
+   collapsing does not leave the last control under the URL bar.
+
+   This is a max-height: a rail shorter than the viewport is untouched and
+   shows no scrollbar. `overscroll-behavior: contain` stops a scroll that
+   reaches the rail's end from chaining to the page underneath.
+
+   The model picker's menu is `position: absolute` inside this box, so it CAN
+   be clipped by the new scroll container. Verified in a layout harness at
+   800px and 620px viewports: the menu opens fully visible in both, and when
+   the rail is scrolled past its trigger the menu travels with the trigger
+   rather than being cut. If the rail ever gains a picker near its bottom edge,
+   that menu needs to move to a portal. */
 .ide-compose-side {
   position: sticky;
   top: 16px;
+  max-height: calc(100dvh - 46px - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .ide-compose-request {
   padding: 14px;
@@ -3226,8 +3252,15 @@
   .ide-compose-layout {
     display: block;
   }
+  /* Single column here, so the rail is just the next block down the page and
+     the page scroll is the right scroll. The desktop bound MUST be undone with
+     it: a static box with max-height + overflow-y would trap Run setup in a
+     nested scroller inside an already-scrolling page — two scrollbars for one
+     list, and on touch the inner one swallows the gesture. */
   .ide-compose-side {
     position: static;
+    max-height: none;
+    overflow-y: visible;
   }
   /* `1fr` is shorthand for `minmax(auto, 1fr)`, and that `auto` floor is
      min-content: the column can never shrink below its widest unbreakable
@@ -5819,8 +5852,6 @@
 .ide-root .con-section-title {
   letter-spacing: -0.015em;
 }
-.ide-root .ide-metric-value,
-.ide-root .con-metric-value,
 .ide-root .ide-mono,
 .ide-root code,
 .ide-root kbd {
@@ -5855,8 +5886,7 @@
   inherits: false;
   initial-value: 0;
 }
-.ide-root .agent-card.is-pending,
-.ide-root .con-gate-waiting {
+.ide-root .agent-card.is-pending {
   --ide-glow: 0;
   animation: ide-gate-pulse 3.2s var(--ide-ease) infinite;
   box-shadow:
@@ -5873,8 +5903,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ide-root .agent-card.is-pending,
-  .ide-root .con-gate-waiting {
+  .ide-root .agent-card.is-pending {
     animation: none;
     --ide-glow: 0.5;
   }
