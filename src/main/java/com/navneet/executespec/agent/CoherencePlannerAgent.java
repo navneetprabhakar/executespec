@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.cost.RunEffectiveRouteService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -44,10 +45,9 @@ public class CoherencePlannerAgent {
   private final ModelResolver modelResolver;
   private final PromptAssembler promptAssembler;
   private final RunEffectiveRouteService effectiveRouteService;
+  private final ModelRegistry modelRegistry;
 
   private static final String PROMPT_PATH = "prompts/coherence-planner.md";
-  private static final int COHERENCE_MAX_TOKENS = 4_096;
-  private static final int COHERENCE_REPAIR_MAX_TOKENS = 4_096;
 
   public record PatchResult(
       Plan patchedPlan,
@@ -130,6 +130,12 @@ public class CoherencePlannerAgent {
             ? 0
             : planWithSafetyContracts.requirements().size());
 
+    // Model-derived, not a constant: a fixed 4,096 ceiling truncated the patched plan on any
+    // verbose model, and the repair retried at the same ceiling so it failed identically.
+    int modelMax = modelRegistry.maxOutputForModel(resolved.getModel());
+    int coherenceMaxTokens = PlanEmissionBudget.firstAttempt(modelMax);
+    int coherenceRepairMaxTokens = PlanEmissionBudget.repairAttempt(modelMax);
+
     ChatResponse resp;
     try {
       resp =
@@ -140,7 +146,7 @@ public class CoherencePlannerAgent {
               context,
               patchPlan,
               "planner.coherence",
-              COHERENCE_MAX_TOKENS,
+              coherenceMaxTokens,
               strictProvider);
     } catch (Exception e) {
       log.warn("CoherencePlanner LLM call failed — using unpatched plan: {}", e.getMessage());
@@ -158,7 +164,7 @@ public class CoherencePlannerAgent {
           context,
           patchPlan,
           "tool was not called",
-          COHERENCE_REPAIR_MAX_TOKENS,
+          coherenceRepairMaxTokens,
           strictProvider,
           this::applyPatches);
     }
@@ -177,7 +183,7 @@ public class CoherencePlannerAgent {
               context,
               patchPlan,
               modelResult.validationFailure(),
-              COHERENCE_REPAIR_MAX_TOKENS,
+              coherenceRepairMaxTokens,
               strictProvider,
               this::applyPatches);
     }

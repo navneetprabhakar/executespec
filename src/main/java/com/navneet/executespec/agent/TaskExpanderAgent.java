@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -62,11 +63,17 @@ public class TaskExpanderAgent {
   private final LlmRouter router;
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
+  private final ModelRegistry modelRegistry;
   private final PromptAssembler promptAssembler;
 
   private static final String PROMPT_PATH = "prompts/task-expander.md";
 
-  private static final int EXPAND_MAX_TOKENS = 4_096;
+  /**
+   * Output ceiling for one expanded task body. Derived from the resolved model rather than fixed at
+   * 4,096: on a reasoning model the reasoning tokens share this budget with the emitted tool call,
+   * so a fixed ceiling truncates the task detail mid-emission. A ceiling is a bound, not a charge.
+   * The 4,000-character description envelope below is enforced separately and still fails closed.
+   */
   static final int MAX_DESCRIPTION_CHARS = 4_000;
 
   public static final class ExpansionContractException extends IllegalStateException {
@@ -241,7 +248,9 @@ public class TaskExpanderAgent {
                         + skeleton.id()
                         + (repairKind == null ? "" : "." + repairKind))
                 .temperature(0.0)
-                .maxTokens(EXPAND_MAX_TOKENS)
+                .maxTokens(
+                    PlanEmissionBudget.firstAttempt(
+                        modelRegistry.maxOutputForModel(resolved.getModel())))
                 .toolChoice("required")
                 .toolsOverride(List.of(submitTaskDetail))
                 .build());

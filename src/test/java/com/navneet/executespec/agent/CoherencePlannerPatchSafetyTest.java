@@ -25,7 +25,7 @@ class CoherencePlannerPatchSafetyTest {
   private final ObjectMapper mapper = new ObjectMapper();
   private final CoherencePlannerAgent agent =
       new CoherencePlannerAgent(
-          mock(LlmRouter.class), mapper, mock(ModelResolver.class), null, null);
+          mock(LlmRouter.class), mapper, mock(ModelResolver.class), null, null, null);
 
   private Plan planWith(String... files) {
     PlannedTask task =
