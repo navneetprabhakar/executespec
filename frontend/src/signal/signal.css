@@ -2064,6 +2064,18 @@ body {
   font-weight: 600;
 }
 
+/* "Forgot password?" is a STANDALONE target on its own line, so WCAG 2.5.8's
+   inline-in-a-sentence exemption does not cover it — measured 14px tall on the
+   deployed login page. Padding plus equal negative margin grows the tappable
+   box to 32px without moving the text or disturbing the form's rhythm.
+   The "Create workspace" link in .footer-link is deliberately NOT given this:
+   it sits inside the sentence "New here? Create workspace" and is exempt. */
+.signal-splash .hint a {
+  display: inline-block;
+  padding: 9px 4px;
+  margin: -9px -4px;
+}
+
 /* ─────────── Rails (desktop) ─────────── */
 .signal-rail-eyebrow {
   font-size: 11px;
@@ -2233,8 +2245,10 @@ body {
 }
 .signal-app .welcome-step .step-indicator {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--signal-text-mute);
+  /* 11px/--signal-text-mute measured 4.41:1 on the dark ground and 2.89:1 on
+     the light one; both fail AA, and 11px is under the app's 12px floor. */
+  font-size: 12px;
+  color: var(--signal-text-dim);
   letter-spacing: 0.1em;
   margin-bottom: 14px;
 }
@@ -2310,8 +2324,9 @@ body {
 .signal-app .preset-card .meta {
   margin-top: 12px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--signal-text-mute);
+  /* Same as .step-indicator above — these run/cost chips are real content. */
+  font-size: 12px;
+  color: var(--signal-text-dim);
   display: flex;
   gap: 12px;
 }
@@ -3380,8 +3395,13 @@ body {
   top: -10px;
   right: 14px;
   background: var(--signal-y);
-  color: var(--signal-y-text);
-  font-size: 11px;
+  /* NOT --signal-y-text: that token is amber FOR a dark ground and flips to
+     #fbbf24 in dark mode, while --signal-y (#b88700) does not change — so the
+     pill became bright amber on dark amber at 1.93:1, effectively invisible on
+     a pricing page. The fill is constant, so a fixed dark ink is right in both
+     schemes (5.75:1). White is not an option here; it only reaches 3.23. */
+  color: #1a1200;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   padding: 3px 9px;
