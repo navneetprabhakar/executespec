@@ -376,11 +376,23 @@ public final class RunTerminalOutcomeContract {
           "Local execution is currently unavailable.",
           "Use a cloud run or ask an administrator to enable local execution.");
     }
-    if ("PLANNER_UNAVAILABLE".equals(code) || "PLAN_VALIDATION_REJECTED".equals(code)) {
+    // These two were one message telling the customer to "revise the requirement". That is right
+    // for the validator and WRONG for PLANNER_UNAVAILABLE, which is reached when the planning call
+    // itself could not be completed — a provider that returned nothing, a transport timeout, or an
+    // output ceiling that truncated the plan. Dev runs 350fd2fc and f86d1ad1 both failed for those
+    // reasons with perfectly plannable specs, and were told to go rewrite the spec.
+    if ("PLAN_VALIDATION_REJECTED".equals(code)) {
       return RunTerminalOutcomeDefinitions.actionRequired(
-          "Planning needs attention",
-          "The planning step could not produce a safely executable plan.",
+          "Plan did not pass its checks",
+          "The plan was produced but rejected by the safety and consistency checks.",
           "Review the planning evidence and revise the requirement before retrying.");
+    }
+    if ("PLANNER_UNAVAILABLE".equals(code)) {
+      return RunTerminalOutcomeDefinitions.actionRequired(
+          "Planning could not be completed",
+          "The planning step did not finish — the model route did not return a usable plan. This"
+              + " is not a problem with your request.",
+          "Retry the run. If you pinned an exact model, try another model or provider.");
     }
     if ("EXECUTION_ABORTED".equals(code)) {
       return RunTerminalOutcomeDefinitions.actionRequired(
