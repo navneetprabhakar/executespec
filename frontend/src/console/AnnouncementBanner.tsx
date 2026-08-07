@@ -1,3 +1,4 @@
+import {X} from 'lucide-react';
 import {useState} from 'react';
 import {ANNOUNCEMENT} from './announcement';
 
@@ -48,7 +49,7 @@ export function AnnouncementBanner() {
         aria-label='Dismiss announcement'
         title='Dismiss'
       >
-        ✕
+        <X size={16} strokeWidth={1.75} aria-hidden='true' />
       </button>
     </div>
   );

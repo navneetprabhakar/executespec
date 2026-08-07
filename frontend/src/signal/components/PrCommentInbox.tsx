@@ -1,3 +1,4 @@
+import {ExternalLink} from 'lucide-react';
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {Button} from '@/signal/components/Primitives';
@@ -97,7 +98,13 @@ export function PrCommentInbox({runId, variant}: {runId: string; variant: 'signa
                 target='_blank'
                 rel='noreferrer'
               >
-                View ↗
+                View{' '}
+                <ExternalLink
+                  size={12}
+                  strokeWidth={1.75}
+                  aria-hidden='true'
+                  style={{display: 'inline-block', verticalAlign: '-0.1em', marginLeft: 4}}
+                />
               </a>
             </div>
           </div>
@@ -154,7 +161,13 @@ export function PrCommentInbox({runId, variant}: {runId: string; variant: 'signa
               rel='noreferrer'
               style={{fontSize: 12, color: 'var(--signal-coral)'}}
             >
-              View ↗
+              View{' '}
+              <ExternalLink
+                size={12}
+                strokeWidth={1.75}
+                aria-hidden='true'
+                style={{display: 'inline-block', verticalAlign: '-0.1em', marginLeft: 4}}
+              />
             </a>
           </div>
         </div>

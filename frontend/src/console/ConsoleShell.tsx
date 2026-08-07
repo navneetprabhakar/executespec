@@ -322,7 +322,7 @@ export default function ConsoleShell() {
     // One entry per destination. `start` and `compose` both went to /compose,
     // and `decisions` duplicated `agent-approvals` — the palette listed the same
     // two destinations twice under different names.
-    {id: 'compose', label: 'Start work', hint: '＋', run: () => navigate('/compose')},
+    {id: 'compose', label: 'Start work', hint: 'new run', run: () => navigate('/compose')},
     {id: 'agent', label: 'Go: Agent', hint: 'chat', run: () => navigate('/agent')},
     {
       id: 'agent-new-sandbox',
@@ -350,7 +350,7 @@ export default function ConsoleShell() {
             : '/agent',
         ),
     },
-    {id: 'new-project', label: 'New project', hint: '＋', run: () => navigate('/projects')},
+    {id: 'new-project', label: 'New project', hint: 'new', run: () => navigate('/projects')},
     {id: 'runs', label: 'Go: Work', hint: 'g r', run: () => navigate('/runs')},
     {id: 'projects', label: 'Go: Projects', run: () => navigate('/projects')},
     {id: 'team', label: 'Go: Team / invites', run: () => navigate('/org-members')},

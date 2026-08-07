@@ -1,3 +1,4 @@
+import {Check} from 'lucide-react';
 import {useEffect, useMemo, useState, type CSSProperties} from 'react';
 import {useNavigate, useSearchParams} from 'react-router-dom';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -82,8 +83,13 @@ export default function CliLoginPage() {
 
         {status === 'done' ? (
           <p style={{color: '#16a34a', fontSize: 14, margin: 0}}>
-            ✓ Authorized — return to your {isVscode ? 'editor' : 'terminal'}. You can close this
-            tab.
+            <Check
+              size={14}
+              strokeWidth={2.25}
+              aria-hidden='true'
+              style={{display: 'inline-block', verticalAlign: '-0.15em', marginRight: 5}}
+            />
+            Authorized — return to your {isVscode ? 'editor' : 'terminal'}. You can close this tab.
           </p>
         ) : (
           <div style={{display: 'flex', gap: 12, justifyContent: 'center'}}>

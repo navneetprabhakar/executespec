@@ -1,3 +1,4 @@
+import {Check} from 'lucide-react';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Card, Button, KvList} from '@/signal/components/Primitives';
 
@@ -14,7 +15,9 @@ export function TrustPage() {
             {label: 'Training on your code', v: 'Never', tone: 'mint'},
           ].map((b) => (
             <div key={b.label} className={`signal-quick-card ${b.tone}`}>
-              <div className='icon-bg'>✓</div>
+              <div className='icon-bg'>
+                <Check size={15} strokeWidth={2.25} aria-hidden='true' />
+              </div>
               <h4>{b.label}</h4>
               <div className='count signal-trust-count'>{b.v}</div>
             </div>
