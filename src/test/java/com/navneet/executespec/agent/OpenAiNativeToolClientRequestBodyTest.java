@@ -85,7 +85,7 @@ class OpenAiNativeToolClientRequestBodyTest {
 
   private static ObjectNode requestBody(
       String baseUrl, String model, int maxTokens, Double temperature) {
-    OpenAiNativeToolClient client = new OpenAiNativeToolClient(new ObjectMapper());
+    OpenAiNativeToolClient client = new OpenAiNativeToolClient(new ObjectMapper(), null);
     OpenAiNativeToolClient.OpenAiToolCallRequest request =
         OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
             .model(model)
