@@ -29,6 +29,19 @@
   --ide-border-strong: rgba(255, 255, 255, 0.16);
   --ide-accent: #5b8cff;
   --ide-accent-fg: #ffffff;
+  /* The accent is tuned to READ ON a ground — #5b8cff scores 6.07:1 against the
+     editor background, which is what borders, links and focus rings need. It is
+     NOT tuned to carry white text: #fff on #5b8cff is 3.16:1, under AA for the
+     13px/550 label every primary button uses. Filled controls therefore take a
+     deeper shade of the same hue (4.79:1) so the button still reads as the one
+     accent while its label is actually legible. Anything that puts
+     --ide-accent-fg on a fill must use this, not --ide-accent. */
+  --ide-accent-fill: #3e6be0;
+  /* Hover DARKENS. The old rule mixed the accent toward --ide-fg-bright, but
+     that token flips per theme (#eceef2 dark / #0f141b light), so hover
+     lightened in dark mode and the white label fell to 2.75:1 — worse than at
+     rest. A fixed deeper shade is the same direction in both themes (5.53:1). */
+  --ide-accent-fill-hover: #3560d6;
   --ide-hover: #171d25;
   --ide-list-active: #162338;
   --ide-list-inactive: #1b2230;
@@ -807,7 +820,7 @@
   min-height: var(--ide-control-h);
   max-width: 100%;
   padding: var(--ide-s1) var(--ide-s3);
-  background: var(--ide-accent);
+  background: var(--ide-accent-fill);
   color: var(--ide-accent-fg);
   border: 1px solid transparent;
   border-radius: var(--ide-r-control);
@@ -831,7 +844,7 @@
     color 120ms var(--ide-ease);
 }
 .ide-root .ide-btn:hover {
-  background: color-mix(in srgb, var(--ide-accent) 88%, var(--ide-fg-bright));
+  background: var(--ide-accent-fill-hover);
 }
 .ide-root .ide-btn.ghost {
   background: transparent;
@@ -2513,7 +2526,7 @@
     margin-left: auto;
     border: none;
     border-radius: var(--ide-r-control);
-    background: var(--ide-accent);
+    background: var(--ide-accent-fill);
     color: var(--ide-accent-fg);
     cursor: pointer;
     font: inherit;
@@ -3371,7 +3384,7 @@
     color: var(--ide-fg-bright);
   }
   .ide-compose-steps button.active span {
-    background: var(--ide-accent);
+    background: var(--ide-accent-fill);
     color: var(--ide-accent-fg);
   }
   .ide-compose-section {
