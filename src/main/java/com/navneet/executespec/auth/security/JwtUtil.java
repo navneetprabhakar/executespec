@@ -13,6 +13,7 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -49,13 +50,26 @@ public class JwtUtil {
   private final SecretKey secretKey;
   private final long accessTokenExpiryMinutes;
   private final long refreshTokenExpiryDays;
-  private final FeatureFlagService featureFlagService;
+
+  /**
+   * Resolved LAZILY at call time, never in the constructor. {@code JwtAuthenticationFilter} is a
+   * {@link jakarta.servlet.Filter} and therefore a {@code ServletContextInitializer}, so Spring
+   * instantiates it — and this bean — EARLY during embedded-web-server startup, before the shared
+   * JPA {@code EntityManagerFactory} is ready. {@code FeatureFlagService}'s {@code @PostConstruct}
+   * eagerly loads its cache via a Spring Data JPA repository, so injecting it directly dragged the
+   * EntityManagerFactory into the filter's construction path and crash-looped {@code prod,gcp}
+   * boots ({@code UnsatisfiedDependencyException} → {@code jpaSharedEM_entityManagerFactory} not
+   * ready). An {@link ObjectProvider} is a lazy handle: constructing {@code JwtUtil} no longer
+   * forces the feature-flag/JPA chain, and the flag is resolved on the request path where the full
+   * context is up. Do NOT inject a JPA-backed bean directly here.
+   */
+  private final ObjectProvider<FeatureFlagService> featureFlagServiceProvider;
 
   public JwtUtil(
       @Value("${app.jwt.secret}") String secret,
       @Value("${app.jwt.access-token-expiry-minutes:15}") long accessTokenExpiryMinutes,
       @Value("${app.jwt.refresh-token-expiry-days:7}") long refreshTokenExpiryDays,
-      FeatureFlagService featureFlagService) {
+      ObjectProvider<FeatureFlagService> featureFlagServiceProvider) {
     // A shared profile with no JWT_SECRET supplied resolves to an empty string. JwtSecretValidator
     // is the policy gate, but it is a separate bean with no guaranteed ordering relative to this
     // constructor — so state the real cause here instead of surfacing an opaque key-length error
@@ -67,7 +81,7 @@ public class JwtUtil {
     this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     this.accessTokenExpiryMinutes = accessTokenExpiryMinutes;
     this.refreshTokenExpiryDays = refreshTokenExpiryDays;
-    this.featureFlagService = featureFlagService;
+    this.featureFlagServiceProvider = featureFlagServiceProvider;
   }
 
   public String generateAccessToken(AppUser user, OrgMember orgMember) {
@@ -169,8 +183,9 @@ public class JwtUtil {
       Date issuedAt = claims.getIssuedAt();
       Instant preciseIssuedAt = preciseIssuedAt(claims, issuedAt);
 
-      // Global force-logout check: reject tokens issued before the logout epoch
-      String epoch = featureFlagService.getString("force_logout_epoch", null);
+      // Global force-logout check: reject tokens issued before the logout epoch. Resolved lazily —
+      // see featureFlagServiceProvider's javadoc for why this must not be a constructor dependency.
+      String epoch = featureFlagServiceProvider.getObject().getString("force_logout_epoch", null);
       if (epoch != null) {
         Instant logoutEpoch = Instant.parse(epoch);
         if (preciseIssuedAt != null && preciseIssuedAt.isBefore(logoutEpoch)) {

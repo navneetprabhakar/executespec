@@ -39,7 +39,10 @@ class AuthServiceLogoutRevocationTest {
 
     jwtUtil =
         new JwtUtil(
-            "logout-revocation-test-secret-that-is-at-least-thirty-two-bytes", 60, 7, flags);
+            "logout-revocation-test-secret-that-is-at-least-thirty-two-bytes",
+            60,
+            7,
+            com.navneet.executespec.support.TestObjectProviders.of(flags));
     user =
         AppUser.builder()
             .id("user-1")
