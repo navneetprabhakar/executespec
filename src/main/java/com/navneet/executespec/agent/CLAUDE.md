@@ -1,5 +1,33 @@
 # `agent/` — LLM agents + routing
 
+## Plan-contract gate tiering — heuristic gates are advisory, not run-killers (2026-08-08)
+
+The final plan-contract battery no longer fails a run closed over a heuristic natural-language
+finding. `TaskExecutionBriefCompiler.compileExecutable` now partitions violations into three classes:
+
+- **Class A — fatal (unchanged).** `structuralPlanContractViolations` (empty/null plan, description
+  over `MAX_DESCRIPTION_CHARS`, >12 hard constraints after coherence), requirement ownership
+  (`validateRequirementCoverage` — execution authority, with the deterministic
+  `PlannerOwnershipRepair` backfill upstream), and source-route namespace drift
+  (`PlanSourceHttpRouteGate`). These prove the plan cannot execute or violates explicit user intent.
+- **Class B — deleted.** `PlanDatabaseInitializationContractGate` was removed: it re-checked the
+  deterministic `PlanSafetyContractEnricher`'s own migration/`create_all` output in prose and
+  false-positived on correctly-enriched plans. The genuine "task bypasses migrations with ORM/manual
+  `create_all`" contradiction is caught more precisely by `TaskExpansionContradictionValidator`
+  (constraint forbids create_all AND the description positively instructs it).
+- **Class C — advisory.** Every remaining `PlanContractQualityGate` + semantic/cross-task heuristic
+  (`advisoryPlanContractViolations`). These are surfaced to the worker as `ADVISORY (non-blocking):`
+  hard constraints (budget-safe attachment) AND handed to the reviewer as a
+  `PLAN_ADVISORIES_TO_VERIFY` block (`ReviewerRequest.planAdvisories`) instructing it to confirm or
+  dismiss each against the ACTUAL generated code. Enforcement moves from unreliable plan-time
+  prose-matching to execution-time code-checking — the same worker-writes/reviewer-checks mechanism
+  that lets PATCH-mode benchmarks pass. Rationale: the heuristic battery false-positived often enough
+  that a correct plan reached the gate only as a coin flip (a FastAPI/Alembic spec failed planning 5×
+  in a row, then planned cleanly and passed 8/8 independent HTTP acceptance probes once advisory).
+
+`PlanContractQualityGate.violations(plan)` and each gate's `addViolations` are unchanged — only the
+compiler's TREATMENT of the output changed, so the gate-level unit tests still pin their findings.
+
 ## Enterprise-demo request hardening (2026-08-02)
 
 `PlanDocumentedCommandContractGate` distinguishes real documented build/test commands from generic
@@ -109,8 +137,11 @@ status sections must agree with the canonical lifecycle even when their values a
 an endpoint contract. Route inventories fail on unbalanced code spans, duplicate operations, or
 mixed versioned namespaces; documented test commands fail when their target is unowned, their
 pytest token is malformed, or their frontend/backend origin variable contradicts the plan. Worker
-briefs containing a synthetic compaction-omission marker or a dangling numbered step are rejected,
-as is one task that both requires migrations and permits runtime `create_all` initialization.
+briefs containing a synthetic compaction-omission marker or a dangling numbered step are rejected.
+A task that both requires migrations and positively instructs runtime `create_all` initialization is
+now flagged by `TaskExpansionContradictionValidator` as an advisory (2026-08-08 gate tiering) rather
+than a hard rejection — the dedicated DB-init contradiction gate was deleted for false-positiving on
+the safety enricher's own output.
 `CoherencePlannerEvidence` deduplicates repeated exact constraints only in the coherence prompt by
 pointing later copies to the first task; persisted worker constraints remain byte-complete.
 

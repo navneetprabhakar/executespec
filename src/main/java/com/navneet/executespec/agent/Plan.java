@@ -25,7 +25,7 @@ import lombok.Builder;
  *   <li>Subtask decomposition — folded into the worker's iteration budget.
  * </ul>
  */
-@Builder
+@Builder(toBuilder = true)
 public record Plan(
     String planTitle,
     String planSummary,

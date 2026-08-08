@@ -414,4 +414,80 @@ class TaskExecutionBriefCompilerTest {
             () -> TaskExecutionBriefCompiler.compile(Plan.builder().tasks(List.of(task)).build()))
         .hasMessageContaining("unknown requirement R404");
   }
+
+  // --- Heuristic contradiction gates are advisory, not run-killers (2026-08-08 structural fix) ---
+  //
+  // The ~30-gate PlanContractQualityGate battery false-positives on legitimate plans often enough
+  // that a correct plan used to fail to reach the plan gate as a coin flip. Those heuristic
+  // findings
+  // must now compile through as worker guidance, while genuinely structural / intent violations
+  // stay
+  // fatal.
+
+  @Test
+  void heuristicContradictionCompilesAsAdvisoryGuidanceInsteadOfKillingTheRun() {
+    // A task that trips a Class-C heuristic detector — an unresolved implementation-stack choice
+    // ("Flask or FastAPI") that the deterministic normalizer cannot auto-resolve — with valid
+    // ownership and no source-route drift.
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Build the HTTP service")
+            .description(
+                "Build the service. Choose either the Flask framework or the FastAPI framework for"
+                    + " the server implementation.")
+            .complexity(PlannedTask.Complexity.MEDIUM)
+            .meetsRequirements(List.of("R1"))
+            .touchesFiles(List.of("backend/app/main.py"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1", "Serve HTTP.", RequirementSpec.RequirementKind.FUNCTIONAL)))
+            .runtimeSurface(Plan.RuntimeSurface.HTTP)
+            .tasks(List.of(task))
+            .build();
+
+    // The heuristic fires ...
+    assertThat(TaskExpanderAgent.advisoryPlanContractViolations(plan))
+        .anyMatch(v -> v.contains("implementation choice unresolved"));
+
+    // ... but the run is NOT killed: it compiles, and the finding is surfaced to the worker as a
+    // non-blocking advisory hard constraint.
+    Plan compiled = TaskExecutionBriefCompiler.compileExecutable(plan, "Serve HTTP.");
+    PlannedTask compiledTask = compiled.tasks().getFirst();
+    assertThat(compiledTask.hardConstraints())
+        .anyMatch(
+            c ->
+                c.startsWith("ADVISORY (non-blocking):")
+                    && c.contains("implementation choice unresolved"));
+  }
+
+  @Test
+  void structuralAndIntentViolationsStayFatalWhileHeuristicsAreAdvisory() {
+    // Requirement ownership (execution authority) is still fatal even though heuristics are not.
+    Plan uncovered =
+        Plan.builder()
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1", "Implement it", RequirementSpec.RequirementKind.FUNCTIONAL),
+                    new RequirementSpec(
+                        "R2", "Preserve it", RequirementSpec.RequirementKind.FUNCTIONAL)))
+            .tasks(
+                List.of(
+                    PlannedTask.builder()
+                        .id("T1")
+                        .title("Implement it")
+                        .description("Implement it")
+                        .meetsRequirements(List.of("R1"))
+                        .build()))
+            .build();
+
+    assertThatThrownBy(() -> TaskExecutionBriefCompiler.compileExecutable(uncovered))
+        .isInstanceOf(TaskExecutionBriefCompiler.ExecutablePlanContractException.class)
+        .hasMessageContaining("R2");
+  }
 }

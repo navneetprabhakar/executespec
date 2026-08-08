@@ -27,7 +27,7 @@ import lombok.Builder;
  * @param hardConstraints per-task constraints the worker must satisfy (e.g. "Do NOT use JPA — use
  *     JDBC directly"). Framed as project-controlled worker evidence rather than system authority.
  */
-@Builder
+@Builder(toBuilder = true)
 public record PlannedTask(
     String id,
     String title,

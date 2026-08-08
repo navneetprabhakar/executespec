@@ -122,11 +122,11 @@ public class OutlinePlannerAgent {
           "hardConstraints": {"type": "array", "items": {"type": "string"}},
           "meetsRequirements": {
             "type": "array",
-            "description": "Requirement IDs (from the top-level requirements array) this task implements. REQUIRED in both modes so requirement ownership survives hierarchical fan-out.",
+            "description": "Requirement IDs (from the top-level requirements array) this task implements. REQUIRED in both modes so requirement ownership survives hierarchical fan-out. Every task must own at least one requirement; every requirement must be owned by at least one task.",
             "items": {"type": "string"}
           }
         },
-        "required": ["id", "title"]
+        "required": ["id", "title", "meetsRequirements"]
       }
     }
   },
