@@ -33,10 +33,11 @@ public class GitDiffTool implements Tool {
   @Override
   public String description() {
     return "Shows the diff of tracked changes (staged + unstaged) since the last commit, AND lists"
-        + " new (untracked) files you created — those have no HEAD diff yet, so readFile them to"
-        + " review their contents. Pass `path` to limit to one file/directory. Large diffs are"
-        + " saved to a file — you get an inline preview plus a path you can readFile for the"
-        + " complete diff. Use this to review your own changes before completeTask.";
+        + " untracked (new) files present in the workspace — those have no HEAD diff yet, so"
+        + " readFile them to review their contents. Pass `path` to limit to one"
+        + " file/directory. Large diffs are saved to a file — you get an inline preview plus"
+        + " a path you can readFile for the complete diff. Use this to review your own"
+        + " changes before completeTask.";
   }
 
   /** Bound on the untracked-file listing so one call can't flood the context. */

@@ -81,11 +81,11 @@ public class SpecChatController {
 
   /**
    * Hard ceiling on one compatibility chat turn. The old emitter had no timeout at all, so a wedged
-   * provider call held the response open indefinitely. Raised 2026-08-08 (10 → 20 min) for slow
-   * models: a single slow-model turn can consume the ~11-min transport window, so 10 min could cut
-   * one legitimate turn plus a retry. Stays under the 30-min servlet async ceiling.
+   * provider call held the response open indefinitely. Interactive chat turns use the INTERACTIVE
+   * retry profile and a tight (~180s) per-turn transport window, so they fail fast; 10 min is a
+   * comfortable backstop above the 4-attempt INTERACTIVE worst case.
    */
-  static final long TURN_TIMEOUT_MS = 20 * 60 * 1000L;
+  static final long TURN_TIMEOUT_MS = 10 * 60 * 1000L;
 
   @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chat(

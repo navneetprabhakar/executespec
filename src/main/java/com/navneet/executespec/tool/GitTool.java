@@ -882,7 +882,17 @@ public class GitTool {
       Process pc = commit.start();
       String commitOut = new String(pc.getInputStream().readAllBytes());
       int commitExit = pc.waitFor();
-      if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
+      if (commitExit != 0) {
+        // A dirty `status --porcelain` can still stage no blob change — git content normalization
+        // (autocrlf / `* text=auto`), an unchanged submodule pointer, or a mode-only change with
+        // core.fileMode=false. That is genuinely "nothing to publish", NOT a failure: with
+        // --allow-empty removed, treat it like the up-front CLEAN case instead of failing the push
+        // (which would block the PR) or publishing an empty commit.
+        if (commitOut != null && commitOut.contains("nothing to commit")) {
+          return GitToolResult.ok("CLEAN");
+        }
+        return GitToolResult.err("commit failed: " + commitOut);
+      }
 
       runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
       ProcessBuilder push =

@@ -265,8 +265,9 @@ public class WorkerAgent {
   // The old global constant (120s pre-campaign, hardcoded 300s during the TB 2.1 campaign)
   // overrode LlmRouter's per-provider transport windows on every call, which cancelled long
   // GLM/DeepSeek turns mid-generation while the provider billed the discarded completion. The
-  // router now owns the window per provider (spring.ai.<provider>.read-timeout-seconds for
-  // gemini/deepseek/fireworks, constants for anthropic/default) and caps any caller override at
+  // router now owns the window: every provider inherits the shared
+  // executespec.llm.model-response-timeout-seconds (2026-08-08), unless a per-provider
+  // spring.ai.<provider>.read-timeout-seconds override is set, and it caps any caller override at
   // that window. The worker supplies an override only when an absolute deadline constrains the
   // call — see AbsoluteDeadlineBudget.readTimeoutOverride.
 

@@ -63,14 +63,13 @@ public final class ToolOutput {
       Files.createDirectories(dir);
       // A millisecond timestamp is NOT unique: two spills for the same tool inside one millisecond
       // (reachable via the default-ON parallel read-tool batches, or back-to-back build/test
-      // spills)
-      // produced an identical filename, and the default TRUNCATE_EXISTING write let the second call
-      // silently destroy the first — after which the model was pointed at a readFile path that
-      // resolved to a DIFFERENT tool call's output. Make the name collision-proof with a random
-      // suffix and refuse to overwrite: CREATE_NEW throws FileAlreadyExistsException on the
-      // (astronomically unlikely) collision, which the fail-open catch turns into a plain
-      // truncation
-      // rather than a wrong-content overwrite.
+      // spills) produced an identical filename, and the default TRUNCATE_EXISTING write let the
+      // second call silently destroy the first — after which the model was pointed at a readFile
+      // path that resolved to a DIFFERENT tool call's output. Make the name collision-proof with a
+      // random suffix and refuse to overwrite: CREATE_NEW throws FileAlreadyExistsException on the
+      // (astronomically unlikely) collision, which the fail-open catch below turns into a null
+      // return (budget() then degrades to a plain head+tail truncation) rather than a wrong-content
+      // overwrite.
       String fname = tool + "-" + System.currentTimeMillis() + "-" + shortToken() + ".txt";
       Files.writeString(dir.resolve(fname), output, java.nio.file.StandardOpenOption.CREATE_NEW);
       return ".agent-context/tool-output/" + fname;
