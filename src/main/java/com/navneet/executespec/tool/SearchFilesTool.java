@@ -1,12 +1,9 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -83,17 +80,11 @@ public class SearchFilesTool implements Tool {
   private static final int MAX_LINE_LEN = 240;
 
   /**
-   * RR-644 — bounds for the Java-regex fallback (reached when ripgrep is unavailable or rejects the
-   * pattern dialect). The JDK regex engine backtracks, so an unbounded pattern / very long line can
-   * pin a worker thread. Cap the pattern length, skip pathologically long lines before the matcher
-   * touches them, skip oversized files before {@code readAllLines}, and stop the whole walk once a
-   * wall-clock deadline elapses. These are conservative bounds, not a linear-time engine swap.
+   * RR-644 — the JDK regex engine backtracks, so an unbounded pattern can pin a worker thread. Cap
+   * the pattern length before it reaches the backtracking compiler. The per-line / per-file / walk-
+   * deadline bounds live in {@link SearchFilesFallbackWalk}, the extracted Java-walk engine.
    */
   private static final int MAX_PATTERN_LEN = 2_000;
-
-  private static final int MAX_MATCH_LINE_LEN = 20_000;
-  private static final long MAX_SEARCH_FILE_BYTES = 8L * 1024 * 1024;
-  private static final long WALK_DEADLINE_NANOS = 20L * 1_000_000_000L;
 
   @Override
   public String name() {
@@ -301,16 +292,28 @@ public class SearchFilesTool implements Tool {
       // Fast path: ripgrep (faster + gitignore-aware on large repos). Falls back to the Java walk
       // when rg isn't on PATH, the pattern isn't valid Rust-regex, or rg errors (RL-2026-05-062).
       List<String> matches = null;
+      SearchFilesFallbackWalk.Outcome walk = null;
       if (ripgrepAvailable()) {
         matches = collectViaRipgrep(patternStr, searchRoot, workspaceReal, filePattern, false);
       }
       if (matches == null) {
-        matches = collectViaJavaWalk(searchRoot, fileMatcher, regex, workspaceReal);
+        walk =
+            new SearchFilesFallbackWalk(contextSanitizer)
+                .collect(searchRoot, fileMatcher, regex, workspaceReal);
+        matches = walk.matches();
       }
 
-      if (matches.isEmpty()) return ToolResult.ok("(no matches)");
+      if (matches.isEmpty()) {
+        // "(no matches)" must mean "searched everything, found nothing" — not "gave up early".
+        // If the walk skipped files or hit its deadline, say so, so the model does not conclude a
+        // symbol is absent when the search never reached it.
+        if (walk != null && walk.isIncomplete()) {
+          return ToolResult.ok("(no matches so far) — " + walk.incompletenessNote());
+        }
+        return ToolResult.ok("(no matches)");
+      }
       int total = matches.size();
-      boolean ceilingHit = total >= MATCH_CEILING;
+      boolean ceilingHit = total >= MATCH_CEILING || (walk != null && walk.ceilingHit());
       int from = Math.min(offset, total);
       int to = Math.min(from + maxResults, total);
       List<String> page = matches.subList(from, to);
@@ -321,6 +324,11 @@ public class SearchFilesTool implements Tool {
         if (to < total) {
           sb.append(" — use offset=").append(to).append(" for more, or narrow the pattern");
         }
+      }
+      // Surface the walk's skip ledger so a deadline-truncated or skip-heavy search is never
+      // presented as a complete count.
+      if (walk != null && walk.isIncomplete()) {
+        sb.append("; ").append(walk.incompletenessNote());
       }
       sb.append('\n').append(String.join("\n", page));
       return ToolResult.ok(sb.toString());
@@ -339,76 +347,6 @@ public class SearchFilesTool implements Tool {
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("mode must be REGEX, EXACT, SYMBOL, or RELATIONSHIPS");
     }
-  }
-
-  /** The original Java walk + regex. The reliable fallback when ripgrep isn't usable. */
-  private List<String> collectViaJavaWalk(
-      Path searchRoot, PathMatcher fileMatcher, Pattern regex, Path workspaceReal)
-      throws IOException {
-    List<String> matches = new ArrayList<>();
-    long deadline = System.nanoTime() + WALK_DEADLINE_NANOS;
-    Files.walkFileTree(
-        searchRoot,
-        new SimpleFileVisitor<>() {
-          @Override
-          public FileVisitResult preVisitDirectory(Path d, BasicFileAttributes attrs) {
-            if (HIDDEN_DIRS.contains(d.getFileName().toString()))
-              return FileVisitResult.SKIP_SUBTREE;
-            return FileVisitResult.CONTINUE;
-          }
-
-          @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-            if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
-            // RR-644 — stop the whole walk once the wall-clock budget is spent.
-            if (System.nanoTime() > deadline) return FileVisitResult.TERMINATE;
-            // RR-644 — skip a file too large to decode whole before readAllLines allocates it.
-            if (attrs.isRegularFile() && attrs.size() > MAX_SEARCH_FILE_BYTES) {
-              return FileVisitResult.CONTINUE;
-            }
-            if (SensitiveWorkspacePathPolicy.isSensitive(file.toString())) {
-              return FileVisitResult.CONTINUE;
-            }
-            // walkFileTree does not follow directory links, but a symlink visited as a file would
-            // otherwise be opened by readAllLines. Keep the compatibility fallback subject to the
-            // same workspace-realpath boundary as the structured search implementation.
-            if (Files.isSymbolicLink(file) && !isInsideRealWorkspace(workspaceReal, file)) {
-              return FileVisitResult.CONTINUE;
-            }
-            if (fileMatcher != null && !fileMatcher.matches(file.getFileName())) {
-              return FileVisitResult.CONTINUE;
-            }
-            String name = file.getFileName().toString().toLowerCase();
-            if (name.endsWith(".jar")
-                || name.endsWith(".class")
-                || name.endsWith(".png")
-                || name.endsWith(".jpg")
-                || name.endsWith(".gif")
-                || name.endsWith(".pdf")
-                || name.endsWith(".zip")
-                || name.endsWith(".gz")) {
-              return FileVisitResult.CONTINUE;
-            }
-            try {
-              List<String> lines = Files.readAllLines(file);
-              for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i);
-                // RR-644 — never feed a pathologically long line to the backtracking matcher.
-                if (line.length() > MAX_MATCH_LINE_LEN) continue;
-                if (regex.matcher(line).find()) {
-                  String rel = workspaceReal.relativize(file).toString();
-                  matches.add(
-                      rel + ":" + (i + 1) + ":" + contextSanitizer.sanitizeOutput(clampLine(line)));
-                  if (matches.size() >= MATCH_CEILING) return FileVisitResult.TERMINATE;
-                }
-              }
-            } catch (IOException ignored) {
-              // skip files we can't read (binary, permission denied)
-            }
-            return FileVisitResult.CONTINUE;
-          }
-        });
-    return matches;
   }
 
   /**
@@ -432,6 +370,17 @@ public class SearchFilesTool implements Tool {
     cmd.add("--color");
     cmd.add("never");
     cmd.add("--no-messages");
+    // One contract, not two. By default rg honours .gitignore, .ignore, .git/info/exclude and
+    // skips every dotfile/dot-directory; the Java-walk fallback honours NONE of those (it skips
+    // only the explicit HIDDEN_DIRS set below). That made an identical query return different
+    // results depending on whether `rg` was on the host PATH — and, because ExecuteSpec's own
+    // workspace prep writes generated/vendor rules into .git/info/exclude, it made platform-ignored
+    // source unsearchable on rg hosts while it stayed searchable on non-rg hosts. Force rg to match
+    // the walk: search everything, and exclude ONLY the HIDDEN_DIRS below (via the -g globs) plus
+    // the sensitive-path filter applied to every emitted line. Result sets are now
+    // host-independent.
+    cmd.add("--no-ignore");
+    cmd.add("--hidden");
     if (fixedStrings) cmd.add("--fixed-strings");
     cmd.add("--max-count");
     cmd.add(String.valueOf(MATCH_CEILING)); // per-file cap; total still bounded below
@@ -562,14 +511,6 @@ public class SearchFilesTool implements Tool {
 
   private static String clampLine(String line) {
     return line.length() > MAX_LINE_LEN ? line.substring(0, MAX_LINE_LEN) + "..." : line;
-  }
-
-  private static boolean isInsideRealWorkspace(Path workspaceReal, Path file) {
-    try {
-      return file.toRealPath().startsWith(workspaceReal);
-    } catch (IOException e) {
-      return false;
-    }
   }
 
   /** Lazily probes {@code rg --version} once per JVM; caches the result. */

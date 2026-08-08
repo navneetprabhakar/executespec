@@ -167,7 +167,11 @@ public class FileSystemTool {
           String path) {
     try {
       Path resolved = safeResolve(runId, path);
-      return Files.readString(resolved);
+      // ISO-8859-1 maps every byte and never throws. Strict UTF-8 (the default) threw on any
+      // latin-1 / UTF-16 / stray-byte source file, and the accuracy assessor reading this saw
+      // "Cannot read <path>" — indistinguishable from a missing file — so it could grade a present
+      // file as absent. ASCII content is byte-identical either way.
+      return Files.readString(resolved, java.nio.charset.StandardCharsets.ISO_8859_1);
     } catch (SecurityException e) {
       return "ACCESS DENIED: " + e.getMessage();
     } catch (IOException e) {
@@ -186,7 +190,10 @@ public class FileSystemTool {
       int requestedEnd = Math.max(start, endLine);
       int totalLines = 0;
       List<String> selected = new java.util.ArrayList<>();
-      try (BufferedReader reader = Files.newBufferedReader(resolved)) {
+      // ISO-8859-1 never throws on non-UTF-8 bytes — a legacy-encoded source file stays readable
+      // instead of collapsing to "Cannot read" (a false "absent/corrupt" signal to the assessor).
+      try (BufferedReader reader =
+          Files.newBufferedReader(resolved, java.nio.charset.StandardCharsets.ISO_8859_1)) {
         String line;
         while ((line = reader.readLine()) != null) {
           totalLines++;
@@ -393,8 +400,17 @@ public class FileSystemTool {
       // 1. Root-level files (everything outside repos/) — bounded by perRepoMax.
       sb.append("=== workspace root (excluding repos/) ===\n");
       int rootBefore = count[0];
-      walkRootShallow(ws, sb, count, perRepoMax, totalMax);
+      boolean[] rootTruncated = {false};
+      walkRootShallow(ws, sb, count, perRepoMax, totalMax, rootTruncated);
       if (count[0] == rootBefore) sb.append("(no root-level files)\n");
+      // The per-repo and total-cap paths below disclose truncation; the root section did not, so a
+      // workspace with more than perRepoMax root files silently dropped the overflow and the
+      // accuracy assessor could conclude root files are missing.
+      if (rootTruncated[0]) {
+        sb.append("...(truncated at ")
+            .append(perRepoMax)
+            .append(" entries for the workspace root)\n");
+      }
 
       // 2. Per-repo subtree, each capped at perRepoMax.
       for (Path repoDir : repoSubdirs) {
@@ -463,7 +479,8 @@ public class FileSystemTool {
    * listing path so per-repo subtrees aren't double-counted under the "root" section.
    */
   private static void walkRootShallow(
-      Path workspaceRoot, StringBuilder sb, int[] count, int max, int totalMax) throws IOException {
+      Path workspaceRoot, StringBuilder sb, int[] count, int max, int totalMax, boolean[] truncated)
+      throws IOException {
     try (var stream = Files.walk(workspaceRoot)) {
       stream
           .filter(p -> !p.equals(workspaceRoot))
@@ -483,7 +500,13 @@ public class FileSystemTool {
           .sorted()
           .forEach(
               p -> {
-                if (count[0] >= max || count[0] >= totalMax) return;
+                // Record that at least one entry went unlisted because of the cap, so the caller
+                // can
+                // disclose it instead of presenting a truncated listing as the complete set.
+                if (count[0] >= max || count[0] >= totalMax) {
+                  truncated[0] = true;
+                  return;
+                }
                 sb.append(Files.isDirectory(p) ? "[DIR] " : "      ")
                     .append(workspaceRoot.relativize(p).toString())
                     .append('\n');
@@ -516,7 +539,18 @@ public class FileSystemTool {
       pb.redirectErrorStream(true);
       Process p = pb.start();
       String output = new String(p.getInputStream().readAllBytes());
-      p.waitFor();
+      int exit = p.waitFor();
+      // grep exit codes: 0 = matched, 1 = no match, >=2 = ERROR (bad regex, unreadable path,
+      // killed).
+      // Treating an errored search as "(no matches)" tells the caller the pattern is absent when
+      // the
+      // search never actually completed — so it may write code duplicating something that exists.
+      if (exit >= 2) {
+        return "Search error (grep exit="
+            + exit
+            + "): "
+            + (output.isBlank() ? "(no output)" : output);
+      }
       return output.isBlank() ? "(no matches)" : output;
     } catch (Exception e) {
       return "Search failed: " + e.getMessage();
