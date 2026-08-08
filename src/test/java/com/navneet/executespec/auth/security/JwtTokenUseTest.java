@@ -15,6 +15,7 @@ import javax.crypto.SecretKey;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.support.TestObjectProviders;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,7 @@ class JwtTokenUseTest {
   void setUp() {
     FeatureFlagService flags = mock(FeatureFlagService.class);
     when(flags.getString(eq("force_logout_epoch"), any())).thenReturn(null);
-    jwtUtil = new JwtUtil(SECRET, 15, 7, flags);
+    jwtUtil = new JwtUtil(SECRET, 15, 7, TestObjectProviders.of(flags));
     key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
   }
 
