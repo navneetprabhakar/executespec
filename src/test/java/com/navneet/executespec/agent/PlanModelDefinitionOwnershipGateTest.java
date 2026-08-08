@@ -53,6 +53,11 @@ class PlanModelDefinitionOwnershipGateTest {
 
   @Test
   void contradictoryManualSchemaInstructionsFailClosed() {
+    // The redundant DB-init contradiction gate was deleted (2026-08-08 Class-B refinement) because
+    // it
+    // false-positived on the safety enricher's own migration prose. The GENUINE contradiction — a
+    // constraint that forbids ORM create_all while the description positively instructs it — is
+    // still caught, more precisely, by TaskExpansionContradictionValidator.
     PlannedTask task =
         task(
             "T5",
@@ -63,9 +68,10 @@ class PlanModelDefinitionOwnershipGateTest {
             task, "Fixtures must apply migrations and must not call ORM create_all.");
     List<String> violations = new ArrayList<>();
 
-    PlanDatabaseInitializationContractGate.addViolations(plan(task), violations);
+    TaskExpansionContradictionValidator.addViolations(task, plan(task), violations);
 
-    assertThat(violations).singleElement().asString().contains("both requires and forbids");
+    assertThat(violations)
+        .anySatisfy(v -> assertThat(v).contains("bypasses the required migration path"));
   }
 
   @Test
