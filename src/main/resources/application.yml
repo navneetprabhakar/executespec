@@ -79,9 +79,9 @@ spring:
   mvc:
     async:
       # Servlet async ceiling for streaming agent/chat turns that run on the request thread (the
-      # BUILD pipeline is off-thread and unaffected). Raised 2026-08-08 (900000 → 1800000 ms) so a
-      # slow-model interactive streaming turn is not cut by the container mid-response.
-      request-timeout: ${SPRING_MVC_ASYNC_REQUEST_TIMEOUT_MS:1800000}
+      # BUILD pipeline is off-thread and unaffected). Interactive turns use the tight INTERACTIVE
+      # transport window and fail fast, so the original 15-min ceiling is a comfortable backstop.
+      request-timeout: ${SPRING_MVC_ASYNC_REQUEST_TIMEOUT_MS:900000}
   jpa:
     open-in-view: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect

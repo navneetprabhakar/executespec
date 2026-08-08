@@ -1269,6 +1269,28 @@ class LlmRouterTest {
   }
 
   @Test
+  void interactiveProfileGetsTheTightHumanFacingWindowNotThePipelineWindow() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+
+    // A human is watching an INTERACTIVE chat turn — it must NOT inherit the 660s pipeline window;
+    // it gets the tight interactive window (180s) so a wedged provider fails fast.
+    router.call(
+        req("openai", "gpt-x").toBuilder()
+            .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
+            .build());
+    // PIPELINE (default) stays on the full slow-model window.
+    router.call(req("openai", "gpt-x"));
+
+    verify(openai, times(2)).call(wire.capture());
+    assertThat(wire.getAllValues())
+        .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::readTimeoutSeconds)
+        .containsExactly(180, 660);
+  }
+
+  @Test
   void pipeline_default_profile_uses_eight_attempt_accuracy_ladder() {
     build();
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));

@@ -616,6 +616,14 @@ public class LlmRouter {
   @Value("${executespec.llm.model-response-timeout-seconds:660}")
   private int modelResponseTimeoutSeconds = 660;
 
+  /**
+   * Per-turn transport read window for INTERACTIVE (human-facing chat) turns only — a person is
+   * watching, so this stays well below the slow-model pipeline window so a wedged provider fails
+   * fast instead of hanging the user for minutes. Default 180s (3 min).
+   */
+  @Value("${executespec.llm.interactive-model-response-timeout-seconds:180}")
+  private int interactiveModelResponseTimeoutSeconds = 180;
+
   /** Per-provider window override; -1 (default) inherits {@link #modelResponseTimeoutSeconds}. */
   @Value("${spring.ai.anthropic.read-timeout-seconds:-1}")
   private int anthropicReadTimeoutSeconds = -1;
@@ -1382,6 +1390,15 @@ public class LlmRouter {
    */
   private Duration transportTimeout(LlmRequest request) {
     Duration window = providerTransportWindow(request.provider());
+    // Human-facing (INTERACTIVE) turns fail fast — a person is watching, so the slow-model
+    // pipeline window (660s) is wrong here: a wedged provider would hold the socket ~11 min per
+    // attempt. Cap INTERACTIVE at the tighter interactive window. PIPELINE keeps the full window;
+    // AUXILIARY already self-caps via its caller's 60s readTimeoutSeconds override below.
+    if (request.retryProfile() == LlmRequest.RetryProfile.INTERACTIVE) {
+      Duration interactive =
+          Duration.ofSeconds(Math.max(1, interactiveModelResponseTimeoutSeconds));
+      if (interactive.compareTo(window) < 0) window = interactive;
+    }
     if (request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0) {
       Duration override = Duration.ofSeconds(request.readTimeoutSeconds());
       return override.compareTo(window) < 0 ? override : window;
