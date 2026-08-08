@@ -5,6 +5,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Compiles a bounded worker-visible task brief from the validated plan.
  *
@@ -12,6 +14,7 @@ import java.util.Map;
  * remains implementation guidance because it carries the code-level sequencing and integration
  * details that do not fit cleanly into those structured fields.
  */
+@Slf4j
 public final class TaskExecutionBriefCompiler {
 
   static final int MAX_BRIEF_CHARS = 12_000;
@@ -29,15 +32,92 @@ public final class TaskExecutionBriefCompiler {
       throw contractFailure("planner returned an empty executable plan");
     }
     Plan compiled = compile(TaskExpanderAgent.normalizeFinalPlan(plan));
-    List<String> violations = TaskExpanderAgent.finalPlanContractViolations(compiled);
-    violations = new ArrayList<>(violations);
-    // Requirement ownership is execution authority, not a rollout-gated quality heuristic. Keep
-    // it at the shared final compiler so SMALL/MEDIUM/LARGE/SINGLE_SHOT all enter the same bounded
-    // repair/escalation lifecycle and no strategy can spend an earlier duplicate repair.
-    violations.addAll(PlannerOutputUtils.validateRequirementCoverage(compiled));
-    violations.addAll(PlanSourceHttpRouteGate.violations(originalRequest, compiled));
-    if (!violations.isEmpty()) throw contractFailure(String.join("; ", violations));
+
+    // FAIL-CLOSED set — the plan cannot execute or violates explicit user intent. These stay fatal:
+    //  * structural envelope overflow (a truncated brief is not a plan),
+    //  * requirement ownership (execution authority — every requirement must be owned; this has a
+    //    deterministic upstream backfill, so reaching here means a genuinely uncovered
+    // requirement),
+    //  * source HTTP route drift (adding/removing an /api namespace the user did not ask for).
+    List<String> fatal =
+        new ArrayList<>(TaskExpanderAgent.structuralPlanContractViolations(compiled));
+    fatal.addAll(PlannerOutputUtils.validateRequirementCoverage(compiled));
+    fatal.addAll(PlanSourceHttpRouteGate.violations(originalRequest, compiled));
+    if (!fatal.isEmpty()) throw contractFailure(String.join("; ", fatal));
+
+    // ADVISORY set — the heuristic natural-language contradiction detectors (the ~30-gate
+    // PlanContractQualityGate battery plus the cross-task semantic checks). These are genuine
+    // cross-task guidance but false-positive on legitimate plans often enough that a correct plan
+    // used to fail to reach the plan gate as a coin flip (and, worse, fought the deterministic
+    // safety enricher's own injected phrasing). BUILD-mode quality is enforced at execution time by
+    // the worker's own tests and the read-only reviewer — the same mechanism that lets this system
+    // pass coding benchmarks, which bypass this battery entirely. So surface these findings to the
+    // worker as guidance and log them, but never kill the run over them.
+    List<String> advisory = TaskExpanderAgent.advisoryPlanContractViolations(compiled);
+    if (!advisory.isEmpty()) {
+      log.warn(
+          "Executable plan compiled with {} advisory contract finding(s) (non-blocking, surfaced to"
+              + " the worker): {}",
+          advisory.size(),
+          boundedSummary(advisory));
+      compiled = attachAdvisoryGuidance(compiled, advisory);
+    }
     return compiled;
+  }
+
+  private static String boundedSummary(List<String> findings) {
+    String joined = String.join(" | ", findings);
+    return joined.length() > 600 ? joined.substring(0, 600) + " …(truncated)" : joined;
+  }
+
+  /**
+   * Appends each advisory finding to its owning task's hard constraints as explicit non-blocking
+   * guidance, so the worker actually sees the cross-task consistency note instead of it being lost
+   * when the gate stops being fatal. Attachment is budget-safe: a task already at the constraint
+   * count or brief-size ceiling is skipped (the finding was still logged), never truncated into a
+   * structural violation. Findings with no resolvable owning task are left to the log.
+   */
+  private static Plan attachAdvisoryGuidance(Plan plan, List<String> advisory) {
+    Map<String, List<String>> byTask = new LinkedHashMap<>();
+    for (String finding : advisory) {
+      int colon = finding.indexOf(": ");
+      if (colon <= 0) continue;
+      String taskId = finding.substring(0, colon).trim();
+      String message = finding.substring(colon + 2).trim();
+      if (taskId.isEmpty() || message.isEmpty()) continue;
+      byTask.computeIfAbsent(taskId, ignored -> new ArrayList<>()).add(message);
+    }
+    if (byTask.isEmpty()) return plan;
+    List<PlannedTask> rebuilt = new ArrayList<>(plan.tasks().size());
+    for (PlannedTask task : plan.tasks()) {
+      List<String> notes = task == null ? null : byTask.get(task.id());
+      if (task == null || notes == null) {
+        rebuilt.add(task);
+        continue;
+      }
+      List<String> constraints =
+          new ArrayList<>(task.hardConstraints() == null ? List.of() : task.hardConstraints());
+      int briefUsed =
+          safeLen(task.description())
+              + constraints.stream().mapToInt(TaskExecutionBriefCompiler::safeLen).sum();
+      for (String note : notes) {
+        if (constraints.size() >= 12) break; // structural ceiling — do not overflow it
+        String guidance = "ADVISORY (non-blocking): " + boundedNote(note);
+        if (briefUsed + guidance.length() > MAX_BRIEF_CHARS - 500) break; // keep brief headroom
+        constraints.add(guidance);
+        briefUsed += guidance.length();
+      }
+      rebuilt.add(task.toBuilder().hardConstraints(constraints).build());
+    }
+    return plan.toBuilder().tasks(rebuilt).build();
+  }
+
+  private static int safeLen(String value) {
+    return value == null ? 0 : value.length();
+  }
+
+  private static String boundedNote(String note) {
+    return note.length() > 240 ? note.substring(0, 240) + " …" : note;
   }
 
   public static Plan compile(Plan plan) {

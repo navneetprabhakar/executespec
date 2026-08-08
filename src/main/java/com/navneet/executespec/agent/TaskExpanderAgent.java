@@ -304,6 +304,16 @@ public class TaskExpanderAgent {
     return TaskExpansionPlanContract.finalPlanContractViolations(plan);
   }
 
+  /** Fail-closed subset — the assembled plan literally cannot execute (see delegate javadoc). */
+  public static List<String> structuralPlanContractViolations(Plan plan) {
+    return TaskExpansionPlanContract.structuralPlanContractViolations(plan);
+  }
+
+  /** Advisory remainder — heuristic cross-task guidance, surfaced but never a run-killer. */
+  public static List<String> advisoryPlanContractViolations(Plan plan) {
+    return TaskExpansionPlanContract.advisoryPlanContractViolations(plan);
+  }
+
   public static Plan normalizeFinalPlan(Plan plan) {
     return TaskExpansionPlanContract.normalizeFinalPlan(plan);
   }
