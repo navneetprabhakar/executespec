@@ -59,7 +59,12 @@ final class PlanContractQualityGate {
     PlanLifecycleValueContractGate.addViolations(plan.tasks(), violations);
     PlanSharedFieldContractGate.addViolations(plan.tasks(), violations);
     PlanPersistenceFieldUsageGate.addViolations(plan, violations);
-    PlanDatabaseInitializationContractGate.addViolations(plan, violations);
+    // The database-initialization contradiction gate was removed (2026-08-08 Class-B refinement).
+    // It re-checked the deterministic PlanSafetyContractEnricher's own migration/create_all output
+    // in natural-language prose and false-positived on correctly-enriched plans (dev runs 3ef2716f
+    // T3/T4). The genuine "task bypasses migrations with ORM/manual create_all" contradiction is
+    // caught more precisely by TaskExpansionContradictionValidator (constraint forbids create_all
+    // AND the description positively instructs it), which already runs above.
     addPythonPackagingViolations(plan.tasks(), violations);
     PlanBackendContractGate.addViolations(plan, violations);
     PlanCrossStackIdentifierTypeGate.addViolations(plan, violations);

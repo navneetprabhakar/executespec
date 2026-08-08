@@ -63,6 +63,32 @@ class ReviewerPromptTrustBoundaryTest {
         .contains("not merely whether the build and generated tests are green");
   }
 
+  @Test
+  void reviewerReceivesPlanAdvisoriesToVerifyAgainstGeneratedCode() {
+    // Class-C plan-time advisories (2026-08-08) — heuristic cross-task findings that did NOT block
+    // the run are handed to the reviewer to confirm or dismiss against the actual code.
+    ReviewerRequest request =
+        ReviewerRequest.builder()
+            .provider("deepseek")
+            .model("deepseek-v4-pro-native")
+            .context(new ExecutionContext("run-1", "review", Path.of(".").toAbsolutePath()))
+            .originalGoal("Serve HTTP.")
+            .planAdvisories(
+                List.of(
+                    "T3: Order consumer requires status but schema task T2 does not define"
+                        + " Order.status"))
+            .build();
+
+    String prompt = ReviewerAgent.composeReviewerUserPrompt(request, null);
+
+    assertThat(prompt)
+        .contains("<<<UNTRUSTED_PLAN_ADVISORIES_TO_VERIFY")
+        .contains("Order consumer requires status")
+        .contains("against the actual generated code")
+        .contains("Do not")
+        .contains("cannot reproduce in the code");
+  }
+
   private static int count(String value, String needle) {
     int count = 0;
     int offset = 0;

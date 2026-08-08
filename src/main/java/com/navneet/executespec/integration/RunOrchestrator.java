@@ -2301,6 +2301,9 @@ public class RunOrchestrator implements RunControlPort {
                     .allowBuildManifestCreation(false)
                     .originalGoal(userRequest)
                     .requirements(plan.requirements())
+                    .planAdvisories(
+                        com.navneet.executespec.agent.TaskExpanderAgent
+                            .advisoryPlanContractViolations(plan))
                     .build());
         persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
@@ -3867,6 +3870,9 @@ public class RunOrchestrator implements RunControlPort {
                     .originalGoal(
                         runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
                     .requirements(plan.requirements())
+                    .planAdvisories(
+                        com.navneet.executespec.agent.TaskExpanderAgent
+                            .advisoryPlanContractViolations(plan))
                     .build());
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
         long reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();

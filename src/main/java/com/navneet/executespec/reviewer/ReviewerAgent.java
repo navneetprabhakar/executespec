@@ -814,6 +814,31 @@ exit=0 — the harness will reject premature completions.
           .append("\n\n")
           .append(PromptTrustBoundary.wrap("PLAN_REQUIREMENTS", rows.toString().stripTrailing()));
     }
+    if (req.planAdvisories() != null && !req.planAdvisories().isEmpty()) {
+      // Class-C plan-time advisories (2026-08-08). These heuristic cross-task contract findings did
+      // NOT block the run — they false-positive too often to be run-killers — so verify each one
+      // against the actual generated code here, where it can be confirmed or dismissed with real
+      // evidence rather than guessed at plan time. A finding you cannot reproduce in the code is a
+      // false positive; report only the ones that are genuinely present.
+      StringBuilder rows = new StringBuilder();
+      for (String advisory : req.planAdvisories()) {
+        if (advisory == null || advisory.isBlank()) continue;
+        rows.append("- ").append(advisory.strip()).append('\n');
+      }
+      if (!rows.isEmpty()) {
+        evidence
+            .append(
+                "\n\nThe advisories below are non-blocking heuristic findings raised during"
+                    + " planning. They did NOT block the run because they false-positive too often"
+                    + " to be trusted at plan time. Verify each one against the actual generated"
+                    + " code: confirm it as a real defect or dismiss it as a false positive. Do not"
+                    + " fail the review over an advisory you cannot reproduce in the code.")
+            .append("\n\n")
+            .append(
+                PromptTrustBoundary.wrap(
+                    "PLAN_ADVISORIES_TO_VERIFY", rows.toString().stripTrailing()));
+      }
+    }
     return evidence.toString().stripTrailing();
   }
 
