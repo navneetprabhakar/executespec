@@ -29,6 +29,8 @@ import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Service;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Deterministic, workspace-confined repository search contract. This is the typed seam shared by
  * worker tools, project chat, local-hands clients, and future optional explorers. It deliberately
@@ -36,6 +38,7 @@ import org.springframework.stereotype.Service;
  * contract without changing callers.
  */
 @Service
+@Slf4j
 public class RepositorySearchService {
 
   private static final Set<String> IGNORED_DIRS =
@@ -384,7 +387,15 @@ public class RepositorySearchService {
         if (previous != null && previous.contentHash.equals(contentHash)) {
           return previous.lines;
         }
-        List<String> current = Files.readAllLines(file);
+        // Decode with ISO-8859-1, which maps every byte 0..255 and NEVER throws. The prior
+        // strict-UTF-8 readAllLines threw MalformedInputException on any latin-1 / UTF-16 /
+        // Windows-1252 / stray-byte source file; that IOException was caught below and turned into
+        // a
+        // null → the file was silently dropped from EVERY search, so the model concluded a symbol
+        // did not exist and wrote a duplicate. ASCII patterns (the overwhelming majority of code
+        // search) still match byte-for-byte; the content-hash fence below is a byte digest and is
+        // unaffected by the decode charset.
+        List<String> current = Files.readAllLines(file, StandardCharsets.ISO_8859_1);
         String afterReadHash = contentHash(file);
         if (!contentHash.equals(afterReadHash)) {
           removeSnapshot(file);
@@ -530,11 +541,19 @@ public class RepositorySearchService {
       // without
       // limit. Destroy the whole tree on expiry.
       ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+      java.util.concurrent.atomic.AtomicBoolean inventoryTruncated =
+          new java.util.concurrent.atomic.AtomicBoolean(false);
       Process proc = process;
       Thread outDrain =
           Thread.ofVirtual()
               .name("repo-inventory-out")
-              .start(() -> drainBounded(proc.getInputStream(), buffer, MAX_GIT_INVENTORY_BYTES));
+              .start(
+                  () ->
+                      drainBounded(
+                          proc.getInputStream(),
+                          buffer,
+                          MAX_GIT_INVENTORY_BYTES,
+                          inventoryTruncated));
       Thread errDrain =
           Thread.ofVirtual()
               .name("repo-inventory-err")
@@ -552,6 +571,19 @@ public class RepositorySearchService {
       joinDrainQuietly(outDrain);
       joinDrainQuietly(errDrain);
       if (process.exitValue() != 0) return null;
+      // If the NUL-separated listing exceeded the 32 MiB cap, the tail of the file list was dropped
+      // (and the last surviving name may be cut mid-path). Using that truncated listing as the
+      // authoritative inventory would silently hide an arbitrary set of files from every search —
+      // symbols defined only there would read as absent. Fail over to the uncapped tree-walk
+      // fallback in inventory() instead of accepting a partial list as complete.
+      if (inventoryTruncated.get()) {
+        log.warn(
+            "git ls-files inventory exceeded {} bytes for {} — falling back to the full tree walk"
+                + " so no files are silently hidden from search",
+            MAX_GIT_INVENTORY_BYTES,
+            root);
+        return null;
+      }
       String listing = buffer.toString(StandardCharsets.UTF_8);
       List<Path> files = new ArrayList<>();
       for (String relativeName : listing.split("\\u0000")) {
@@ -576,7 +608,11 @@ public class RepositorySearchService {
   /**
    * Drain a stream into a byte-bounded buffer, continuing to read past the cap so the pipe frees.
    */
-  private static void drainBounded(InputStream in, ByteArrayOutputStream sink, int maxBytes) {
+  private static void drainBounded(
+      InputStream in,
+      ByteArrayOutputStream sink,
+      int maxBytes,
+      java.util.concurrent.atomic.AtomicBoolean truncated) {
     try {
       byte[] buf = new byte[8192];
       int n;
@@ -584,6 +620,10 @@ public class RepositorySearchService {
         int room = maxBytes - sink.size();
         if (room > 0) {
           sink.write(buf, 0, Math.min(n, room));
+          if (n > room) truncated.set(true);
+        } else {
+          // Bytes arrived after the cap was already full — the listing is genuinely truncated.
+          truncated.set(true);
         }
       }
     } catch (Exception ignored) {

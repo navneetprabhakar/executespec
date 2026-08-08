@@ -108,19 +108,35 @@ public class WorkspaceRunTestsTool implements Tool, FlagGatedTool {
 
     Optional<TestExecutionSummary> opt = runner.runTests(ctx.runId(), ctx.workspaceRoot());
     if (opt.isEmpty()) {
-      ObjectNode noRunner = json.createObjectNode();
-      noRunner.put("available", true);
-      noRunner.put("verified", false);
-      noRunner.put(
+      // Optional.empty() conflates TWO very different states: (a) no supported test runner was
+      // detected, and (b) a runner WAS detected but produced no trustworthy pass/fail count — the
+      // suite failed to compile, crashed, hit a coverage gate, timed out, or the sandbox was
+      // unavailable. Reporting (b) as "no test runner found" tells the model its tests don't exist
+      // when they actually RAN AND FAILED, so it calls completeTask on red code. Split them.
+      boolean detected = runner.frameworkDetected(ctx.workspaceRoot());
+      ObjectNode noResult = json.createObjectNode();
+      noResult.put("available", true);
+      noResult.put("verified", false);
+      noResult.put("frameworkDetected", detected);
+      noResult.put(
           "summary",
-          "no recognized test runner in the workspace, or test output was unparseable. "
-              + "Confirm the framework is supported (pytest / mvn / gradle / npm / cargo / go) "
-              + "and that tests + config files were written to disk before retrying.");
-      return ToolResult.ok(noRunner.toString());
+          detected
+              ? "A test framework WAS detected, but no pass/fail counts could be produced. This is"
+                  + " NOT the same as 'no tests' and does NOT mean the tests passed — the suite may"
+                  + " have failed to compile, crashed, timed out, hit a coverage gate, or could not"
+                  + " be run. Inspect with buildProject or by running the test command via shell;"
+                  + " do not call completeTask assuming tests are absent or green."
+              : "no recognized test runner in the workspace. Confirm the framework is supported"
+                  + " (pytest / mvn / gradle / npm / cargo / go) and that tests + config files were"
+                  + " written to disk before retrying.");
+      return ToolResult.ok(noResult.toString());
     }
 
     TestExecutionSummary s = opt.get();
-    boolean verified = s.getFailed() == 0 && s.getErrors() == 0 && s.getTotalTests() > 0;
+    // An all-skipped suite (passed == 0, failed == 0) is NOT verified green — nothing was actually
+    // asserted. Requiring passed > 0 stops a suite whose tests are all gated behind an unmet
+    // marker/condition from certifying as passing. The skipped count is still surfaced below.
+    boolean verified = s.getFailed() == 0 && s.getErrors() == 0 && s.getPassed() > 0;
 
     ObjectNode result = json.createObjectNode();
     result.put("available", true);

@@ -151,11 +151,11 @@ public class OutlinePlannerAgent {
 
   /**
    * Per-call HTTP read-timeout override propagated through {@code LlmRequest.readTimeoutSeconds}.
-   * Honoured by Gemini and every OpenAI-wire route; Anthropic retains its configured Spring AI
-   * client timeout. 240s (4 minutes) gives thinking models enough headroom for a single multi-task
-   * plan call — a healthy dev outline on a reasoning model measured 220s.
+   * Honoured by Gemini and every OpenAI-wire route; Anthropic retains its Spring AI client timeout.
+   * Raised 2026-08-08 (240s → 660s) to match the shared slow-model window {@code
+   * executespec.llm.model-response-timeout-seconds}; the router applies it as a MIN.
    */
-  private static final int PLANNER_HTTP_READ_TIMEOUT_SECONDS = 240;
+  private static final int PLANNER_HTTP_READ_TIMEOUT_SECONDS = 660;
 
   /**
    * [D-02] Wall-clock timeout for the synchronous planner call; a hit raises IllegalStateException

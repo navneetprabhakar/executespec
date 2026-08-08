@@ -83,6 +83,17 @@ public class WorkspaceTestRunner {
     return runTestsDetailed(runId, workspaceRoot).map(DetailedResult::summary);
   }
 
+  /**
+   * Whether a supported test framework is detected in the workspace, independent of whether it ran
+   * or produced parseable counts. Lets a caller distinguish "no runner here" from "a runner exists
+   * but produced no trustworthy count" — because {@link #runTests} collapses both to {@link
+   * Optional#empty()}, and reporting the second as the first tells the model its tests don't exist
+   * when in fact the suite failed to compile / crashed / hit a coverage gate / could not be run.
+   */
+  public boolean frameworkDetected(Path workspaceRoot) {
+    return workspaceRoot != null && resolver.resolve(workspaceRoot).isPresent();
+  }
+
   /** Detailed sibling of {@link #runTests} — same fail-safe contract. */
   public Optional<DetailedResult> runTestsDetailed(String runId, Path workspaceRoot) {
     if (workspaceRoot == null) return Optional.empty();

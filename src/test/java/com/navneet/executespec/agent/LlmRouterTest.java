@@ -527,7 +527,7 @@ class LlmRouterTest {
             eq(1),
             eq("PRIMARY"),
             nullable(String.class),
-            eq(Duration.ofSeconds(300)),
+            eq(Duration.ofSeconds(660)),
             eq(Duration.ofSeconds(15))))
         .thenReturn(admitted);
     when(anthropicAttemptModelFactory.create(
@@ -563,7 +563,7 @@ class LlmRouterTest {
             eq(1),
             eq("PRIMARY"),
             nullable(String.class),
-            eq(Duration.ofSeconds(300)),
+            eq(Duration.ofSeconds(660)),
             eq(Duration.ofSeconds(15))))
         .thenReturn(admittedAttempt(request, 1, "PRIMARY", null, "fresh-anthropic-key"));
     AnthropicChatModel model = mock(AnthropicChatModel.class);
@@ -812,7 +812,7 @@ class LlmRouterTest {
             eq(1),
             eq("PRIMARY"),
             nullable(String.class),
-            eq(Duration.ofSeconds(300)),
+            eq(Duration.ofSeconds(660)),
             eq(Duration.ofSeconds(15))))
         .thenReturn(admittedAttempt(request, 1, "PRIMARY", null, "fresh-anthropic-key"));
     when(anthropicForcedToolClient.canAttempt(any(), any(), any())).thenReturn(true);
@@ -1255,7 +1255,7 @@ class LlmRouterTest {
     ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
         ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
 
-    // No override: the resolved per-provider window (openai default 120s), never null.
+    // No override: the resolved per-provider window (shared slow-model default 660s), never null.
     router.call(req("openai", "gpt-x"));
     // Widening attempt (e.g. a worker hours from its absolute deadline): capped at the window.
     router.call(req("openai", "gpt-x").toBuilder().readTimeoutSeconds(3_540).build());
@@ -1265,23 +1265,47 @@ class LlmRouterTest {
     verify(openai, times(3)).call(wire.capture());
     assertThat(wire.getAllValues())
         .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::readTimeoutSeconds)
-        .containsExactly(120, 120, 30);
+        .containsExactly(660, 660, 30);
   }
 
   @Test
-  void pipeline_default_profile_uses_six_attempt_accuracy_ladder() {
+  void interactiveProfileGetsTheTightHumanFacingWindowNotThePipelineWindow() {
+    build();
+    when(openai.call(any())).thenReturn(ok());
+    ArgumentCaptor<OpenAiNativeToolClient.OpenAiToolCallRequest> wire =
+        ArgumentCaptor.forClass(OpenAiNativeToolClient.OpenAiToolCallRequest.class);
+
+    // A human is watching an INTERACTIVE chat turn — it must NOT inherit the 660s pipeline window;
+    // it gets the tight interactive window (180s) so a wedged provider fails fast.
+    router.call(
+        req("openai", "gpt-x").toBuilder()
+            .retryProfile(LlmRequest.RetryProfile.INTERACTIVE)
+            .build());
+    // PIPELINE (default) stays on the full slow-model window.
+    router.call(req("openai", "gpt-x"));
+
+    verify(openai, times(2)).call(wire.capture());
+    assertThat(wire.getAllValues())
+        .extracting(OpenAiNativeToolClient.OpenAiToolCallRequest::readTimeoutSeconds)
+        .containsExactly(180, 660);
+  }
+
+  @Test
+  void pipeline_default_profile_uses_eight_attempt_accuracy_ladder() {
     build();
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
     assertThatThrownBy(() -> router.call(req("openai", "gpt-x")))
         .isInstanceOf(RuntimeException.class);
     verify(openai, times(LlmRouter.TRANSIENT_RETRY_MAX_ATTEMPTS)).call(any());
-    // 5 backoffs between 6 attempts, at the campaign-proven pipeline spacing.
-    verify(router, times(5)).backoffSleep(anyLong());
-    verify(router).backoffSleep(5_000L);
-    verify(router).backoffSleep(15_000L);
-    verify(router).backoffSleep(25_000L);
-    verify(router).backoffSleep(45_000L);
-    verify(router).backoffSleep(65_000L);
+    // 7 backoffs between 8 attempts, at the widened (2026-08-08 slow-model) pipeline spacing.
+    verify(router, times(7)).backoffSleep(anyLong());
+    verify(router).backoffSleep(10_000L);
+    verify(router).backoffSleep(20_000L);
+    verify(router).backoffSleep(40_000L);
+    verify(router).backoffSleep(60_000L);
+    verify(router).backoffSleep(90_000L);
+    verify(router).backoffSleep(120_000L);
+    verify(router).backoffSleep(150_000L);
   }
 
   @Test
@@ -1441,7 +1465,7 @@ class LlmRouterTest {
             anyInt(),
             anyString(),
             nullable(String.class),
-            eq(Duration.ofSeconds(120)),
+            eq(Duration.ofSeconds(660)),
             eq(Duration.ofSeconds(15)));
     verify(stepUsageRecorder)
         .recordFailure(
@@ -1734,7 +1758,7 @@ class LlmRouterTest {
             argThat(
                 request ->
                     request.readTimeoutSeconds() != null
-                        && request.readTimeoutSeconds() == 300
+                        && request.readTimeoutSeconds() == 660
                         && request.baseUrl().contains("deepseek")));
     verify(openai, times(1))
         .call(
