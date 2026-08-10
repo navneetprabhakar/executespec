@@ -31,6 +31,24 @@ if [[ "$MODE" == "execute" ]]; then
   }
 fi
 
+assert_shared_kernel_enabled() {
+  local base_url="$1" tmp_dir token flag_value
+  tmp_dir="$(mktemp -d)"
+  curl -fsS -X POST "${base_url}/api/auth/login" -H 'Content-Type: application/json' \
+    --data "$(jq -cn --arg email "$EMAIL" --arg password "$PASSWORD" \
+      '{email:$email,password:$password}')" -o "${tmp_dir}/login.json"
+  token="$(jq -er '.accessToken // .token' "${tmp_dir}/login.json")"
+  curl -fsS "${base_url}/api/admin/feature-flags" \
+    -H "Authorization: Bearer ${token}" -o "${tmp_dir}/flags.json"
+  flag_value="$(jq -er '.[] | select(.flagKey=="build.shared-code-change-loop.enabled") | .flagValue' \
+    "${tmp_dir}/flags.json")"
+  rm -rf "$tmp_dir"
+  [[ "$flag_value" == "true" ]] || {
+    echo "Refusing paid qualification: build.shared-code-change-loop.enabled is ${flag_value:-missing}" >&2
+    return 1
+  }
+}
+
 SUITE_ID="$(jq -r '.suiteId' "$PLAN")"
 RESULT_ROOT="${BUILD_QUAL_RESULT_ROOT:-${SCRIPT_DIR}/build-qualification/results/${SUITE_ID}}"
 
@@ -52,8 +70,12 @@ while IFS=$'\t' read -r arm base_url_env release_sha_env; do
         "${arm}: ${base_url} @ ${release_sha}" \
         "  ${provider}/${model}, case=${case_id}, cap=\$${cap}, output=${out_dir}"
       if [[ "$MODE" == "execute" ]]; then
+        # Recheck immediately before every paid submission. A candidate result is not shared-kernel
+        # evidence if the global rollout flag is off, even when every held-out test later passes.
+        assert_shared_kernel_enabled "$base_url"
         BASE_URL="$base_url" OUT_DIR="$out_dir" PROVIDER="$provider" MODEL="$model" \
           USER_COST_CAP="$cap" RELEASE_SHA="$release_sha" QUALIFICATION_ARM="$arm" \
+          BUILD_SHARED_KERNEL_ENABLED=true \
           "${SCRIPT_DIR}/build-eval.sh" --provider "$provider" --model "$model" --case "$case_id"
       fi
     done < <(jq -r '.cases[].id' "$PLAN")

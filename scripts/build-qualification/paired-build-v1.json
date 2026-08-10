@@ -51,7 +51,7 @@
   ],
   "harness": {
     "path": "scripts/build-eval.sh",
-    "sha256": "3c28092017ea080e27e3d6bfd2a1ef18a74c07f7850c212ea69408672e050f69"
+    "sha256": "b9b71838bee5c3ea11879732e07486f4dc29de59c17c40544c664dffbb9d5a44"
   },
   "pairedEqualFields": [
     "runMode",
@@ -85,6 +85,10 @@
     "workspaceArchiveGeneration",
     "heldOutPassed",
     "heldOutTotal",
+    "initialFailureOutcome",
+    "initialFailureCode",
+    "acceptanceCheckCount",
+    "sharedKernelFlagEnabledAtSubmission",
     "generatedCodeReview"
   ],
   "requiredRolledBackEvidence": [
@@ -109,6 +113,7 @@
     "legacyRejectedDiffMaySubstituteForUnfrozenCandidateGeneration": true,
     "systemVerifiedScoreIsNonAuthoritative": true,
     "manualGeneratedCodeReviewRequired": true,
-    "allHeldOutTestsMustPassOnAcceptedArm": true
+    "allHeldOutTestsMustPassOnAcceptedArm": true,
+    "sharedKernelFlagMustBeEnabledAtSubmission": true
   }
 }

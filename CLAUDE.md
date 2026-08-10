@@ -20,7 +20,10 @@ replacement dispatch or handoff-dossier construction. Canonical BUILD ZIP export
 authority through traversal and returns `X-ExecuteSpec-Workspace-Generation`; qualification binds
 that value to the accepted frontier. The frozen schema-v2 cohort permits exactly two fresh dev
 candidates (Sonnet 5 and GLM 5.2, $5 each); its two ROLLED_BACK arms are immutable historical
-controls, not additional paid runs.
+controls, not additional paid runs. Paid execution fails closed unless the global shared-kernel
+flag is read as true immediately before each submission, and accepted evidence must independently
+contain the observed initial failure plus frozen acceptance checks. The harness never mutates the
+flag.
 The operator-only
 `GET /api/admin/workspace-generation-attempts/{attemptId}/qualification-evidence` route is
 SUPER_ADMIN + no-store and exposes preserved rejected-diff evidence only for manual qualification;
@@ -1229,7 +1232,7 @@ requires the consumer repository to be linked to that project before persistence
 | Frontend API client             | `frontend/src/lib/api/` (`transport.ts` + domain DTO contracts, with `core.ts` retaining compatibility re-exports)                                                                                                                                                              |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                                                                                                |
 | V2 eval framework               | `scripts/v2-eval.sh` + `scripts/v2-eval-specs/{low,medium,high}.txt`                                                                                                                                                                                                              |
-| Paired BUILD qualification      | `scripts/build-qualification/paired-build-v1.json` + `scripts/run-paired-build-qualification.sh` + `scripts/validate-paired-build-{qualification,results}.mjs` — authorization-gated control/candidate release comparison with digest-bound held-out evaluator, exact routes, accepted-generation evidence, and independent archive-bound code review; dry-run is provider-free |
+| Paired BUILD qualification      | `scripts/build-qualification/paired-build-v1.json` + `scripts/run-paired-build-qualification.sh` + `scripts/validate-paired-build-{qualification,results}.mjs` — authorization-gated comparison using two immutable rollback controls plus exactly two $5 live candidates; paid submission rechecks the shared-kernel flag and accepted evidence must prove the observed red precondition, frozen checks, accepted generation, held-out result, and independent archive-bound review; dry-run is provider-free |
 | Tier-eval-v2                    | [`eval/v2/`](src/main/java/com/navneet/executespec/eval/v2/) (`TierEvalRunner` + `TierEvalController` + `cases/`) + `scripts/tier-eval-v2.sh`                                                                                                                                     |
 
 ## Current state

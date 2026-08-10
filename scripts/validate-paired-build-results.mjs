@@ -77,6 +77,16 @@ export function validateResultRecords(plan, records, reviews = new Map(), option
 function validateAccepted(key, record, review, errors) {
   if (record.terminalStatus !== "COMPLETE") errors.push(`${key} did not reach COMPLETE`);
   if (record.latestWorkspaceGenerationAttemptState !== "ACCEPTED") errors.push(`${key} latest attempt is not ACCEPTED`);
+  if (record.sharedKernelFlagEnabledAtSubmission !== true) {
+    errors.push(`${key} was not submitted with the shared BUILD kernel flag enabled`);
+  }
+  if (record.initialFailureOutcome !== "FAILURE_OBSERVED"
+      || typeof record.initialFailureCode !== "string" || !record.initialFailureCode.trim()) {
+    errors.push(`${key} lacks the observed failure-first evidence required by the shared kernel`);
+  }
+  if (!Number.isInteger(record.acceptanceCheckCount) || record.acceptanceCheckCount < 1) {
+    errors.push(`${key} lacks the frozen shared-kernel acceptance checks`);
+  }
   for (const field of ["priorAcceptedWorkspaceGeneration", "acceptedWorkspaceGeneration", "workspaceArchiveSha256", "workspaceArchiveGeneration"]) {
     if (!SHA256.test(record[field] || "")) errors.push(`${key} ${field} is missing`);
   }
