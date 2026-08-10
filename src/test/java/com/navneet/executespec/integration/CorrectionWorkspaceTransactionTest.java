@@ -6,6 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.workspacegeneration.WorkspaceIgnoredArtifactGuard;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -34,6 +37,54 @@ class CorrectionWorkspaceTransactionTest {
     assertThat(Files.readString(repository.resolve("worker-new.txt"))).isEqualTo("worker output\n");
     assertThat(repository.resolve("correction-new.txt")).doesNotExist();
     assertThat(transaction.currentGeneration(checkpoint)).isEqualTo(beforeGeneration);
+  }
+
+  @Test
+  void rollbackDoesNotDeletePreexistingIgnoredDependencyRoots() throws Exception {
+    Path repository = repository("ignored-baseline");
+    Files.writeString(repository.resolve(".gitignore"), "baseline-cache/\n");
+    git(repository, "add", ".gitignore");
+    git(repository, "commit", "-q", "-m", "ignore dependency cache");
+    Files.createDirectories(repository.resolve("baseline-cache"));
+    Files.writeString(repository.resolve("baseline-cache/dependency.bin"), "keep\n");
+    var checkpoint = transaction.begin(repository);
+
+    Files.writeString(repository.resolve("tracked.txt"), "rejected\n");
+    transaction.rollback(checkpoint);
+
+    assertThat(repository.resolve("baseline-cache/dependency.bin")).exists();
+    assertThat(transaction.currentGeneration(checkpoint)).isEqualTo(checkpoint.generation());
+  }
+
+  @Test
+  void buildGenerationGuardDeletesIgnoredDependencyRootsAfterMultiRepoRollback() throws Exception {
+    Path root = repository("nested-ignored-baseline");
+    Path nested = repository(Files.createDirectories(root.resolve("repos")), "api");
+    git(root, "add", "repos/api");
+    git(root, "commit", "-q", "-m", "record nested repository");
+    Files.writeString(root.resolve(".gitignore"), "baseline-cache/\nscratch/\n");
+    git(root, "add", ".gitignore");
+    git(root, "commit", "-q", "-m", "ignore dependency cache");
+    Files.createDirectories(root.resolve("baseline-cache"));
+    Files.writeString(root.resolve("baseline-cache/dependency.bin"), "keep\n");
+    Files.writeString(root.resolve("staged.txt"), "staged-before\n");
+    git(root, "add", "staged.txt");
+    Files.writeString(root.resolve("untracked.txt"), "untracked-before\n");
+    var checkpoint = transaction.begin(root);
+    WorkspaceIgnoredArtifactGuard ignored = new WorkspaceIgnoredArtifactGuard(new ObjectMapper());
+    var baseline = ignored.prepare(checkpoint, () -> {});
+
+    Files.writeString(root.resolve("tracked.txt"), "rejected\n");
+    Files.writeString(root.resolve("staged.txt"), "rejected\n");
+    Files.delete(root.resolve("untracked.txt"));
+    Files.writeString(nested.resolve("tracked.txt"), "rejected\n");
+    Files.createDirectories(root.resolve("scratch"));
+    Files.writeString(root.resolve("scratch/rejected.bin"), "remove\n");
+    transaction.rollback(checkpoint);
+    ignored.cleanAttemptArtifacts(checkpoint, baseline.json(), () -> {});
+
+    assertThat(root.resolve("baseline-cache")).doesNotExist();
+    assertThat(transaction.currentGeneration(checkpoint)).isEqualTo(checkpoint.generation());
   }
 
   @Test

@@ -1452,6 +1452,7 @@ public class RunController {
             .body(resource);
 
       } catch (IllegalStateException e) {
+        if (e instanceof WorkspaceExportService.UnacceptedWorkspaceException) throw e;
         log.warn("Workspace not available for run {}: {}", id, e.getMessage());
         // Path 3: GitHub fallback
         if (run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
@@ -1479,6 +1480,11 @@ public class RunController {
 
     } catch (ResponseStatusException e) {
       throw e;
+    } catch (WorkspaceExportService.UnacceptedWorkspaceException e) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Workspace download is blocked until the accepted BUILD generation is recovered: "
+              + e.getMessage());
     } catch (WorkspaceExportService.ExportTooLargeException e) {
       // RR-165: an over-quota export is refused explicitly rather than degrading to an OOM.
       throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, e.getMessage());

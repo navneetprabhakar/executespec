@@ -16,16 +16,24 @@ final class WorkerCorrectionToolFence {
   private WorkerCorrectionToolFence() {}
 
   static Future<?> submitCurrent(ExecutorService executor, Runnable dispatch) {
-    RunWorkspaceAuthorityService.Lease lease =
+    RunWorkspaceAuthorityService.Lease correctionLease =
         RunWorkspaceAuthorityService.currentCorrectionToolLease();
+    RunWorkspaceAuthorityService.Lease generationLease =
+        RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease();
+    Runnable generationFence =
+        RunWorkspaceAuthorityService.currentWorkspaceGenerationDispatchFence();
     return executor.submit(
         () ->
             RunWorkspaceAuthorityService.withCorrectionToolLease(
-                lease,
-                () -> {
-                  dispatch.run();
-                  return null;
-                }));
+                correctionLease,
+                () ->
+                    RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
+                        generationLease,
+                        generationFence,
+                        () -> {
+                          dispatch.run();
+                          return null;
+                        })));
   }
 
   static Future<?> submitRead(

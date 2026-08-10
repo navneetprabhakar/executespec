@@ -69,6 +69,13 @@ class DurableCorrectionLifecycleTest {
                     .filter(r -> r.getRunId().equals(i.getArgument(0)))
                     .filter(r -> ((List<?>) i.getArgument(1)).contains(r.getPhase()))
                     .findFirst());
+    when(attempts.findFirstByRunIdAndPhaseOrderByCreatedAtDesc(anyString(), anyString()))
+        .thenAnswer(
+            i ->
+                rows.values().stream()
+                    .filter(r -> r.getRunId().equals(i.getArgument(0)))
+                    .filter(r -> r.getPhase().equals(i.getArgument(1)))
+                    .max(java.util.Comparator.comparing(CorrectionAttempt::getCreatedAt)));
     when(attempts.findByPhaseInOrderByCreatedAtAsc(any()))
         .thenAnswer(
             i -> {
@@ -337,6 +344,7 @@ class DurableCorrectionLifecycleTest {
     assertThat(row.getBeforeGeneration()).isEqualTo(prepared.checkpoint().generation());
     assertThat(row.getAfterGeneration()).isEqualTo(after).isNotEqualTo(row.getBeforeGeneration());
     assertThat(row.getResolvedAt()).isNotNull();
+    assertThat(lifecycle.latestAcceptedGeneration("run-2")).contains(after);
   }
 
   @Test

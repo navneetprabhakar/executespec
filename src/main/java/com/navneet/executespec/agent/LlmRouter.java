@@ -716,6 +716,10 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
+    // V374 — a BUILD/correction worker may spend only while its exact workspace-generation and
+    // LLM-attempt leases remain current. The bound fence is absent for unrelated agents.
+    com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+        request.context().runId());
     // RR-392 — one shared fail-closed authorization for every provider-spending dispatch.
     providerDispatchAuthorization.authorize(
         request.provider(), request.model(), request.context().runId());
@@ -930,6 +934,8 @@ public class LlmRouter {
     final int maxAttempts = transientRetryMaxAttempts(request);
     final long[] backoffLadderMs = transientRetryBackoffMs(request);
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+          request.context().runId());
       // This is the last common seam before every physical chat transport. The request already
       // carries the managed-AI or failover route, so price that effective provider/model rather
       // than the worker's earlier requested route. Rechecking each bounded retry also observes any
@@ -1661,6 +1667,8 @@ public class LlmRouter {
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
               + " subsequent calls this JVM)",
           r.model());
+      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+          r.context().runId());
       projectedCallCostAdmission.admit(r, tools);
       PhysicalDispatch retryAttempt = prepareAnthropicAttempt(auditContext);
       String retryApiKey = retryAttempt == null ? apiKey : retryAttempt.apiKey();

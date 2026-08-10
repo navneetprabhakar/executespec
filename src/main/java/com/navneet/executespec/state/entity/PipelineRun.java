@@ -248,6 +248,41 @@ public class PipelineRun {
   private String workspacePath; // per-run path: ./workspace/projects/{runId}/
 
   /**
+   * V374 — digest of the last workspace generation accepted by deterministic verification and an
+   * exact completed checkpoint. This is the durable execution frontier; later tasks, reviewer,
+   * recovery, and publication must not consume a different local tree.
+   */
+  @Column(name = "accepted_workspace_generation", length = 64)
+  private String acceptedWorkspaceGeneration;
+
+  /**
+   * Zero-based plan index represented by {@link #acceptedWorkspaceGeneration}. A freshly seeded
+   * post-clone frontier uses {@code -1}; null denotes a pre-V374 run with no durable frontier.
+   */
+  @Column(name = "accepted_task_index")
+  private Integer acceptedTaskIndex;
+
+  /** Exact accepted {@code workspace_generation_attempt}; null only for the seeded base tree. */
+  @Column(name = "accepted_generation_attempt_id")
+  private java.util.UUID acceptedGenerationAttemptId;
+
+  /** Storage class of the exact internal checkpoint accepted with the generation. */
+  @Column(name = "accepted_checkpoint_kind", length = 24)
+  private String acceptedCheckpointKind;
+
+  /** Internal checkpoint object/path. This is distinct from the customer workspace ZIP key. */
+  @Column(name = "accepted_checkpoint_key", columnDefinition = "TEXT")
+  private String acceptedCheckpointKey;
+
+  /** SHA-256 of the exact accepted internal checkpoint bytes. */
+  @Column(name = "accepted_checkpoint_digest", length = 64)
+  private String acceptedCheckpointDigest;
+
+  /** Completion time copied from the accepted attempt's immutable checkpoint receipt. */
+  @Column(name = "accepted_checkpoint_completed_at")
+  private Instant acceptedCheckpointCompletedAt;
+
+  /**
    * Durable local-hands intent captured at submit time. Unlike the Redis marker, this survives a
    * JVM restart so crash recovery cannot silently resume a client-owned run on the server shell.
    * The execution path still requires the local-hands feature flag and a reconnecting client.

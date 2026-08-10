@@ -86,6 +86,7 @@ class ProjectDashboardTaskProofStatusTest {
             null,
             new ObjectMapper(),
             null,
+            null,
             null);
     controller =
         new ProjectDashboardController(

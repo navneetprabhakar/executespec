@@ -3,6 +3,7 @@ package com.navneet.executespec.integration;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -188,6 +189,20 @@ public class DurableCorrectionLifecycle {
                 throw new IllegalStateException(
                     "CORRECTION_RECOVERY_UNPROVEN: prior correction could not be restored");
               }
+            });
+  }
+
+  /** Latest immutable correction frontier, when a correction supersedes the initial BUILD tree. */
+  public Optional<String> latestAcceptedGeneration(String runId) {
+    return attempts
+        .findFirstByRunIdAndPhaseOrderByCreatedAtDesc(runId, "ACCEPTED")
+        .map(
+            row -> {
+              String generation = row.getAfterGeneration();
+              if (generation == null || !generation.matches("[0-9a-f]{64}")) {
+                throw new IllegalStateException("CORRECTION_ACCEPTED_GENERATION_INVALID");
+              }
+              return generation;
             });
   }
 

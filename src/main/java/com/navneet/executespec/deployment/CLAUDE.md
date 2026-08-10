@@ -77,8 +77,16 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
+  BUILD exports and retention uploads first recover unresolved corrections. A latest accepted
+  correction generation supersedes the initial BUILD task frontier; otherwise export runs
+  deterministic BUILD-generation recovery and proves the exact accepted initial frontier.
+  Unresolved/missing/mismatched proof fails closed; the download controller returns 409 and cannot
+  redirect to a repository archive in that case.
   Runtime/test caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`,
   `*.pyc`, `*.pyo`) are excluded from both workspace and repo ZIPs, including nested paths.
+- `WorkspaceExportAcceptedFrontierTest` pins accepted BUILD recovery/proof before ZIP reads,
+  unresolved-candidate rejection, accepted-correction precedence, correction-generation mismatch
+  rejection, and unchanged PATCH behavior.
 - `WorkspaceArchiveJob.java` — Hourly archive + local cleanup. RR-163: `requireRemoteArchive`
   proves a nonblank object key AND a live `GcsWorkspaceStore.exists` hit before any local deletion,
   so a skipped upload (`uploadZip` returns `null` when the Storage client was disabled at startup)

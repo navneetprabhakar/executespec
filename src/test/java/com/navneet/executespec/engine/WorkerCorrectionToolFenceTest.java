@@ -62,4 +62,44 @@ class WorkerCorrectionToolFenceTest {
 
     verify(lease).assertOwned();
   }
+
+  @Test
+  void propagatesAndFencesExactBuildGenerationLease() throws Exception {
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.runId()).thenReturn("run-build");
+    AtomicReference<RunWorkspaceAuthorityService.Lease> observed = new AtomicReference<>();
+
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
+          lease,
+          () -> {
+            try {
+              WorkerCorrectionToolFence.submitCurrent(
+                      executor,
+                      () ->
+                          observed.set(
+                              RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease()))
+                  .get();
+            } catch (Exception failure) {
+              throw new IllegalStateException(failure);
+            }
+            return null;
+          });
+    }
+
+    assertThat(observed.get()).isSameAs(lease);
+    assertThat(RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease()).isNull();
+    ExecutionContext matching = new ExecutionContext("run-build", "T1", Path.of("/tmp/run-build"));
+    ExecutionContext other = new ExecutionContext("run-other", "T1", Path.of("/tmp/run-other"));
+    RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
+        lease,
+        () -> {
+          WorkerCorrectionToolFence.assertDispatch(matching);
+          assertThatThrownBy(() -> WorkerCorrectionToolFence.assertDispatch(other))
+              .isInstanceOf(IllegalStateException.class)
+              .hasMessage("WORKSPACE_GENERATION_TOOL_LEASE_RUN_MISMATCH");
+          return null;
+        });
+    verify(lease, org.mockito.Mockito.atLeastOnce()).assertOwned();
+  }
 }

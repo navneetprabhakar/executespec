@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
@@ -37,6 +38,7 @@ import com.navneet.executespec.execution.model.GoalContinuationAdvisorRequest;
 import com.navneet.executespec.execution.model.GoalContinuationPolicyDecision;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.router.AvailableProviderResolver;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelMatrixProperties;
@@ -98,12 +100,20 @@ class SequentialExecutorSoftCompletionTest {
   private final ModelMatrixProperties matrixProps = mock(ModelMatrixProperties.class);
   private final AvailableProviderResolver availableProviderResolver =
       mock(AvailableProviderResolver.class);
+  private final com.navneet.executespec.deployment.GcsTaskCheckpointService taskCheckpointService =
+      mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class);
 
   private SequentialExecutor newExecutor() {
     return newExecutor(null);
   }
 
   private SequentialExecutor newExecutor(GoalContinuationAdvisor goalContinuationAdvisor) {
+    return newExecutor(goalContinuationAdvisor, null);
+  }
+
+  private SequentialExecutor newExecutor(
+      GoalContinuationAdvisor goalContinuationAdvisor,
+      BuildTaskGenerationCoordinator buildTaskGenerations) {
     // ModelResolver is called from tierConfigFor — stub it to throw so we fall back to the
     // run-level provider+model. That avoids needing real Spring config wiring in this unit
     // test.
@@ -127,10 +137,16 @@ class SequentialExecutorSoftCompletionTest {
         featureFlagService,
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
-        org.mockito.Mockito.mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
+        null,
+        taskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
-        null);
+        null,
+        null,
+        null,
+        null,
+        null,
+        buildTaskGenerations);
   }
 
   /** Snapshot of the (status, lastLlmFailure) tuple at the moment of saveAndFlush. */
@@ -403,7 +419,7 @@ class SequentialExecutorSoftCompletionTest {
   // 1: T2-class case — multi-task, intermediate, iter-limit + writes
 
   @Test
-  void multitask_intermediate_iter_limit_with_writes_is_COMPLETE_not_PARTIAL() {
+  void multitask_intermediate_iter_limit_with_writes_is_durably_PARTIAL() {
     // Worker fails to call completeTask but wrote 5 files. Multi-task plan,
     // first task (intermediate). Pre-fix this would have been PARTIAL.
     stubTaskRow();
@@ -420,20 +436,114 @@ class SequentialExecutorSoftCompletionTest {
         t1.status(),
         "Multi-task intermediate + iter-limit + writes should be COMPLETED_WITH_WARNING.");
 
-    // Verify the T1-key save landed COMPLETE in the DB with the warning persisted.
-    boolean sawCompleteWithWarningOnT1 =
+    // The live executor continues with a warning, but the durable row must stay PARTIAL. Persisting
+    // COMPLETE loses the missing-completeTask proof when crash recovery synthesizes prior outcomes.
+    boolean sawPartialWithWarningOnT1 =
         saveLog.stream()
             .anyMatch(
                 s ->
                     s.taskKey().endsWith("_T1")
-                        && "COMPLETE".equals(s.status())
+                        && "PARTIAL".equals(s.status())
                         && s.lastLlmFailure() != null
                         && s.lastLlmFailure().contains("Iteration cap exceeded"));
     assertTrue(
-        sawCompleteWithWarningOnT1,
-        "Expected T1 save with status=COMPLETE + lastLlmFailure containing the iter-cap warning."
+        sawPartialWithWarningOnT1,
+        "Expected T1 save with status=PARTIAL + lastLlmFailure containing the iter-cap warning."
             + " Saw: "
             + saveLog);
+  }
+
+  @Test
+  void intermediate_task_must_pass_smoke_before_next_task_runs() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\ncompile failed"),
+            new ToolResult.Ok("exit=1\ncompile still failed"));
+
+    ExecutionResult result = newExecutor().execute(req(multiTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
+    assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
+    assertFalse(result.perTask().get(0).smokeTestPassed());
+    assertEquals(TaskOutcome.Status.SKIPPED, result.perTask().get(1).status());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class));
+    verify(buildProjectTool, times(2)).execute(any(), any());
+    verify(taskCheckpointService, never()).checkpointAfterTask(anyString(), anyString());
+  }
+
+  @Test
+  void every_task_in_a_green_multitask_plan_runs_its_smoke() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+
+    ExecutionResult result = newExecutor().execute(req(multiTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    assertEquals(2, result.tasksSuccessful());
+    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
+    verify(buildProjectTool, times(2)).execute(any(), any());
+    verify(taskCheckpointService).checkpointAfterTask("run-soft", "T1");
+    verify(taskCheckpointService).checkpointAfterTask("run-soft", "T2");
+  }
+
+  @Test
+  void transactionalBuildNeverQueuesTheLegacyRacyWorkspaceCheckpoint() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    BuildTaskGenerationCoordinator generations = mock(BuildTaskGenerationCoordinator.class);
+    when(generations.childContext(any(ExecutionContext.class), anyString()))
+        .thenAnswer(
+            invocation ->
+                ((ExecutionContext) invocation.getArgument(0))
+                    .child(invocation.getArgument(1, String.class)));
+    when(generations.pendingStatus(anyString()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(generations.execute(anyInt(), any(), any(), any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(4);
+              return dispatch.get();
+            });
+
+    ExecutionResult result = newExecutor(null, generations).execute(req(multiTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    verify(generations, times(2)).execute(anyInt(), any(), any(), any(), any(), any());
+    verify(taskCheckpointService, never()).checkpointAfterTask(anyString(), anyString());
+  }
+
+  @Test
+  void durableCorrectionRemainsTheOnlyGenerationAuthorityForApprovedRetry() {
+    stubTaskRow();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), workerCompleted(1));
+    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
+    BuildTaskGenerationCoordinator generations = mock(BuildTaskGenerationCoordinator.class);
+    when(generations.childContext(any(ExecutionContext.class), anyString()))
+        .thenAnswer(
+            invocation ->
+                ((ExecutionContext) invocation.getArgument(0))
+                    .child(invocation.getArgument(1, String.class)));
+    when(generations.pendingStatus(anyString()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    RunWorkspaceAuthorityService.Lease correction = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(correction.runId()).thenReturn("run-soft");
+
+    ExecutionResult result =
+        RunWorkspaceAuthorityService.withCorrectionToolLease(
+            correction, () -> newExecutor(null, generations).execute(req(multiTaskPlan(), true)));
+
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    verify(generations, never()).execute(anyInt(), any(), any(), any(), any(), any());
+    verify(taskCheckpointService, never()).checkpointAfterTask(anyString(), anyString());
   }
 
   // 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning
@@ -571,6 +681,15 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, t1.status());
     assertEquals(true, t1.smokeTestPassed());
     assertEquals(0, t1.smokeTestExitCode());
+    assertTrue(
+        saveLog.stream()
+            .anyMatch(
+                s ->
+                    s.taskKey().endsWith("_T1")
+                        && "PARTIAL".equals(s.status())
+                        && s.lastLlmFailure() != null
+                        && s.lastLlmFailure().contains("Iteration cap exceeded")),
+        "A green build must not durably upgrade missing completeTask proof to COMPLETE.");
     verify(broadcaster)
         .emit(
             anyString(),
@@ -671,7 +790,7 @@ class SequentialExecutorSoftCompletionTest {
     ExecutionResult result = newExecutor().execute(req(singleTaskPlan(), true));
 
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
-    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
     verify(broadcaster)
         .emit(
             anyString(),
@@ -1196,17 +1315,28 @@ class SequentialExecutorSoftCompletionTest {
   }
 
   @Test
-  void goal_decision_enforcement_default_off_does_not_skip_remaining_tasks() {
+  void task_acceptance_stops_remaining_tasks_even_when_advisory_goal_enforcement_is_off() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(0));
 
     SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
 
-    assertEquals(ExecutionResult.Overall.FAILED, result.overall());
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
     assertEquals(2, result.perTask().size());
-    assertEquals(0, result.tasksSkipped());
-    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
+    assertEquals(TaskOutcome.Status.WORKER_FAILED, result.perTask().get(0).status());
+    assertEquals(TaskOutcome.Status.SKIPPED, result.perTask().get(1).status());
+    assertEquals(1, result.tasksSkipped());
+    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
+    verify(broadcaster)
+        .emit(
+            anyString(),
+            argThat(
+                event ->
+                    event != null
+                        && "LOG".equals(event.type())
+                        && event.payload() != null
+                        && event.payload().startsWith("Task acceptance failed:")));
   }
 
   @Test
@@ -1748,7 +1878,7 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "requireBenchmarkPriorForAutomaticContinuation", true);
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
-    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
     assertEquals("anthropic", result.perTask().get(0).dispatchedProvider());
     assertEquals("claude-haiku-4-5-20251001", result.perTask().get(0).dispatchedModel());
@@ -2113,7 +2243,7 @@ class SequentialExecutorSoftCompletionTest {
     ReflectionTestUtils.setField(executor, "advisoryModelStepUpLimit", 0);
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
-    assertEquals(ExecutionResult.Overall.PARTIAL_WITH_WARNINGS, result.overall());
+    assertEquals(ExecutionResult.Overall.ABORTED, result.overall());
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
     assertEquals("anthropic", result.perTask().get(0).dispatchedProvider());
     assertEquals("claude-haiku-4-5-20251001", result.perTask().get(0).dispatchedModel());

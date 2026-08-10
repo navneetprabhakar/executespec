@@ -39,6 +39,7 @@ class RunMapperCreatorProjectionTest {
             null,
             new ObjectMapper(),
             null,
+            null,
             null);
     PipelineRun run = new PipelineRun();
     run.setRunId("run-1");

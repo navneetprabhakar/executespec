@@ -379,6 +379,27 @@ class RunLifecycleServiceContinuationApprovalTest {
   }
 
   @Test
+  void acceptedBuildTaskCannotEnterTheLegacyInPlaceRetryPath() {
+    PipelineRun run =
+        PipelineRun.builder()
+            .runId(RUN_ID)
+            .status("COMPLETE")
+            .acceptedGenerationAttemptId(UUID.fromString("44444444-4444-4444-4444-444444444444"))
+            .build();
+    AgentTask task = AgentTask.builder().taskId(TASK_KEY).runId(RUN_ID).status("COMPLETE").build();
+    when(runRepo.findById(RUN_ID)).thenReturn(Optional.of(run));
+    when(taskRepo.findById(TASK_KEY)).thenReturn(Optional.of(task));
+
+    assertThatThrownBy(() -> service.retryTask(RUN_ID, TASK_ID))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("accepted BUILD prefix");
+
+    verify(pool, never()).submit(any(Runnable.class));
+    verify(taskRepo, never()).save(any());
+    verify(runRepo, never()).save(any());
+  }
+
+  @Test
   void crashRecoveryRehydratesTheExactCompletedPlanGateContinuation() throws Exception {
     String payload =
         objectMapper.writeValueAsString(

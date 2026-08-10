@@ -27,6 +27,8 @@ public class RunWorkspaceAuthorityService {
 
   private static final Duration LEASE_TTL = Duration.ofMinutes(3);
   private static final ThreadLocal<Lease> CORRECTION_TOOL_LEASE = new ThreadLocal<>();
+  private static final ThreadLocal<Lease> GENERATION_TOOL_LEASE = new ThreadLocal<>();
+  private static final ThreadLocal<Runnable> GENERATION_DISPATCH_FENCE = new ThreadLocal<>();
 
   private final JdbcTemplate jdbc;
   private final AgentProperties agentProperties;
@@ -85,16 +87,23 @@ public class RunWorkspaceAuthorityService {
    */
   public static void assertCorrectionToolDispatch(String runId) {
     Lease correction = CORRECTION_TOOL_LEASE.get();
-    if (correction != null) {
-      if (!correction.runId().equals(runId)) {
-        throw new IllegalStateException("CORRECTION_TOOL_LEASE_RUN_MISMATCH");
-      }
-      correction.assertOwned();
-    }
+    assertToolLease(runId, correction, "CORRECTION_TOOL_LEASE_RUN_MISMATCH");
+    Lease generation = GENERATION_TOOL_LEASE.get();
+    assertToolLease(runId, generation, "WORKSPACE_GENERATION_TOOL_LEASE_RUN_MISMATCH");
+    Runnable generationFence = GENERATION_DISPATCH_FENCE.get();
+    if (generationFence != null) generationFence.run();
   }
 
   public static Lease currentCorrectionToolLease() {
     return CORRECTION_TOOL_LEASE.get();
+  }
+
+  public static Lease currentWorkspaceGenerationToolLease() {
+    return GENERATION_TOOL_LEASE.get();
+  }
+
+  public static Runnable currentWorkspaceGenerationDispatchFence() {
+    return GENERATION_DISPATCH_FENCE.get();
   }
 
   /** Binds the exact attempt lease, never the latest per-run lease, to a worker dispatch thread. */
@@ -108,6 +117,35 @@ public class RunWorkspaceAuthorityService {
       if (prior == null) CORRECTION_TOOL_LEASE.remove();
       else CORRECTION_TOOL_LEASE.set(prior);
     }
+  }
+
+  /** Binds one exact BUILD generation lease to provider-adjacent worker tool dispatch. */
+  public static <T> T withWorkspaceGenerationToolLease(Lease lease, Supplier<T> work) {
+    return withWorkspaceGenerationToolLease(lease, null, work);
+  }
+
+  public static <T> T withWorkspaceGenerationToolLease(
+      Lease lease, Runnable dispatchFence, Supplier<T> work) {
+    Lease prior = GENERATION_TOOL_LEASE.get();
+    Runnable priorFence = GENERATION_DISPATCH_FENCE.get();
+    if (lease == null) GENERATION_TOOL_LEASE.remove();
+    else GENERATION_TOOL_LEASE.set(lease);
+    if (dispatchFence == null) GENERATION_DISPATCH_FENCE.remove();
+    else GENERATION_DISPATCH_FENCE.set(dispatchFence);
+    try {
+      return work.get();
+    } finally {
+      if (prior == null) GENERATION_TOOL_LEASE.remove();
+      else GENERATION_TOOL_LEASE.set(prior);
+      if (priorFence == null) GENERATION_DISPATCH_FENCE.remove();
+      else GENERATION_DISPATCH_FENCE.set(priorFence);
+    }
+  }
+
+  private static void assertToolLease(String runId, Lease lease, String mismatchCode) {
+    if (lease == null) return;
+    if (!lease.runId().equals(runId)) throw new IllegalStateException(mismatchCode);
+    lease.assertOwned();
   }
 
   @Scheduled(fixedDelayString = "${execution.workspace-authority.heartbeat-ms:30000}")
@@ -207,6 +245,7 @@ public class RunWorkspaceAuthorityService {
   }
 
   public enum Authority {
+    BUILD_GENERATION,
     CORRECTION,
     RECOVERY,
     PUBLICATION

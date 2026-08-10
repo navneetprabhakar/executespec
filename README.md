@@ -168,7 +168,7 @@ Generated project explanations can ground narrowly scoped behavior in digest-val
 exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
 treated as authority.
 
-The current deployment candidate advances the migration source head to V373. V354 adds
+The current deployment candidate advances the migration source head to V374. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -191,6 +191,26 @@ selected repository, checkout branch, and publication tuple all match exactly. P
 clones retain the active actor's in-memory GitHub credential. Crash-recovered clones must prove
 their actual branch before planning, and correction runs project the reused PR's live status/CI
 evidence through their own run-detail API.
+V374 makes every initial BUILD task an accepted-generation transaction. Before provider/tool
+dispatch, the server persists an exact task contract, workspace lease, per-task LLM operation, Git
+tree baseline, ignored-artifact baseline, and durable generation archive. A task becomes COMPLETE
+only after server-resolved build/test verification, an immutable receipt, a candidate checkpoint,
+and an atomic accepted-frontier advance. The exact candidate diff is authoritative: zero-diff
+generations fail, and actual code changes require an executed non-empty green test suite even when
+the planner described the task as documentation/configuration. Failure, cancellation, or crash
+restores the exact
+multi-repository predecessor; reviewer/validation/publication require the current bytes to equal the
+accepted frontier. Default workspace/repo exports first honor the latest accepted correction
+generation, otherwise they require the accepted initial BUILD frontier. The initial reviewer is
+read-only. Production BUILD fails closed without durable
+cross-node checkpoint storage, and local-hands BUILD remains blocked until the client proxy carries
+the same generation protocol.
+V375 preserves original rejection and rejected-diff evidence separately from the first recovery
+failure, so crash recovery cannot rewrite causality. Ignored dependency/cache roots are purged at
+task entry and before acceptance (plus rollback/recovery): a task may install derived dependencies
+for deterministic verification, but those bytes never cross a task or node boundary. Run detail
+exposes a bounded, patch-free generation-attempt ledger and the Evidence view highlights rejected
+or unresolved attempts using stable codes and immutable digests.
 V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
@@ -267,7 +287,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V373`              | V373 separates checkout from exact existing-PR authority; next V374      |
+| Flyway head       | `V375`              | V375 preserves independent immutable recovery evidence; next V376       |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -303,7 +323,7 @@ egress is required before the four runtime flags can be enabled.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V373                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL/pgvector (local container in the current single-VM deployment; managed Cloud SQL remains supported), Flyway migrations head V374 | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/` |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -316,7 +336,7 @@ egress is required before the four runtime flags can be enabled.
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
 | CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reads `/opt/app/RUNNING_SHA` back from the target host and fails on any target-SHA mismatch before health verification. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
-| Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| Cloud               | GCP us-east4 — private 4-vCPU/8-GiB GCE VM, local PostgreSQL + Redis, Cloud NAT, and Cloudflare Tunnel at `app.executespec.ai`; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`infra/SINGLE_VM.md`](infra/SINGLE_VM.md), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
 Browser session hydration is fail-visible: protected routes retain a valid session across a
 transient `/auth/me` failure and show an explicit Retry action instead of an indefinite loading
@@ -363,7 +383,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V373; next V374; 359 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V375; next V376; 361 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -429,6 +449,19 @@ Run submit advanced options include continuation controls: "Confirm model upgrad
 `Apply to Run` is temporarily fail-closed. V368 force-disables the legacy direct-mutation path until it uses the same checkpointed correction, evidence invalidation, deterministic validation, read-only review, rollback, and publication-admission lifecycle as approved continuation corrections.
 
 Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run, set `SWEBENCH_ENABLED=true`, `SWEBENCH_OUTPUT_BASE` to a writable directory, and `SWEBENCH_INSTANCES_FILE` to the task JSON; the base configuration binds these controls without requiring the benchmark profile. Keep `SWEBENCH_DEFAULT_PROVIDER=deepseek` for the approved DeepSeek-only smoke lane. The benchmark generation request accepts `absoluteDeadlineEpochMs` and `shutdownReserveMs`; the server tightens that deadline to `SWEBENCH_TASK_WALL_TIMEOUT_MINUTES`, keeps at least 120 seconds for cleanup/result publication, and rejects an unusable deadline before container or provider work.
+
+The authorization-gated paired BUILD qualification is defined by
+`scripts/build-qualification/paired-build-v1.json`. It binds the control/candidate arms to distinct
+release SHAs on one HTTPS host in explicit control-before-deploy/candidate-after-deploy order, pins the same held-out spec/evaluator digests and exact
+Anthropic/Sonnet 5 plus OpenRouter/GLM 5.2 routes, and requires accepted-generation evidence, zero
+unresolved generation attempts, a content-addressed export, all held-out tests, and an independent
+archive-bound code review. `scripts/run-paired-build-qualification.sh --dry-run` performs no login,
+submission, provider call, or deployment. `--execute-arm control|candidate` additionally requires
+`BUILD_QUAL_AUTHORIZATION_ID`, credentials, distinct release SHAs, and the per-route cost caps in
+the manifest. The committed matrix caps each run at $5 and the complete four-run suite at $20, so
+the sum of every arm/route/case cap cannot exceed the authorized total. The arm-specific command prevents candidate evidence from being collected before the
+same-host deployment boundary. `scripts/validate-paired-build-results.mjs` refuses an incomplete pair or system score
+in place of the held-out and manual evidence.
 
 Live provider fixtures are also fail-closed. Reserve an exact provider/model/run scope with
 `scripts/provider-budget-ledger.mjs`, then boot with the Maven live-test profile and that reservation:

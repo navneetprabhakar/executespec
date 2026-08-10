@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
@@ -23,6 +25,10 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
 import com.navneet.executespec.testgen.repository.TestPlanRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttempt;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttemptRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationKind;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationState;
 
 import org.junit.jupiter.api.Test;
 
@@ -49,6 +55,8 @@ class RunMapperVerifiedScoreParityTest {
   private final ManagedAiUsageEventRepository managedUsage =
       mock(ManagedAiUsageEventRepository.class);
   private final AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+  private final WorkspaceGenerationAttemptRepository generationAttempts =
+      mock(WorkspaceGenerationAttemptRepository.class);
 
   @Test
   void listDetailAndReportProjectionExposeTheSameEvidenceCappedScore() {
@@ -140,6 +148,51 @@ class RunMapperVerifiedScoreParityTest {
         .doesNotContain("provider stack", "api_key", "secret");
   }
 
+  @Test
+  void detailExposesBoundedGenerationCodesAndDigestsWithoutPersistedReasonsOrPatches() {
+    PipelineRun run = new PipelineRun();
+    run.setRunId(RUN_ID);
+    run.setStatus("FAILED");
+    UUID attemptId = UUID.randomUUID();
+    WorkspaceGenerationAttempt attempt =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId(RUN_ID)
+            .taskId("T2")
+            .taskIndex(1)
+            .attemptNumber(2)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(WorkspaceGenerationState.RECOVERY_FAILED)
+            .beforeGeneration("a".repeat(64))
+            .candidateGeneration("b".repeat(64))
+            .rejectedDiffDigest("c".repeat(64))
+            .rejectedDiffJson("{\"unifiedPatch\":\"secret patch\"}")
+            .failureCode("TASK_VERIFICATION_REJECTED")
+            .failureReason("provider api_key=secret")
+            .recoveryFailureCode("WORKSPACE_GENERATION_RECOVERY_FAILED")
+            .recoveryFailureReason("Bearer secret")
+            .recoveryFailureAt(Instant.parse("2026-08-10T00:00:00Z"))
+            .createdAt(Instant.parse("2026-08-09T23:59:00Z"))
+            .build();
+
+    when(reports.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+    when(integrationRuns.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+    when(codeMaps.findByRunId(RUN_ID)).thenReturn(Optional.empty());
+    when(generationAttempts.findTop20ByRunIdOrderByCreatedAtDesc(RUN_ID))
+        .thenReturn(List.of(attempt));
+
+    RunDetail.WorkspaceGenerationAttemptEvidence evidence =
+        mapper().toDetail(run, List.of()).getWorkspaceGenerationAttempts().getFirst();
+
+    assertThat(evidence.attemptId()).isEqualTo(attemptId.toString());
+    assertThat(evidence.state()).isEqualTo("RECOVERY_FAILED");
+    assertThat(evidence.rejectedDiffDigest()).isEqualTo("c".repeat(64));
+    assertThat(evidence.failureCode()).isEqualTo("TASK_VERIFICATION_REJECTED");
+    assertThat(evidence.recoveryFailureCode()).isEqualTo("WORKSPACE_GENERATION_RECOVERY_FAILED");
+    assertThat(evidence.toString())
+        .doesNotContain("secret patch", "api_key", "Bearer secret", "failureReason");
+  }
+
   private RunMapper mapper() {
     return new RunMapper(
         integrationRuns,
@@ -154,6 +207,7 @@ class RunMapperVerifiedScoreParityTest {
         null,
         objectMapper,
         null,
-        null);
+        null,
+        new WorkspaceGenerationEvidenceProjection(generationAttempts));
   }
 }

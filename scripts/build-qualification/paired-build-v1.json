@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "build-workspace-generation-v1",
+  "runMode": "BUILD",
+  "executionMode": "PROTOTYPE",
+  "executionTopology": "SEQUENTIAL_SAME_HOST",
+  "safeMaxTotalUsd": 20.0,
+  "status": "PREPARED_NOT_EXECUTED",
+  "arms": [
+    {
+      "id": "control",
+      "baseUrlEnv": "BUILD_QUAL_CONTROL_URL",
+      "releaseShaEnv": "BUILD_QUAL_CONTROL_SHA"
+    },
+    {
+      "id": "candidate",
+      "baseUrlEnv": "BUILD_QUAL_CANDIDATE_URL",
+      "releaseShaEnv": "BUILD_QUAL_CANDIDATE_SHA"
+    }
+  ],
+  "routes": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "safeMaxUsdPerRun": 5.0
+    },
+    {
+      "provider": "openrouter",
+      "model": "glm-5.2",
+      "safeMaxUsdPerRun": 5.0
+    }
+  ],
+  "cases": [
+    {
+      "id": "rest-api-low",
+      "kind": "GREENFIELD",
+      "band": "LOW",
+      "specPath": "scripts/build-eval-cases/rest-api-low/spec.md",
+      "specSha256": "c7a178f7012f9aa7e69794d821304a16410dcdc705a9e57d7e6e67c2e7eea164",
+      "acceptancePath": "scripts/build-eval-cases/rest-api-low/acceptance/run.sh",
+      "acceptanceSha256": "0e35fbfc69c71e8a9a0d630373daed10bf0bb65306417d41f96459c0a61c8dd9"
+    }
+  ],
+  "harness": {
+    "path": "scripts/build-eval.sh",
+    "sha256": "d2f02d416620047ab3126d3c2427e5e5a737fb2bbf8b15cfa4a1235b8ce5b25e"
+  },
+  "pairedEqualFields": [
+    "runMode",
+    "executionMode",
+    "route.provider",
+    "route.model",
+    "case.specSha256",
+    "case.acceptanceSha256",
+    "runOptions"
+  ],
+  "requiredRunOptions": {
+    "skipApproval": true,
+    "requireConfirmationBeforeExpensiveContinuation": true,
+    "requireBenchmarkPriorForAutomaticContinuation": false
+  },
+  "requiredEvidence": [
+    "releaseSha",
+    "runId",
+    "terminalStatus",
+    "provider",
+    "model",
+    "costUsd",
+    "acceptedWorkspaceGeneration",
+    "latestWorkspaceGenerationAttemptState",
+    "unresolvedWorkspaceGenerationAttemptCount",
+    "workspaceArchiveSha256",
+    "heldOutPassed",
+    "heldOutTotal",
+    "generatedCodeReview"
+  ],
+  "qualificationRules": {
+    "terminalStatus": "COMPLETE",
+    "unresolvedWorkspaceGenerationAttemptCount": 0,
+    "workspaceArchiveMustMatchAcceptedGeneration": true,
+    "systemVerifiedScoreIsNonAuthoritative": true,
+    "manualGeneratedCodeReviewRequired": true,
+    "allHeldOutTestsMustPass": true
+  }
+}

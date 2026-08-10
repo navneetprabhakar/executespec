@@ -2,6 +2,7 @@ package com.navneet.executespec.executioncontext;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreType;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -72,6 +73,16 @@ public class LlmExecutionOperationCoordinator {
     requireLease(lease);
     return operationService.heartbeat(lease.claim, lease.leaseOwner, leaseDuration);
   }
+
+  /** Secret-bearing identity exposed only to the owning root for durable cross-row fencing. */
+  public LeaseIdentity identity(Lease lease) {
+    requireLease(lease);
+    return new LeaseIdentity(
+        lease.claim.operationId(), lease.claim.attempt(), lease.claim.leaseToken());
+  }
+
+  @JsonIgnoreType
+  public record LeaseIdentity(String operationId, int attempt, UUID leaseToken) {}
 
   public boolean complete(Lease lease) {
     requireLease(lease);
