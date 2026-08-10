@@ -55,6 +55,7 @@ RELEASE_SHA="${RELEASE_SHA:-}"
 QUALIFICATION_ARM="${QUALIFICATION_ARM:-}"
 USER_COST_CAP="${USER_COST_CAP:-}"
 BUILD_SHARED_KERNEL_ENABLED="${BUILD_SHARED_KERNEL_ENABLED:-false}"
+RELEASE_IDENTITY_AUTHORITY="${RELEASE_IDENTITY_AUTHORITY:-}"
 ONLY_CASE=""
 
 while [[ $# -gt 0 ]]; do
@@ -125,6 +126,11 @@ run_case() {
   log "submit  $id (band=$band, provider=$PROVIDER, model=${MODEL:-tier-default})"
   if [[ "$QUALIFICATION_ARM" == "candidate" && "$BUILD_SHARED_KERNEL_ENABLED" != "true" ]]; then
     log "refuse $id: candidate qualification lacks a positive shared-kernel flag preflight"
+    return 1
+  fi
+  if [[ "$QUALIFICATION_ARM" == "candidate" \
+      && "$RELEASE_IDENTITY_AUTHORITY" != "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA" ]]; then
+    log "refuse $id: candidate qualification lacks deployment-host release identity"
     return 1
   fi
 
@@ -235,6 +241,7 @@ run_case() {
     --arg initialFailureCode "$initial_failure_code" \
     --argjson acceptanceCheckCount "$acceptance_check_count" \
     --argjson sharedKernelFlagEnabledAtSubmission "$BUILD_SHARED_KERNEL_ENABLED" \
+    --arg releaseIdentityAuthority "$RELEASE_IDENTITY_AUTHORITY" \
     --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
     --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
     '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,specSha256:$specSha256,runId:$runId,terminalStatus:$status,
@@ -247,6 +254,7 @@ run_case() {
       initialFailureOutcome:$initialFailureOutcome,initialFailureCode:$initialFailureCode,
       acceptanceCheckCount:$acceptanceCheckCount,
       sharedKernelFlagEnabledAtSubmission:$sharedKernelFlagEnabledAtSubmission,
+      releaseIdentityAuthority:$releaseIdentityAuthority,
       unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
       heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \
     >> "${ARTIFACT_DIR}/completed-runs.jsonl"

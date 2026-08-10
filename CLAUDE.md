@@ -23,7 +23,9 @@ candidates (Sonnet 5 and GLM 5.2, $5 each); its two ROLLED_BACK arms are immutab
 controls, not additional paid runs. Paid execution fails closed unless the global shared-kernel
 flag is read as true immediately before each submission, and accepted evidence must independently
 contain the observed initial failure plus frozen acceptance checks. The harness never mutates the
-flag.
+flag. `GET /api/admin/release-identity` reads the deployment workflow's exact
+`/opt/app/RUNNING_SHA` authority on every request; missing/malformed identity returns 503, and the
+paid harness refuses a caller-supplied candidate SHA that does not match it.
 The operator-only
 `GET /api/admin/workspace-generation-attempts/{attemptId}/qualification-evidence` route is
 SUPER_ADMIN + no-store and exposes preserved rejected-diff evidence only for manual qualification;
@@ -1170,6 +1172,7 @@ requires the consumer repository to be linked to that project before persistence
 | GET    | `/api/notifications` + `/unread-count` + POST `/{id}/read` + POST `/read-all` | In-app notifications.             |
 | GET    | `/api/models/available`                                                       | Model matrix (YAML-derived).      |
 | GET    | `/api/admin/feature-flags` + PUT `/{key}`                                    | Feature flag admin (SUPER_ADMIN). |
+| GET    | `/api/admin/release-identity`                                                  | No-store exact `/opt/app/RUNNING_SHA` attestation (SUPER_ADMIN). |
 
 ## Key file locations
 

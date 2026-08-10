@@ -18,8 +18,8 @@ This is a proof ledger, not a launch declaration. ExecuteSpec score is never acc
   positive acceptance nor kernel rollback.
 - The product flag remains default-off. A newly discovered harness gap allowed paid qualification
   to run against that legacy path. The executor now rechecks the flag before each submission and
-  candidate validation requires durable failure-first/check evidence. No flag mutation or new paid
-  run is authorized by this audit.
+  attests the candidate SHA against `/opt/app/RUNNING_SHA`; candidate validation requires durable
+  failure-first/check evidence. No flag mutation or new paid run is authorized by this audit.
 
 ## Requirement-by-requirement evidence
 

@@ -117,7 +117,9 @@ read-only API capture and writes review templates; it never submits a run or cer
 diff. `run-paired-build-qualification.sh --execute` refuses both candidate submissions until the
 completed manual reviews make the controls-only validator pass. It also authenticates and reads the
 global rollout flag immediately before each paid submission; `false` or missing aborts before run
-creation. A candidate record is inadmissible unless the accepted attempt proves
+creation. The same preflight reads the no-store SUPER_ADMIN release identity backed by
+`/opt/app/RUNNING_SHA`; a missing, malformed or mismatched running SHA aborts before run creation.
+A candidate record is inadmissible unless the accepted attempt proves
 `FAILURE_OBSERVED`, names the initial failure code, and exposes at least one frozen acceptance
 check. The harness never mutates the flag.
 
