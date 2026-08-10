@@ -486,7 +486,8 @@ read-only pre-submit proof that `build.shared-code-change-loop.enabled=true`; th
 immediately before each paid submission. It also compares the candidate SHA with the SUPER_ADMIN
 no-store `GET /api/admin/release-identity` response, whose authority is the deploy workflow's
 `/opt/app/RUNNING_SHA`; missing, malformed or mismatched identity aborts before run creation.
-Candidate results are rejected unless the accepted attempt
+Accepted artifacts persist that attested SHA, canonical authority and live-read timestamp;
+candidate results are rejected unless the attested SHA equals the frozen candidate release and the accepted attempt
 also contains an observed failure-first result and frozen acceptance checks. The harness never
 enables the global flag itself. `scripts/validate-paired-build-results.mjs` refuses an incomplete
 pair or system score in place of the held-out and manual evidence.

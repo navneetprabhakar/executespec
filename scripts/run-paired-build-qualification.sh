@@ -33,7 +33,7 @@ fi
 
 assert_candidate_release_ready() {
   local base_url="$1" expected_sha="$2" login_json token release_json flags_json
-  local flag_value running_sha authority
+  local flag_value running_sha authority read_at
   login_json="$(curl -fsS -X POST "${base_url}/api/auth/login" -H 'Content-Type: application/json' \
     --data "$(jq -cn --arg email "$EMAIL" --arg password "$PASSWORD" \
       '{email:$email,password:$password}')")"
@@ -42,6 +42,7 @@ assert_candidate_release_ready() {
     -H "Authorization: Bearer ${token}")"
   running_sha="$(jq -er 'select(.schemaVersion==1) | .runningSha' <<<"$release_json")"
   authority="$(jq -er 'select(.schemaVersion==1) | .authority' <<<"$release_json")"
+  read_at="$(jq -er 'select(.schemaVersion==1) | .readAt | select(test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*Z$"))' <<<"$release_json")"
   [[ "$running_sha" == "$expected_sha" ]] || {
     echo "Refusing paid qualification: running SHA ${running_sha:-missing} != ${expected_sha}" >&2
     return 1
@@ -59,6 +60,8 @@ assert_candidate_release_ready() {
     return 1
   }
   BUILD_QUAL_RELEASE_IDENTITY_AUTHORITY="$authority"
+  BUILD_QUAL_ATTESTED_RUNNING_SHA="$running_sha"
+  BUILD_QUAL_RELEASE_IDENTITY_READ_AT="$read_at"
 }
 
 SUITE_ID="$(jq -r '.suiteId' "$PLAN")"
@@ -89,6 +92,8 @@ while IFS=$'\t' read -r arm base_url_env release_sha_env; do
           USER_COST_CAP="$cap" RELEASE_SHA="$release_sha" QUALIFICATION_ARM="$arm" \
           BUILD_SHARED_KERNEL_ENABLED=true \
           RELEASE_IDENTITY_AUTHORITY="$BUILD_QUAL_RELEASE_IDENTITY_AUTHORITY" \
+          ATTESTED_RUNNING_SHA="$BUILD_QUAL_ATTESTED_RUNNING_SHA" \
+          RELEASE_IDENTITY_READ_AT="$BUILD_QUAL_RELEASE_IDENTITY_READ_AT" \
           "${SCRIPT_DIR}/build-eval.sh" --provider "$provider" --model "$model" --case "$case_id"
       fi
     done < <(jq -r '.cases[].id' "$PLAN")

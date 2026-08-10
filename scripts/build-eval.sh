@@ -56,6 +56,8 @@ QUALIFICATION_ARM="${QUALIFICATION_ARM:-}"
 USER_COST_CAP="${USER_COST_CAP:-}"
 BUILD_SHARED_KERNEL_ENABLED="${BUILD_SHARED_KERNEL_ENABLED:-false}"
 RELEASE_IDENTITY_AUTHORITY="${RELEASE_IDENTITY_AUTHORITY:-}"
+ATTESTED_RUNNING_SHA="${ATTESTED_RUNNING_SHA:-}"
+RELEASE_IDENTITY_READ_AT="${RELEASE_IDENTITY_READ_AT:-}"
 ONLY_CASE=""
 
 while [[ $# -gt 0 ]]; do
@@ -70,6 +72,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+
+assert_candidate_attestation_env() {
+  [[ "$QUALIFICATION_ARM" != "candidate" ]] && return 0
+  [[ "$BUILD_SHARED_KERNEL_ENABLED" == "true" ]] \
+    || { log "refuse candidate: shared-kernel preflight is not positive"; return 1; }
+  [[ "$RELEASE_IDENTITY_AUTHORITY" == "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA" ]] \
+    || { log "refuse candidate: deployment-host release authority is missing"; return 1; }
+  [[ "$ATTESTED_RUNNING_SHA" == "$RELEASE_SHA" && "$ATTESTED_RUNNING_SHA" =~ ^[a-f0-9]{40}$ ]] \
+    || { log "refuse candidate: attested running SHA does not match the candidate release"; return 1; }
+  [[ "$RELEASE_IDENTITY_READ_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*Z$ ]] \
+    || { log "refuse candidate: release identity read timestamp is missing or invalid"; return 1; }
+}
 
 safe_extract_zip() {
   local archive="$1" destination="$2"
@@ -112,6 +126,8 @@ download_workspace_archive() {
 
 api_provider() { case "$1" in gemini) echo GOOGLE ;; *) echo "$1" | tr '[:lower:]' '[:upper:]' ;; esac; }
 
+assert_candidate_attestation_env
+
 TOKEN=$(curl -s -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
   -d "$(jq -n --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p}')" \
   | jq -r '.accessToken // .token // empty')
@@ -124,16 +140,6 @@ run_case() {
   [[ -f "$spec_file" ]] || { log "skip $id: no spec.md"; return 0; }
   local band; band="$(cat "${case_dir}/band" 2>/dev/null || echo unknown)"
   log "submit  $id (band=$band, provider=$PROVIDER, model=${MODEL:-tier-default})"
-  if [[ "$QUALIFICATION_ARM" == "candidate" && "$BUILD_SHARED_KERNEL_ENABLED" != "true" ]]; then
-    log "refuse $id: candidate qualification lacks a positive shared-kernel flag preflight"
-    return 1
-  fi
-  if [[ "$QUALIFICATION_ARM" == "candidate" \
-      && "$RELEASE_IDENTITY_AUTHORITY" != "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA" ]]; then
-    log "refuse $id: candidate qualification lacks deployment-host release identity"
-    return 1
-  fi
-
   local body run_id
   body=$(jq -n --arg req "$(cat "$spec_file")" --arg prov "$(api_provider "$PROVIDER")" \
     --arg model "$MODEL" --arg costCap "$USER_COST_CAP" \
@@ -242,6 +248,8 @@ run_case() {
     --argjson acceptanceCheckCount "$acceptance_check_count" \
     --argjson sharedKernelFlagEnabledAtSubmission "$BUILD_SHARED_KERNEL_ENABLED" \
     --arg releaseIdentityAuthority "$RELEASE_IDENTITY_AUTHORITY" \
+    --arg attestedRunningSha "$ATTESTED_RUNNING_SHA" \
+    --arg releaseIdentityReadAt "$RELEASE_IDENTITY_READ_AT" \
     --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
     --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
     '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,specSha256:$specSha256,runId:$runId,terminalStatus:$status,
@@ -255,6 +263,8 @@ run_case() {
       acceptanceCheckCount:$acceptanceCheckCount,
       sharedKernelFlagEnabledAtSubmission:$sharedKernelFlagEnabledAtSubmission,
       releaseIdentityAuthority:$releaseIdentityAuthority,
+      attestedRunningSha:$attestedRunningSha,
+      releaseIdentityReadAt:$releaseIdentityReadAt,
       unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
       heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \
     >> "${ARTIFACT_DIR}/completed-runs.jsonl"

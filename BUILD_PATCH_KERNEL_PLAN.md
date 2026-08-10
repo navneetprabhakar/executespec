@@ -1,9 +1,11 @@
 # BUILD/PATCH shared-kernel execution plan
 
-Status: M0-M6 implemented and deployed at `b7630ce7f93036254e756f1e856ded8e53cffb02`;
+Status: M0-M6 implemented and deployed at `e4c9afcefcc584b3cd1b02ae94b009f3d70e142e`;
 M7 has provider-free mechanism evidence but real paired code-generation quality remains open. The
 first authorized candidate pair stopped in planner recovery before any task or shared-kernel
-attempt, so it is diagnostic evidence only. A replacement pair is not authorized.
+attempt, so it is diagnostic evidence only. Deployment `31421957285` and the live canonical
+`/opt/app/RUNNING_SHA` attestation prove the exact qualification release; the shared-kernel flag
+remains off and a replacement pair is not authorized.
 
 ## Non-negotiable invariants
 
@@ -119,6 +121,9 @@ completed manual reviews make the controls-only validator pass. It also authenti
 global rollout flag immediately before each paid submission; `false` or missing aborts before run
 creation. The same preflight reads the no-store SUPER_ADMIN release identity backed by
 `/opt/app/RUNNING_SHA`; a missing, malformed or mismatched running SHA aborts before run creation.
+The executor passes that exact SHA, canonical authority and server read timestamp into the
+candidate artifact; validation requires the attested SHA to equal the frozen candidate release, so
+the evidence is independently inspectable instead of relying only on the executor's control flow.
 A candidate record is inadmissible unless the accepted attempt proves
 `FAILURE_OBSERVED`, names the initial failure code, and exposes at least one frozen acceptance
 check. The harness never mutates the flag.

@@ -1,8 +1,8 @@
 # BUILD/PATCH shared-kernel completion audit
 
-Audit date: 2026-08-10
+Audit date: 2026-08-11
 Implementation baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`
-Deployed candidate fix: `b7630ce7f93036254e756f1e856ded8e53cffb02`
+Deployed qualification release: `e4c9afcefcc584b3cd1b02ae94b009f3d70e142e`
 
 This is a proof ledger, not a launch declaration. ExecuteSpec score is never acceptance authority.
 
@@ -10,7 +10,7 @@ This is a proof ledger, not a launch declaration. ExecuteSpec score is never acc
 
 - M0-M5 are implemented locally.
 - M6 is complete: the final tree passed the full backend/PostgreSQL and frontend gates listed below
-  and the planner normalization fix was deployed successfully to `app.executespec.ai`.
+  and the exact qualification release was deployed successfully to `app.executespec.ai`.
 - M7 has provider-free transaction/mechanism evidence. It does **not** yet have a real paired-model
   code-delivery-quality result; the scripted 30%/100%/100% comparison cannot prove model quality.
 - M8 is open. The authorized Sonnet/GLM candidate pair spent $0.033108 total but both stopped in
@@ -19,7 +19,9 @@ This is a proof ledger, not a launch declaration. ExecuteSpec score is never acc
 - The product flag remains default-off. A newly discovered harness gap allowed paid qualification
   to run against that legacy path. The executor now rechecks the flag before each submission and
   attests the candidate SHA against `/opt/app/RUNNING_SHA`; candidate validation requires durable
-  failure-first/check evidence. No flag mutation or new paid run is authorized by this audit.
+  failure-first/check evidence. Deployment `31421957285` and the independent no-store endpoint both
+  attest `e4c9afcefcc584b3cd1b02ae94b009f3d70e142e`; startup health and provider-key checks are green.
+  No flag mutation or new paid run is authorized by this audit.
 
 ## Requirement-by-requirement evidence
 
@@ -41,8 +43,8 @@ This is a proof ledger, not a launch declaration. ExecuteSpec score is never acc
 | 14 | API/UI evidence | Implemented | Run detail exposes attempt, route, explicit prior accepted/candidate/accepted generations, contract, initial acceptance-probe result, usage/cost, receipt, rejected diff and every check outcome. UI distinguishes candidate, failed verification, rollback and acceptance and renders each check. The API redacts hidden check targets/details and raw initial verifier output; immutable internal evidence remains available to verification and operators. Projection and `runResultUtils` tests. |
 | 15 | Observability | Implemented for shared-kernel additions | Typed replayable `WORKSPACE_GENERATION` events include the initial acceptance-probe result and lifecycle states. Metrics distinguish attempt, execution, command class, verification, rollback, recovery, authority/publication control and failure-delta outcomes with bounded route labels; an unresolved-attempt gauge is explicit. `WorkspaceGenerationTelemetryTest`, existing SSE/metrics tests and coordinator assertions. |
 | 16 | Compatibility/migration | Implemented | V376 rollout flag is default-off; V377/V378 are forward-only. Historical null fields are tolerated. PATCH callers continue using PATCH policy over the same port. Flyway inventory, DTO compatibility and PATCH/autofix tests. |
-| 17 | Required tests | Passed | Full Maven verification passed 7,069/7,069 with zero failures, errors or skips, including clean V1→V378 PostgreSQL migration and Hibernate validation. Frontend passed 94 files/742 tests, production build, Prettier and ESLint with zero errors (nine pre-existing warnings). Qualification validators now pass 9/9. |
-| 18 | Qualification | Partial | Ten-category provider-free A/B/C mechanism corpus passes transaction/no-leak gates with zero model spend. The first paid pair stopped before kernel entry and is diagnostic only. A replacement pair remains unauthorized. The hardened executor now refuses a flag-off deployment before each paid submission, and accepted result validation requires durable observed-red and frozen-check evidence in addition to accepted generation, held-out tests and independent review. |
+| 17 | Required tests | Passed | On the exact deployed source, full Maven verification passed 7,072/7,072 with zero failures, errors or skips, including clean V1→V378 PostgreSQL migration and Hibernate validation. Frontend passed 94 files/742 tests, production build, Prettier and ESLint with zero errors (nine pre-existing warnings). Qualification validators pass 9/9 and the provider-free mechanism qualification passes. |
+| 18 | Qualification | Partial | Ten-category provider-free A/B/C mechanism corpus passes transaction/no-leak gates with zero model spend. The first paid pair stopped before kernel entry and is diagnostic only. A replacement pair remains unauthorized. The hardened executor now refuses a flag-off or release-mismatched deployment before authentication/submission. Every accepted artifact must carry the attested 40-character running SHA, canonical authority and live-read timestamp in addition to durable observed-red/frozen-check evidence, accepted generation, held-out tests and independent review. |
 | 19 | Documentation | Implemented | Root/package docs, architecture, API, runbook, migration inventory, qualification method and this audit are synchronized; external docs were committed separately. |
 | 20 | Definition of done | Not complete | Local architecture, containment and full verification are complete. Real paired quality evidence and separately authorized dev positive proof are still required; historical negative controls must validate against immutable evidence before either fresh candidate can start. |
 
@@ -80,8 +82,9 @@ node scripts/build-kernel-provider-free-qualification.mjs
 node --test scripts/build-kernel-provider-free-qualification.test.mjs
 ```
 
-Final local results: backend 7,068/7,068; frontend 94 files/742 tests; production build and format
-green; lint zero errors with nine pre-existing non-null-assertion warnings. The provider-free
+Final local results on the deployed qualification source: backend 7,072/7,072; frontend 94
+files/742 tests; production build and format green; lint zero errors with nine pre-existing
+non-null-assertion warnings. The provider-free
 mechanism corpus remains A=30%, B=100%, C=100% with zero invariant violations. These counts do not
 change the M7/live claim boundary.
 

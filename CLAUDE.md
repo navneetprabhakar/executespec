@@ -25,7 +25,9 @@ flag is read as true immediately before each submission, and accepted evidence m
 contain the observed initial failure plus frozen acceptance checks. The harness never mutates the
 flag. `GET /api/admin/release-identity` reads the deployment workflow's exact
 `/opt/app/RUNNING_SHA` authority on every request; missing/malformed identity returns 503, and the
-paid harness refuses a caller-supplied candidate SHA that does not match it.
+paid harness refuses a caller-supplied candidate SHA that does not match it. Accepted qualification
+artifacts persist the attested SHA, canonical authority and live-read timestamp and are rejected
+unless that SHA equals the frozen candidate release.
 The operator-only
 `GET /api/admin/workspace-generation-attempts/{attemptId}/qualification-evidence` route is
 SUPER_ADMIN + no-store and exposes preserved rejected-diff evidence only for manual qualification;

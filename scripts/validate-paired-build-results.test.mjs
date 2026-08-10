@@ -37,6 +37,8 @@ function completeEvidence() {
         initialFailureOutcome: "FAILURE_OBSERVED", initialFailureCode: "REQUIRED_PATH_MISSING",
         acceptanceCheckCount: 4, sharedKernelFlagEnabledAtSubmission: true,
         releaseIdentityAuthority: "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA",
+        attestedRunningSha: common.releaseSha,
+        releaseIdentityReadAt: "2026-08-11T00:00:00.123456789Z",
       };
       records.push(record);
       reviews.set(key, { verdict: "PASS", runId: record.runId, workspaceArchiveSha256: record.workspaceArchiveSha256,
@@ -87,11 +89,15 @@ test("candidate evidence fails when the run did not prove shared-kernel admissio
   candidate.initialFailureOutcome = "";
   candidate.acceptanceCheckCount = 0;
   candidate.releaseIdentityAuthority = "CALLER_SUPPLIED";
+  candidate.attestedRunningSha = "f".repeat(40);
+  candidate.releaseIdentityReadAt = "";
   const errors = validateResultRecords(plan, records, reviews);
   assert.ok(errors.some((error) => error.includes("shared BUILD kernel flag")));
   assert.ok(errors.some((error) => error.includes("failure-first evidence")));
   assert.ok(errors.some((error) => error.includes("acceptance checks")));
   assert.ok(errors.some((error) => error.includes("RUNNING_SHA authority")));
+  assert.ok(errors.some((error) => error.includes("attested running SHA")));
+  assert.ok(errors.some((error) => error.includes("read timestamp")));
 });
 
 test("negative evidence fails unless exact prior frontier is restored and rejected diff reviewed", () => {
