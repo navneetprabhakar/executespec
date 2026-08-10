@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,23 @@ class GreenfieldBaselineServiceTest {
         .containsOnlyKeys(
             "package.json", "tsconfig.json", "index.html", "tests/executespec-acceptance.test.ts");
     assertThat(frontend.filesToCreate()).doesNotContainKeys("src/App.tsx", "src/main.tsx");
+  }
+
+  @Test
+  void runtimeSurfaceComesFromApprovedPlanNotFileExtensionGuessing() {
+    PlannedTask task = task("Build Python REST API", List.of("src/app.py", "openapi.yaml"));
+    Plan plan =
+        Plan.builder()
+            .planTitle("API")
+            .projectType("python")
+            .runtimeSurface(Plan.RuntimeSurface.HTTP)
+            .tasks(List.of(task))
+            .build();
+
+    GreenfieldBaselinePlan baseline = service.plan(workspace, task, plan);
+
+    assertThat(baseline.kind()).isEqualTo(GreenfieldBaselinePlan.Kind.PYTHON);
+    assertThat(baseline.runtimeSurface()).isEqualTo("HTTP_SERVICE");
   }
 
   @Test

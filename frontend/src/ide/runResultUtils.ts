@@ -312,6 +312,10 @@ export function publicationTrustFacts(
     (attempt) => attempt.failureCode || attempt.recoveryFailureCode,
   );
   const latestGeneration = generationAttempts[0];
+  const latestAcceptanceChecks = latestGeneration?.acceptanceChecks ?? [];
+  const failedAcceptanceChecks = latestAcceptanceChecks.filter(
+    (check) => check.outcome === 'FAILED' || check.outcome === 'UNAVAILABLE',
+  );
 
   const facts: PublicationTrustFact[] = [
     {
@@ -378,6 +382,23 @@ export function publicationTrustFacts(
               : 'neutral',
     },
     {
+      label: 'Initial deterministic failure',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No generation attempt'
+            : latestGeneration.initialFailureEvidence
+              ? `${latestGeneration.initialFailureEvidence.outcome || 'UNKNOWN'} · ${latestGeneration.initialFailureEvidence.code || 'unclassified'} · ${latestGeneration.initialFailureEvidence.detail || 'no detail'}`
+              : 'No actually observed pre-provider failure evidence',
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : latestGeneration?.initialFailureEvidence?.outcome === 'FAILURE_OBSERVED'
+            ? 'ok'
+            : 'bad',
+    },
+    {
       label: 'Latest candidate verification',
       value:
         run.runMode !== 'BUILD'
@@ -394,6 +415,39 @@ export function publicationTrustFacts(
             ? 'bad'
             : 'warn',
     },
+    {
+      label: 'Latest acceptance checks',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No generation attempt'
+            : latestAcceptanceChecks.length === 0
+              ? 'No per-check evidence (legacy or verification not reached)'
+              : failedAcceptanceChecks.length === 0
+                ? `${latestAcceptanceChecks.length}/${latestAcceptanceChecks.length} deterministic checks passed`
+                : `${latestAcceptanceChecks.length - failedAcceptanceChecks.length}/${latestAcceptanceChecks.length} passed · ${failedAcceptanceChecks[0].kind} ${failedAcceptanceChecks[0].outcome?.toLowerCase()}: ${failedAcceptanceChecks[0].detail || 'no detail'}`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : failedAcceptanceChecks.length > 0
+            ? 'bad'
+            : latestAcceptanceChecks.length > 0
+              ? 'ok'
+              : 'warn',
+    },
+    ...latestAcceptanceChecks.map((check) => ({
+      label: `Acceptance · ${check.kind}`,
+      value: check.hidden
+        ? `${check.outcome || 'PENDING'} · hidden deterministic check`
+        : `${check.outcome || 'PENDING'} · ${check.target}${check.detail ? ` · ${check.detail}` : ''}`,
+      kind:
+        check.outcome === 'PASSED'
+          ? ('ok' as const)
+          : check.outcome === 'FAILED' || check.outcome === 'UNAVAILABLE'
+            ? ('bad' as const)
+            : ('warn' as const),
+    })),
     {
       label: 'Latest candidate rollback',
       value:

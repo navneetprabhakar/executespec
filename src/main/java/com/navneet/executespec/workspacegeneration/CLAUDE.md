@@ -2,8 +2,10 @@
 
 V374 makes one initial BUILD task the unit of mutation authority. V375 preserves original rejection
 and rejected-diff evidence independently from first recovery-failure evidence. V376 seeds the
-default-off shared BUILD-loop rollout flag; V377 freezes the schema-v2 task contract, initial
-failure, physical route and usage evidence. `WorkspaceGenerationLifecycle`
+default-off shared BUILD-loop rollout flag; V377 freezes the schema-v2 task contract, planned
+initial failure, physical route and usage evidence. V378 freezes the initial acceptance probe
+executed after baseline materialization and before provider dispatch; only an observed red result
+admits dispatch. `WorkspaceGenerationLifecycle`
 owns `PREPARED → MUTATING → VERIFYING → VERIFIED → CHECKPOINTING → ACCEPTED`; every rejection uses
 `ROLLING_BACK → ROLLED_BACK`, and crash recovery may use `RECOVERY_FAILED → ROLLING_BACK` retries.
 Never infer acceptance from a worker outcome or task status.
@@ -31,6 +33,11 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   path-explicit multi-repository tasks. It never creates product implementation or overwrites an
   existing customer path. `TaskAcceptanceContractResolver` freezes those exact commands, required
   paths, runtime, scopes and checks before mutation.
+- `TaskAcceptanceVerifier.probeInitial` must execute before provider dispatch. It refuses command
+  drift or unavailable required test infrastructure, records missing required paths or missing
+  HTTP interface declarations as red evidence, and refuses to relabel a green workspace as a
+  failure-first task. Every frozen final check is evaluated independently; unknown checks remain
+  `UNAVAILABLE` rather than disappearing.
 - A provider/model change cannot continue inside a mutable generation attempt. It must create a
   new PREPARED attempt from the durable accepted frontier with its own exact LLM/workspace lease.
 - Candidate acceptance requires an exact generation archive acknowledgement. Production may not
@@ -65,15 +72,17 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
 
 - Migrations: `V374__workspace_generation_protocol.sql`,
   `V375__preserve_workspace_generation_recovery_evidence.sql`,
-  `V376__seed_build_shared_code_change_loop_flag.sql`, and
-  `V377__workspace_generation_execution_evidence.sql`.
+  `V376__seed_build_shared_code_change_loop_flag.sql`,
+  `V377__workspace_generation_execution_evidence.sql`, and
+  `V378__observed_initial_build_failure.sql`.
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
   `recovery_failure_*` tuple, so recovery cannot rewrite causality.
-- V377's contract/initial-failure/requested-route tuple and effective route/iteration/tool/call/
+- V377's contract/planned-initial-failure/requested-route tuple and effective route/iteration/tool/call/
   token/cost tuple are write-once. Run detail deliberately omits prompts, patches and failure
   reasons while exposing bounded customer-safe proof and the newest immutable verification receipt.
+- V378's executed initial-probe JSON and observation timestamp are independently write-once.
 - `WorkspaceGenerationRecoveryService` runs before generic startup replay and reconciles the
   ACCEPTED→task-COMPLETE crash window.
 

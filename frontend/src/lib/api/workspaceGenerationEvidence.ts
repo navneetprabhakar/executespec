@@ -9,12 +9,26 @@ export interface WorkspaceGenerationAttemptEvidence {
   beforeGeneration: string;
   candidateGeneration?: string | null;
   taskContractDigest?: string | null;
+  initialFailureEvidence?: {
+    outcome?: string | null;
+    code?: string | null;
+    detail?: string | null;
+    command?: string | null;
+    failedTargets?: string[];
+    observedAt?: string | null;
+  } | null;
   runtimeSurface?: string | null;
   baselineKind?: string | null;
   buildCommand?: string | null;
   testCommand?: string | null;
   requiredPaths?: string[];
-  acceptanceChecks?: {kind: string; target: string; hidden: boolean}[];
+  acceptanceChecks?: {
+    kind: string;
+    target: string;
+    hidden: boolean;
+    outcome?: 'PASSED' | 'FAILED' | 'UNAVAILABLE' | null;
+    detail?: string | null;
+  }[];
   requestedProvider?: string | null;
   requestedModel?: string | null;
   effectiveProvider?: string | null;

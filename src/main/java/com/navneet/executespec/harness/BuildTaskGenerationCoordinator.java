@@ -22,17 +22,14 @@ import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationInitialFailureRecorder;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * Owns the reversible mutation, deterministic verification, checkpoint and acceptance transaction
- * for one initial server-owned BUILD task. Keeping this protocol outside {@link SequentialExecutor}
- * prevents its execution policy from becoming the durability implementation.
- */
+/** Owns one reversible, verified server-owned BUILD task generation transaction. */
 @Service
 @Slf4j
 public class BuildTaskGenerationCoordinator {
@@ -41,6 +38,7 @@ public class BuildTaskGenerationCoordinator {
 
   private final WorkspaceGenerationLifecycle generations;
   private final WorkspaceGenerationExecutionEvidenceRecorder executionEvidence;
+  private final WorkspaceGenerationInitialFailureRecorder initialFailures;
   private final TaskAcceptanceContractResolver contracts;
   private final TaskAcceptanceVerifier verifier;
   private final RunLlmOperationLifecycleService operations;
@@ -55,10 +53,13 @@ public class BuildTaskGenerationCoordinator {
   private final ThreadLocal<ExecutionContext> activeTaskContext = new ThreadLocal<>();
   private final ThreadLocal<TaskAcceptanceContract> activeContract = new ThreadLocal<>();
   private final ThreadLocal<GreenfieldBaselinePlan> activeBaseline = new ThreadLocal<>();
+  private final ThreadLocal<TaskAcceptanceVerifier.InitialFailure> activeInitialFailure =
+      new ThreadLocal<>();
 
   public BuildTaskGenerationCoordinator(
       WorkspaceGenerationLifecycle generations,
       WorkspaceGenerationExecutionEvidenceRecorder executionEvidence,
+      WorkspaceGenerationInitialFailureRecorder initialFailures,
       TaskAcceptanceContractResolver contracts,
       TaskAcceptanceVerifier verifier,
       RunLlmOperationLifecycleService operations,
@@ -70,6 +71,7 @@ public class BuildTaskGenerationCoordinator {
       com.navneet.executespec.observability.Metrics metrics) {
     this.generations = generations;
     this.executionEvidence = executionEvidence;
+    this.initialFailures = initialFailures;
     this.contracts = contracts;
     this.verifier = verifier;
     this.operations = operations;
@@ -93,7 +95,7 @@ public class BuildTaskGenerationCoordinator {
     boolean sharedLoopEnabled = featureFlags != null && featureFlags.isEnabled(SHARED_LOOP_FLAG);
     GreenfieldBaselinePlan baseline =
         sharedLoopEnabled
-            ? greenfieldBaselines.plan(request.runContext().workspaceRoot(), task)
+            ? greenfieldBaselines.plan(request.runContext().workspaceRoot(), task, plan)
             : null;
     if (baseline != null && !baseline.supported()) {
       throw new IllegalStateException(
@@ -102,7 +104,7 @@ public class BuildTaskGenerationCoordinator {
     TaskAcceptanceContract contract =
         sharedLoopEnabled
             ? contracts.resolveFailureFirst(
-                task, taskIndex, request.runContext().workspaceRoot(), baseline)
+                task, plan, taskIndex, request.runContext().workspaceRoot(), baseline)
             : contracts.resolve(task, taskIndex);
     com.navneet.executespec.cost.RunCostTracker.Snapshot usageBefore = taskUsage(runId, task.id());
     WorkspaceGenerationLifecycle.Prepared prepared =
@@ -164,6 +166,7 @@ public class BuildTaskGenerationCoordinator {
       activeContract.set(contract);
       if (baseline != null) activeBaseline.set(baseline);
       acceptancePending.set(true);
+      ExecutionContext operationContext = operation.context();
       TaskOutcome outcome =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
               prepared.lease(),
@@ -171,6 +174,25 @@ public class BuildTaskGenerationCoordinator {
               () -> {
                 if (baseline != null) {
                   greenfieldBaselines.materialize(request.runContext().workspaceRoot(), baseline);
+                }
+                if (sharedLoopEnabled) {
+                  TaskAcceptanceVerifier.InitialFailure initialFailure =
+                      verifier.probeInitial(operationContext, contract);
+                  initialFailures.record(prepared, initialFailure);
+                  activeInitialFailure.set(initialFailure);
+                  emitGeneration(
+                      runId,
+                      task.id(),
+                      prepared,
+                      "INITIAL_FAILURE_" + initialFailure.outcome(),
+                      contract,
+                      request.provider(),
+                      request.model(),
+                      null,
+                      initialFailure.code());
+                  if (!initialFailure.observed()) {
+                    throw new InitialFailureUnavailableException(initialFailure);
+                  }
                 }
                 return dispatch.get();
               });
@@ -294,6 +316,10 @@ public class BuildTaskGenerationCoordinator {
       clearThreadState();
       if (!acceptStarted) {
         try {
+          String code =
+              failure instanceof InitialFailureUnavailableException unavailable
+                  ? unavailable.evidence().code()
+                  : "TASK_GENERATION_EXCEPTION";
           rollback(
               prepared,
               runId,
@@ -302,7 +328,7 @@ public class BuildTaskGenerationCoordinator {
               request.provider(),
               request.model(),
               null,
-              "TASK_GENERATION_EXCEPTION",
+              code,
               failure.getMessage());
         } catch (RuntimeException rollbackFailure) {
           failure.addSuppressed(rollbackFailure);
@@ -340,7 +366,11 @@ public class BuildTaskGenerationCoordinator {
   public String acceptanceSystemDirective() {
     TaskAcceptanceContract contract = activeContract.get();
     GreenfieldBaselinePlan baseline = activeBaseline.get();
-    if (contract == null || contract.schemaVersion() < 2 || baseline == null) return "";
+    TaskAcceptanceVerifier.InitialFailure initialFailure = activeInitialFailure.get();
+    if (contract == null
+        || contract.schemaVersion() < 2
+        || baseline == null
+        || initialFailure == null) return "";
     return """
 
 SERVER-OWNED BUILD ACCEPTANCE CONTRACT (immutable for this task)
@@ -357,7 +387,12 @@ succeeds. Planner text cannot replace or weaken these checks.
         .formatted(
             contract.digest(),
             contract.runtimeSurface(),
-            baseline.initialFailureEvidence(),
+            initialFailure.code()
+                + ": "
+                + initialFailure.detail()
+                + (initialFailure.failedTargets().isEmpty()
+                    ? ""
+                    : " targets=" + initialFailure.failedTargets()),
             contract.requiredPaths(),
             contract.buildCommand() == null ? "UNAVAILABLE" : contract.buildCommand().command(),
             contract.testCommand() == null ? "UNAVAILABLE" : contract.testCommand().command());
@@ -434,6 +469,7 @@ succeeds. Planner text cannot replace or weaken these checks.
     activeTaskContext.remove();
     activeContract.remove();
     activeBaseline.remove();
+    activeInitialFailure.remove();
   }
 
   private com.navneet.executespec.cost.RunCostTracker.Snapshot taskUsage(
@@ -514,7 +550,11 @@ succeeds. Planner text cannot replace or weaken these checks.
     data.put("provider", provider);
     data.put("model", model);
     if (candidate != null) data.put("candidateGeneration", candidate);
-    if (outcome != null) data.put("verificationOutcome", outcome);
+    if (outcome != null) {
+      data.put(
+          state.startsWith("INITIAL_FAILURE_") ? "initialFailureCode" : "verificationOutcome",
+          outcome);
+    }
     broadcaster.emit(
         runId,
         RunEvent.workspaceGeneration(

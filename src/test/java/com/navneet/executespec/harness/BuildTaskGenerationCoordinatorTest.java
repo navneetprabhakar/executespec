@@ -70,6 +70,8 @@ class BuildTaskGenerationCoordinatorTest {
   private WorkspaceGenerationLifecycle.Prepared prepared;
   private com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder
       executionEvidence;
+  private com.navneet.executespec.workspacegeneration.WorkspaceGenerationInitialFailureRecorder
+      initialFailures;
   private RunLlmOperationLifecycleService.PhaseLease operation;
   private TaskAcceptanceContract contract;
 
@@ -79,6 +81,10 @@ class BuildTaskGenerationCoordinatorTest {
     executionEvidence =
         mock(
             com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder
+                .class);
+    initialFailures =
+        mock(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationInitialFailureRecorder
                 .class);
     contracts = mock(TaskAcceptanceContractResolver.class);
     verifier = mock(TaskAcceptanceVerifier.class);
@@ -93,6 +99,7 @@ class BuildTaskGenerationCoordinatorTest {
         new BuildTaskGenerationCoordinator(
             generations,
             executionEvidence,
+            initialFailures,
             contracts,
             verifier,
             operations,
@@ -320,7 +327,7 @@ class BuildTaskGenerationCoordinatorTest {
             java.util.Map.of("requirements.txt", "pytest\n"),
             List.of("src/app.py"),
             List.of("REQUIRED_PATH_MISSING:src/app.py", "FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
-    when(greenfieldBaselines.plan(workspace, task)).thenReturn(baseline);
+    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
     contract =
         new TaskAcceptanceContract(
             2,
@@ -344,13 +351,21 @@ class BuildTaskGenerationCoordinatorTest {
             List.of(),
             List.of(),
             "c".repeat(64));
-    when(contracts.resolveFailureFirst(task, 0, workspace, baseline)).thenReturn(contract);
+    when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(contract);
     when(greenfieldBaselines.materialize(workspace, baseline))
         .thenAnswer(
             ignored -> {
               RunWorkspaceAuthorityService.assertCorrectionToolDispatch("run-1");
               return List.of("requirements.txt");
             });
+    TaskAcceptanceVerifier.InitialFailure observedFailure =
+        new TaskAcceptanceVerifier.InitialFailure(
+            "FAILURE_OBSERVED",
+            "REQUIRED_PATH_MISSING",
+            "Required path assertions are red: [src/app.py]",
+            null,
+            List.of("src/app.py"));
+    when(verifier.probeInitial(any(), eq(contract))).thenReturn(observedFailure);
     WorkspaceGenerationLifecycle.Verification passing = verification("PASSED", true, true, 2, 0);
     when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
     when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/app.py"));
@@ -371,7 +386,7 @@ class BuildTaskGenerationCoordinatorTest {
         () -> {
           assertThat(coordinator.acceptanceSystemDirective())
               .contains("Contract digest: " + contract.digest())
-              .contains("REQUIRED_PATH_MISSING:src/app.py")
+              .contains("REQUIRED_PATH_MISSING: Required path assertions are red: [src/app.py]")
               .contains("python3 -m pytest -q");
           return successfulOutcome();
         },
@@ -382,6 +397,7 @@ class BuildTaskGenerationCoordinatorTest {
     order.verify(operations).claimBuildTask(any(), anyString(), anyString(), anyInt(), anyString());
     order.verify(generations).bindLlmAttempt(eq(prepared), anyString(), anyInt(), any(UUID.class));
     order.verify(greenfieldBaselines).materialize(workspace, baseline);
+    verify(initialFailures).record(prepared, observedFailure);
     verify(executionEvidence)
         .record(eq(prepared), eq("anthropic"), eq("claude-sonnet"), eq(0), eq(0), any());
     verify(metrics, atLeastOnce())
@@ -389,6 +405,14 @@ class BuildTaskGenerationCoordinatorTest {
     verify(metrics).recordWorkspaceGenerationVerification(eq("PASSED"), any());
     verify(broadcaster, atLeastOnce())
         .emit(eq("run-1"), argThat(event -> "WORKSPACE_GENERATION".equals(event.type())));
+    verify(broadcaster)
+        .emit(
+            eq("run-1"),
+            argThat(
+                event ->
+                    "WORKSPACE_GENERATION".equals(event.type())
+                        && "INITIAL_FAILURE_FAILURE_OBSERVED".equals(event.data().get("state"))
+                        && "REQUIRED_PATH_MISSING".equals(event.data().get("initialFailureCode"))));
   }
 
   @Test
@@ -403,7 +427,7 @@ class BuildTaskGenerationCoordinatorTest {
             java.util.Map.of(),
             List.of(),
             List.of("FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
-    when(greenfieldBaselines.plan(workspace, task)).thenReturn(unsupported);
+    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(unsupported);
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->
@@ -431,6 +455,69 @@ class BuildTaskGenerationCoordinatorTest {
             isNull());
     verify(operations, never())
         .claimBuildTask(any(), anyString(), anyString(), anyInt(), anyString());
+  }
+
+  @Test
+  void noActuallyObservedFailureRollsBackBeforeProviderDispatch() {
+    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    GreenfieldBaselinePlan baseline =
+        new GreenfieldBaselinePlan(
+            GreenfieldBaselinePlan.Kind.EXISTING,
+            "EXISTING_REPOSITORY",
+            false,
+            true,
+            java.util.Map.of(),
+            List.of("src/App.java"),
+            List.of("FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
+    TaskAcceptanceContract v2 =
+        new TaskAcceptanceContract(
+            2,
+            "T1",
+            0,
+            "SERVER_RESOLVED_FAILURE_FIRST_V2",
+            "REQUIRED_NON_NOOP",
+            "REQUIRED",
+            List.of("src/App.java"),
+            "EXISTING_REPOSITORY",
+            "EXISTING",
+            new TaskAcceptanceContract.ResolvedCommand("mvn compile", 300, "maven", "MAVEN"),
+            new TaskAcceptanceContract.ResolvedCommand("mvn test", 600, "maven", "SUREFIRE"),
+            List.of("src/App.java"),
+            List.of(),
+            List.of(),
+            true,
+            List.of("."),
+            List.of(),
+            List.of(),
+            contract.digest());
+    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
+    when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(v2);
+    TaskAcceptanceVerifier.InitialFailure noFailure =
+        new TaskAcceptanceVerifier.InitialFailure(
+            "ALREADY_PASSED", "NO_INITIAL_FAILURE", "2 tests passed", "mvn test", List.of());
+    when(verifier.probeInitial(any(), eq(v2))).thenReturn(noFailure);
+    AtomicBoolean dispatched = new AtomicBoolean();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                coordinator.execute(
+                    0,
+                    task,
+                    plan,
+                    request,
+                    () -> {
+                      dispatched.set(true);
+                      return successfulOutcome();
+                    },
+                    mock(BuildTaskGenerationCoordinator.TaskStatusSink.class)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("NO_INITIAL_FAILURE");
+
+    assertThat(dispatched).isFalse();
+    verify(initialFailures).record(prepared, noFailure);
+    verify(generations).rollback(eq(prepared), eq("NO_INITIAL_FAILURE"), anyString());
+    verify(executionEvidence, never())
+        .record(any(), anyString(), anyString(), anyInt(), anyInt(), any());
   }
 
   private WorkspaceGenerationLifecycle.Verification verification(

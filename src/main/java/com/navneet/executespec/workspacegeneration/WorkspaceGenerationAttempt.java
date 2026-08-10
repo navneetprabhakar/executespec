@@ -83,6 +83,13 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "initial_failure_evidence_json", columnDefinition = "jsonb")
   private String initialFailureEvidenceJson;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "observed_initial_failure_evidence_json", columnDefinition = "jsonb")
+  private String observedInitialFailureEvidenceJson;
+
+  @Column(name = "initial_failure_observed_at")
+  private Instant initialFailureObservedAt;
+
   @Column(name = "requested_provider", length = 32)
   private String requestedProvider;
 

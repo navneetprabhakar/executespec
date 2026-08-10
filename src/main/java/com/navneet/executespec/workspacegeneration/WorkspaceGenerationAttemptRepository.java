@@ -56,6 +56,19 @@ public interface WorkspaceGenerationAttemptRepository
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.observedInitialFailureEvidenceJson = :evidence, "
+          + "a.initialFailureObservedAt = :observedAt, a.updatedAt = :observedAt "
+          + "WHERE a.id = :id AND a.workspaceLeaseToken = :token AND a.state = :mutating "
+          + "AND a.observedInitialFailureEvidenceJson IS NULL")
+  int recordObservedInitialFailure(
+      @Param("id") UUID id,
+      @Param("token") UUID token,
+      @Param("mutating") WorkspaceGenerationState mutating,
+      @Param("evidence") String evidenceJson,
+      @Param("observedAt") Instant observedAt);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.effectiveProvider = :provider, "
           + "a.effectiveModel = :model, a.workerIterations = :iterations, "
           + "a.workerToolCalls = :toolCalls, a.modelCalls = :modelCalls, "
