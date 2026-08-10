@@ -52,8 +52,8 @@ while IFS=$'\t' read -r provider model run_id; do
   jq -cn \
     --arg arm control --arg release "$control_release" --arg caseId "$case_id" \
     --arg specSha "$spec_sha" --arg runId "$run_id" --arg reqProvider "$provider" \
-    --arg reqModel "$model" --arg provider "$(jq -r '.effectiveProvider // .requestedProvider' "${out_dir}/attempt-evidence.json")" \
-    --arg effectiveModel "$(jq -r '.effectiveModel // .requestedModel' "${out_dir}/attempt-evidence.json")" \
+    --arg reqModel "$model" --arg provider "$(jq -r '.effectiveProvider // .requestedProvider // .aiProvider' "${out_dir}/run-detail.json")" \
+    --arg effectiveModel "$(jq -r '.effectiveModel // .requestedModel // .workerModel' "${out_dir}/run-detail.json")" \
     --arg terminal "$(jq -r '.status' "${out_dir}/run-detail.json")" \
     --arg prior "$(jq -r '.priorAcceptedGeneration' "${out_dir}/attempt-evidence.json")" \
     --arg candidateKind "$candidate_kind" --arg candidate "$candidate" \
