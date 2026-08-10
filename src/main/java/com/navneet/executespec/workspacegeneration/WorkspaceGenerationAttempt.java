@@ -75,6 +75,53 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "task_contract_digest", nullable = false, length = 64)
   private String taskContractDigest;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "task_contract_json", columnDefinition = "jsonb")
+  private String taskContractJson;
+
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "initial_failure_evidence_json", columnDefinition = "jsonb")
+  private String initialFailureEvidenceJson;
+
+  @Column(name = "requested_provider", length = 32)
+  private String requestedProvider;
+
+  @Column(name = "requested_model", length = 160)
+  private String requestedModel;
+
+  @Column(name = "effective_provider", length = 32)
+  private String effectiveProvider;
+
+  @Column(name = "effective_model", length = 160)
+  private String effectiveModel;
+
+  @Column(name = "worker_iterations")
+  private Integer workerIterations;
+
+  @Column(name = "worker_tool_calls")
+  private Integer workerToolCalls;
+
+  @Column(name = "model_calls")
+  private Long modelCalls;
+
+  @Column(name = "input_tokens")
+  private Long inputTokens;
+
+  @Column(name = "output_tokens")
+  private Long outputTokens;
+
+  @Column(name = "cache_read_tokens")
+  private Long cacheReadTokens;
+
+  @Column(name = "cache_write_tokens")
+  private Long cacheWriteTokens;
+
+  @Column(name = "reasoning_tokens")
+  private Long reasoningTokens;
+
+  @Column(name = "cost_usd", precision = 16, scale = 8)
+  private java.math.BigDecimal costUsd;
+
   @Column(name = "workspace_lease_token", nullable = false)
   private UUID workspaceLeaseToken;
 

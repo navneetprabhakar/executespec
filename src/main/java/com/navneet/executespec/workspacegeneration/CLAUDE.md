@@ -1,10 +1,16 @@
 # Workspace generation protocol
 
 V374 makes one initial BUILD task the unit of mutation authority. V375 preserves original rejection
-and rejected-diff evidence independently from first recovery-failure evidence. `WorkspaceGenerationLifecycle`
+and rejected-diff evidence independently from first recovery-failure evidence. V376 seeds the
+default-off shared BUILD-loop rollout flag; V377 freezes the schema-v2 task contract, initial
+failure, physical route and usage evidence. `WorkspaceGenerationLifecycle`
 owns `PREPARED → MUTATING → VERIFYING → VERIFIED → CHECKPOINTING → ACCEPTED`; every rejection uses
 `ROLLING_BACK → ROLLED_BACK`, and crash recovery may use `RECOVERY_FAILED → ROLLING_BACK` retries.
 Never infer acceptance from a worker outcome or task status.
+
+`WorkspaceGenerationExecutionEvidenceRecorder` owns the transactional MUTATING-state CAS that
+freezes effective route, iteration/tool/model-call counts, token categories, and cost before
+verification. This keeps usage-evidence persistence separate from the lifecycle state machine.
 
 ## Invariants
 
@@ -20,6 +26,13 @@ Never infer acceptance from a worker outcome or task status.
   required build/tests. Acceptance reclassifies against the exact candidate diff: zero-diff
   generations fail, and any actual code-file change requires an executed non-empty green suite
   even when planner wording classified the task as documentation/configuration.
+- Under `build.shared-code-change-loop.enabled`, `GreenfieldBaselineService` creates only the
+  minimum executable red test/config surface for Python, Node/TypeScript, Java/Maven, React, or
+  path-explicit multi-repository tasks. It never creates product implementation or overwrites an
+  existing customer path. `TaskAcceptanceContractResolver` freezes those exact commands, required
+  paths, runtime, scopes and checks before mutation.
+- A provider/model change cannot continue inside a mutable generation attempt. It must create a
+  new PREPARED attempt from the durable accepted frontier with its own exact LLM/workspace lease.
 - Candidate acceptance requires an exact generation archive acknowledgement. Production may not
   use a same-host receipt.
 - `pipeline_run.accepted_workspace_generation`, task index, accepted attempt, and the exact internal
@@ -50,12 +63,17 @@ Never infer acceptance from a worker outcome or task status.
 
 ## Persistence
 
-- Migrations: `V374__workspace_generation_protocol.sql` and
-  `V375__preserve_workspace_generation_recovery_evidence.sql`.
+- Migrations: `V374__workspace_generation_protocol.sql`,
+  `V375__preserve_workspace_generation_recovery_evidence.sql`,
+  `V376__seed_build_shared_code_change_loop_flag.sql`, and
+  `V377__workspace_generation_execution_evidence.sql`.
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
   `recovery_failure_*` tuple, so recovery cannot rewrite causality.
+- V377's contract/initial-failure/requested-route tuple and effective route/iteration/tool/call/
+  token/cost tuple are write-once. Run detail deliberately omits prompts, patches and failure
+  reasons while exposing bounded customer-safe proof and the newest immutable verification receipt.
 - `WorkspaceGenerationRecoveryService` runs before generic startup replay and reconciles the
   ACCEPTED→task-COMPLETE crash window.
 
@@ -79,4 +97,8 @@ Never infer acceptance from a worker outcome or task status.
 - `TaskAcceptanceContractResolverTest`: typed canonical contract/digest, sorted touch paths,
   documentation-vs-code test policy, and admitted plan/goal/workspace authority binding.
 - `BuildTaskGenerationCoordinatorTest`: required orchestration order, exact checkpoint-before-accept,
-  and rollback/no-accept behavior for worker or deterministic-verification rejection.
+  rollback/no-accept behavior for worker or deterministic-verification rejection, flag-off
+  telemetry isolation, schema-v2 execution evidence, and typed lifecycle emission.
+- `GreenfieldBaselineServiceTest`: executable red baselines, no product implementation,
+  no-overwrite behavior and exact multi-repository scoping.
+- `DeterministicFailureDeltaTest`: stable normalized comparison of consecutive verifier evidence.

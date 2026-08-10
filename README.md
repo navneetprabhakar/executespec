@@ -211,6 +211,16 @@ task entry and before acceptance (plus rollback/recovery): a task may install de
 for deterministic verification, but those bytes never cross a task or node boundary. Run detail
 exposes a bounded, patch-free generation-attempt ledger and the Evidence view highlights rejected
 or unresolved attempts using stable codes and immutable digests.
+V376 adds the default-off `build.shared-code-change-loop.enabled` rollout control. When enabled,
+BUILD and PATCH still retain different orchestration but dispatch mutation through the same
+provider-neutral `CodeChangeLoop`. Supported greenfield BUILD tasks start from a deterministic
+executable red baseline; server-frozen schema-v2 commands and paths, not planner prose, determine
+acceptance. Only changed deterministic failure evidence counts as diagnostic progress, and a route
+change starts a new fenced generation attempt from the accepted frontier. V377 makes the exact
+task contract, initial failure, requested/effective route, iterations, tool/model calls, token
+usage and cost immutable and inspectable through run detail. Typed `WORKSPACE_GENERATION` SSE,
+metrics, and Evidence UI facts keep candidate, verification, rollback, and accepted frontier
+separate.
 V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
@@ -287,7 +297,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V375`              | V375 preserves independent immutable recovery evidence; next V376       |
+| Flyway head       | `V377`              | V377 freezes BUILD attempt contract, route, usage and cost evidence; next V378 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -383,7 +393,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V375; next V376; 361 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V377; next V378; 363 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -462,6 +472,22 @@ the manifest. The committed matrix caps each run at $5 and the complete four-run
 the sum of every arm/route/case cap cannot exceed the authorized total. The arm-specific command prevents candidate evidence from being collected before the
 same-host deployment boundary. `scripts/validate-paired-build-results.mjs` refuses an incomplete pair or system score
 in place of the held-out and manual evidence.
+
+Before any paid live qualification, run the provider-free mechanism corpus:
+
+```bash
+node scripts/build-kernel-provider-free-qualification.mjs
+node --test scripts/build-kernel-provider-free-qualification.test.mjs
+```
+
+It covers empty Python/REST/TypeScript/frontend builds plus brownfield feature/bug, multi-file,
+migration, multi-task and multi-repository changes. Arm A models one-pass legacy BUILD acceptance;
+arm B models failure-first BUILD with exact rollback and retry from the accepted frontier; arm C
+models PATCH where applicable. The held-out evaluator never reads ExecuteSpec's verified score.
+The current deterministic scripted run is A=30%, B=100%, C=100%, with zero B wrong accepts,
+unresolved attempts, rollback mismatches or PATCH regressions. This is provider-free mechanism
+evidence, not a live-model-quality result. Evidence is written to
+`target/build-kernel-qualification/provider-free-v1.json`.
 
 Live provider fixtures are also fail-closed. Reserve an exact provider/model/run scope with
 `scripts/provider-budget-ledger.mjs`, then boot with the Maven live-test profile and that reservation:

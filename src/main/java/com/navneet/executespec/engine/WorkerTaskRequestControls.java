@@ -22,11 +22,15 @@ public final class WorkerTaskRequestControls {
   public static WorkerTaskRequest preserveAcrossRetry(
       WorkerTaskRequest primary, WorkerTaskRequest retry) {
     return retry.toBuilder()
+        .changeMode(primary.changeMode())
         .taskTotalTokenCap(primary.taskTotalTokenCap())
         .dollarCap(primary.dollarCap())
         .workerStartedAtEpochMs(primary.workerStartedAtEpochMs())
         .strictProvider(primary.strictProvider())
         .zeroWriteSalvageAllowed(primary.zeroWriteSalvageAllowed())
+        .verifyBeforeComplete(primary.verifyBeforeComplete())
+        .progressV2(primary.progressV2())
+        .autoVerify(primary.autoVerify())
         .agentRole(primary.agentRole())
         .stepPrefix(primary.stepPrefix())
         .build();

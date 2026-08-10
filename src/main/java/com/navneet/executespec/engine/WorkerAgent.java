@@ -68,7 +68,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class WorkerAgent {
+public class WorkerAgent implements CodeChangeLoop {
 
   /** 120s finalizer LLM turn + up to 60s for its single closing tool before shutdown reserve. */
   private static final int TERMINAL_FINALIZER_LEAD_SECONDS = 180;
@@ -271,6 +271,7 @@ public class WorkerAgent {
   // that window. The worker supplies an override only when an absolute deadline constrains the
   // call — see AbsoluteDeadlineBudget.readTimeoutOverride.
 
+  @Override
   public WorkerResult run(WorkerTaskRequest req) {
     return run(req, null);
   }
@@ -305,6 +306,7 @@ public class WorkerAgent {
    * <p>Stagnation counter resets to 0 on resume — the worker gets a fresh {@code
    * STAGNATION_WARN_AFTER_N} of headroom to recover from the interruption.
    */
+  @Override
   public WorkerResult run(
       WorkerTaskRequest req, com.navneet.executespec.context.SavedContext resumeFrom) {
     long start = System.currentTimeMillis();
@@ -432,6 +434,7 @@ public class WorkerAgent {
     int editsSinceAutoVerify = 0;
     boolean lastIterHadWrite = false;
     int autoVerifyRuns = 0;
+    WorkerAutoVerifyProgress autoVerifyProgress = new WorkerAutoVerifyProgress();
     WorkerCompletionPolicy completionPolicy = WorkerCompletionPolicy.create();
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
@@ -518,7 +521,10 @@ public class WorkerAgent {
     final String runId = req.context().runId();
     final Double hardCapUsd = req.runHardCapUsd();
     final boolean patchNoEditNudgeOn =
-        !terminalTaskMode && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false);
+        !terminalTaskMode
+            && (req.changeMode() == CodeChangeMode.PATCH
+                || (req.changeMode() == null
+                    && runRow.map(r -> RunMode.isPatch(r.getRunMode())).orElse(false)));
 
     // RL-2026-05-052 follow-up — prompt (input) tokens the previous LLM call reported; the trigger
     // signal for WorkerHistoryCompactor. 0 until the first call returns usage.
@@ -1517,17 +1523,41 @@ public class WorkerAgent {
             && editsSinceAutoVerify > 0
             && autoVerifyRuns < AUTO_VERIFY_MAX_RUNS_PER_TASK) {
           autoVerifyRuns++;
-          String observation = autoVerifyObservation(req.context(), editsSinceAutoVerify);
+          WorkerAutoVerifyProgress.Result observation = null;
+          try {
+            observation =
+                autoVerifyProgress.observe(
+                    workspaceTestRunner, req.context(), editsSinceAutoVerify);
+          } catch (Exception e) {
+            log.debug("auto-verify failed (fail-open) run={}: {}", runId, e.getMessage());
+          }
           if (observation != null) {
             editsSinceAutoVerify = 0;
-            completionPolicy.observeAutoVerify(observation);
-            history.add(new UserMessage(observation));
-            toolLog.add("AUTO_VERIFY → " + observation.lines().findFirst().orElse(""));
+            metrics.recordDeterministicFailureDelta(observation.delta().name());
+            String deltaObservation =
+                "DETERMINISTIC FAILURE DELTA — "
+                    + observation.delta()
+                    + "\n"
+                    + observation.message();
+            completionPolicy.observeAutoVerify(deltaObservation);
+            history.add(new UserMessage(deltaObservation));
+            toolLog.add("AUTO_VERIFY_" + observation.delta() + " → " + observation.signature());
+            if (observation.resetsProgress()) itersSinceProgress = 0;
+            if (observation.unchangedStreak() >= 2) {
+              history.add(
+                  new UserMessage(
+                      "REPEATED DETERMINISTIC FAILURE — the exact verifier evidence has not"
+                          + " changed across two edit bursts. Stop repeating the same approach;"
+                          + " inspect the named failure and make a materially different edit."));
+            }
             log.info(
-                "WorkerAgent AUTO_VERIFY run={} task={} iter={} runsUsed={}/{}",
+                "WorkerAgent AUTO_VERIFY run={} task={} iter={} delta={} unchangedStreak={}"
+                    + " runsUsed={}/{}",
                 req.context().runId(),
                 req.context().taskId(),
                 iter,
+                observation.delta(),
+                observation.unchangedStreak(),
                 autoVerifyRuns,
                 AUTO_VERIFY_MAX_RUNS_PER_TASK);
           }
@@ -2990,45 +3020,9 @@ public class WorkerAgent {
   }
 
   /**
-   * auto-verify observation (harness-resolution Phase 2): run the resolved suite server-side and
-   * render the result for injection. Null ⇒ nothing to inject (no runner / zero tests / error —
-   * fail-open and silent so an unresolvable stack costs nothing).
-   */
-  private String autoVerifyObservation(ExecutionContext ctx, int editsInBurst) {
-    try {
-      Optional<com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult> opt =
-          workspaceTestRunner.runTestsDetailed(ctx.runId(), ctx.workspaceRoot());
-      if (opt.isEmpty()) return null;
-      TestExecutionSummary s = opt.get().summary();
-      if (s.getTotalTests() == 0) return null;
-      if (s.getFailed() == 0 && s.getErrors() == 0) {
-        return WorkerCompletionPolicy.passingAutoVerifyObservation(
-            opt.get().command(), editsInBurst, s.getPassed(), s.getTotalTests());
-      }
-      return "AUTO-VERIFY — the platform ran `"
-          + opt.get().command()
-          + "` after your last "
-          + editsInBurst
-          + " edit(s): "
-          + s.getFailed()
-          + " failed / "
-          + s.getErrors()
-          + " errored of "
-          + s.getTotalTests()
-          + "."
-          + verificationFailureEvidence(opt.get())
-          + "\nFix these failures (or, if one is genuinely pre-existing and unrelated to your"
-          + " change, say so explicitly) before moving on.";
-    } catch (Exception e) {
-      log.debug("auto-verify failed (fail-open) run={}: {}", ctx.runId(), e.getMessage());
-      return null;
-    }
-  }
-
-  /**
-   * Completion-intent sibling of {@link #autoVerifyObservation}. It deliberately returns only a
-   * refusal detail: green, unavailable, remote, zero-test, and parser-error outcomes all fail open
-   * so enabling the flag cannot turn an otherwise-completable task into a false failure.
+   * Completion-intent auto-verification. It deliberately returns only a refusal detail: green,
+   * unavailable, remote, zero-test, and parser-error outcomes all fail open so enabling the flag
+   * cannot turn an otherwise-completable task into a false failure.
    */
   private String autoVerifyCompletionFailure(ExecutionContext ctx) {
     try {
@@ -3405,6 +3399,7 @@ own line and nothing else. Otherwise list ONLY the real gaps, most important fir
    *
    * <p>The underlying query is scalar and bypasses any stale managed {@code PipelineRun} entity.
    */
+  @Override
   public boolean cancellationRequested(String runId) {
     return WorkerAgentSupport.cancellationRequested(pipelineRunRepository, runId);
   }

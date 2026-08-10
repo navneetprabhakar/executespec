@@ -20,6 +20,10 @@ import lombok.Builder;
  *     injected
  * @param userPrompt user message — typically the task description
  * @param context per-task execution context (workspace + ids)
+ * @param changeMode explicit orchestration policy identity for the shared code-change loop. BUILD
+ *     and PATCH callers set this rather than asking the loop to infer pipeline ownership from
+ *     mutable run state. Null is retained only for historical/specialized callers and falls back to
+ *     the persisted run mode.
  * @param maxIterations max LLM calls; 0/null defaults to {@link WorkerAgent#DEFAULT_MAX_ITER}
  * @param temperature sampling temperature; null defaults to 0.0
  * @param maxTokensPerCall max output tokens per LLM call; null defaults per-provider
@@ -189,6 +193,7 @@ public record WorkerTaskRequest(
     String systemPrompt,
     String userPrompt,
     ExecutionContext context,
+    CodeChangeMode changeMode,
     Integer maxIterations,
     Double temperature,
     Integer maxTokensPerCall,

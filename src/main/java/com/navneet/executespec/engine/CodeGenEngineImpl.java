@@ -59,7 +59,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
 
   private static final int PATCH_STAGNATION_FORCE_AFTER = 20;
 
-  private final WorkerAgent workerAgent;
+  private final CodeChangeLoop codeChangeLoop;
   private final PipelineRunRepository runRepo;
   private final FeatureFlagService featureFlagService;
   private final PromptAssembler promptAssembler;
@@ -108,7 +108,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
     }
 
     WorkerTaskRequest workerReq = workerRequest(request, ctx);
-    WorkerResult wr = workerAgent.run(workerReq);
+    WorkerResult wr = codeChangeLoop.run(workerReq);
 
     return EngineResult.builder()
         .diff(captureDiff(workspace))
@@ -142,6 +142,7 @@ public class CodeGenEngineImpl implements CodeGenEngine {
         .systemPrompt(buildSystemPrompt(request.provider()))
         .userPrompt(withOrientation(request.taskSpec(), ctx))
         .context(ctx)
+        .changeMode(CodeChangeMode.PATCH)
         .maxIterations(maxIterations)
         .temperature(0.0)
         .maxTokensPerCall(MAX_TOKENS_PER_CALL)

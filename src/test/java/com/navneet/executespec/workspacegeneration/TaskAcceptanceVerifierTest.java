@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -27,8 +28,11 @@ import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class TaskAcceptanceVerifierTest {
+
+  @TempDir Path workspace;
 
   private final BuildCommandResolver buildCommands = mock(BuildCommandResolver.class);
   private final TestCommandResolver testCommands = mock(TestCommandResolver.class);
@@ -104,6 +108,54 @@ class TaskAcceptanceVerifierTest {
         .doesNotContain("planner");
   }
 
+  @Test
+  void schemaV2AcceptsOnlyTheFrozenCommandsRequiredPathsAndNonEmptyTests() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary =
+        TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(Optional.of(new DetailedResult(summary, "Tests run: 2", command.command(), 0)));
+
+    var result = verifier.verify(v2Context, failureFirstContract(), List.of("src/main/App.java"));
+
+    assertThat(result.outcome()).isEqualTo("PASSED");
+    assertThat(result.serverResolvedCommandContract())
+        .contains("\"schemaVersion\":2")
+        .contains("\"frozenBuildMatches\":true")
+        .contains("\"requiredPathsPresent\":true");
+  }
+
+  @Test
+  void schemaV2RejectsCommandDriftEvenWhenTheDriftedBuildPasses() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    when(testCommands.resolve(workspace))
+        .thenReturn(Optional.of(new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven")));
+    when(buildCommands.resolve(workspace, null))
+        .thenReturn(
+            BuildCommand.builder()
+                .command("mvn -q package -DskipTests")
+                .timeoutSeconds(300)
+                .sourceDescription("inferred:maven")
+                .build());
+    when(buildTool.execute(any(), any()))
+        .thenReturn(
+            ToolResult.ok(
+                "command=mvn -q package -DskipTests\n"
+                    + "cwd=/workspace\nsource=inferred:maven\nexit=0\noutput:\n"));
+
+    var result = verifier.verify(v2Context, failureFirstContract(), List.of("src/main/App.java"));
+
+    assertThat(result.outcome()).isEqualTo("FAILED");
+    assertThat(result.buildPassed()).isFalse();
+    assertThat(result.evidenceJson()).contains("\"frozenBuildMatches\":false");
+  }
+
   private static TaskAcceptanceContract optionalTests() {
     return new TaskAcceptanceContract(
         1,
@@ -114,5 +166,29 @@ class TaskAcceptanceVerifierTest {
         "OPTIONAL",
         List.of("README.md"),
         "a".repeat(64));
+  }
+
+  private static TaskAcceptanceContract failureFirstContract() {
+    return new TaskAcceptanceContract(
+        2,
+        "T1",
+        0,
+        "SERVER_RESOLVED_FAILURE_FIRST_V2",
+        "REQUIRED_NON_NOOP",
+        "REQUIRED",
+        List.of("src/main/App.java"),
+        "JAVA_MAVEN_MODULE",
+        "JAVA_MAVEN",
+        new TaskAcceptanceContract.ResolvedCommand(
+            "mvn -q -DskipTests compile", 300, "inferred:maven", "MAVEN"),
+        new TaskAcceptanceContract.ResolvedCommand("mvn -q test", 600, "maven", "SUREFIRE"),
+        List.of("src/main/App.java"),
+        List.of(),
+        List.of(),
+        true,
+        List.of("."),
+        List.of(),
+        List.of(),
+        "b".repeat(64));
   }
 }

@@ -129,6 +129,19 @@ public record RunEvent(
         data == null ? Map.of() : Map.copyOf(data));
   }
 
+  /** Durable/replayable lifecycle evidence for one transactional BUILD generation attempt. */
+  public static RunEvent workspaceGeneration(
+      String runId, String taskId, String summary, Map<String, Object> data) {
+    return new RunEvent(
+        "WORKSPACE_GENERATION",
+        runId,
+        taskId,
+        summary,
+        Instant.now(),
+        1,
+        data == null ? Map.of() : Map.copyOf(data));
+  }
+
   /**
    * Machine-readable continuation action emitted when the system acts on a continuation
    * recommendation, for example by rerunning the same task with an advisor-selected provider/model

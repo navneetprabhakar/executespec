@@ -248,6 +248,10 @@ describe('publicationTrustFacts', () => {
       'Tasks terminal': '1/1 terminal · 1/1 completed',
       'Accepted BUILD frontier': 'Task 1 · bbbbbbbbbbbb · receipt 12345678 · GCS cccccccccccc',
       'BUILD generation attempts': '1 recent · 0 rejected · 0 unresolved',
+      'Latest generated candidate': expect.stringContaining('Candidate bbbbbbbbbbbb · ACCEPTED'),
+      'Latest candidate verification': 'No immutable verification receipt · current state ACCEPTED',
+      'Latest candidate rollback':
+        'Not rolled back; deterministic verification and frontier CAS accepted this generation',
       'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
       'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
       Build: 'Passed',
@@ -318,6 +322,10 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'BUILD generation attempts')).toMatchObject({
       value:
         '1 recent · 1 rejected · 1 unresolved · latest ROLLBACK_PROOF_FAILED · diff cccccccccccc',
+      kind: 'bad',
+    });
+    expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
+      value: 'Rollback recovery failed · ROLLBACK_PROOF_FAILED',
       kind: 'bad',
     });
   });

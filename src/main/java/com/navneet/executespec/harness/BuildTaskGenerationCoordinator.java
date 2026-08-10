@@ -6,7 +6,9 @@ import java.util.function.Supplier;
 
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.GcsTaskCheckpointService;
+import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.RunLlmOperationLifecycleService;
@@ -14,14 +16,16 @@ import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.GreenfieldBaselinePlan;
+import com.navneet.executespec.workspacegeneration.GreenfieldBaselineService;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -30,19 +34,52 @@ import lombok.extern.slf4j.Slf4j;
  * prevents its execution policy from becoming the durability implementation.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class BuildTaskGenerationCoordinator {
 
+  static final String SHARED_LOOP_FLAG = "build.shared-code-change-loop.enabled";
+
   private final WorkspaceGenerationLifecycle generations;
+  private final WorkspaceGenerationExecutionEvidenceRecorder executionEvidence;
   private final TaskAcceptanceContractResolver contracts;
   private final TaskAcceptanceVerifier verifier;
   private final RunLlmOperationLifecycleService operations;
   private final GcsTaskCheckpointService checkpoints;
   private final SseBroadcaster broadcaster;
+  private final GreenfieldBaselineService greenfieldBaselines;
+  private final FeatureFlagService featureFlags;
+  private final com.navneet.executespec.cost.RunCostTracker costTracker;
+  private final com.navneet.executespec.observability.Metrics metrics;
 
   private final ThreadLocal<Boolean> acceptancePending = new ThreadLocal<>();
   private final ThreadLocal<ExecutionContext> activeTaskContext = new ThreadLocal<>();
+  private final ThreadLocal<TaskAcceptanceContract> activeContract = new ThreadLocal<>();
+  private final ThreadLocal<GreenfieldBaselinePlan> activeBaseline = new ThreadLocal<>();
+
+  public BuildTaskGenerationCoordinator(
+      WorkspaceGenerationLifecycle generations,
+      WorkspaceGenerationExecutionEvidenceRecorder executionEvidence,
+      TaskAcceptanceContractResolver contracts,
+      TaskAcceptanceVerifier verifier,
+      RunLlmOperationLifecycleService operations,
+      GcsTaskCheckpointService checkpoints,
+      SseBroadcaster broadcaster,
+      GreenfieldBaselineService greenfieldBaselines,
+      FeatureFlagService featureFlags,
+      com.navneet.executespec.cost.RunCostTracker costTracker,
+      com.navneet.executespec.observability.Metrics metrics) {
+    this.generations = generations;
+    this.executionEvidence = executionEvidence;
+    this.contracts = contracts;
+    this.verifier = verifier;
+    this.operations = operations;
+    this.checkpoints = checkpoints;
+    this.broadcaster = broadcaster;
+    this.greenfieldBaselines = greenfieldBaselines;
+    this.featureFlags = featureFlags;
+    this.costTracker = costTracker;
+    this.metrics = metrics;
+  }
 
   public TaskOutcome execute(
       int taskIndex,
@@ -53,16 +90,66 @@ public class BuildTaskGenerationCoordinator {
       TaskStatusSink taskStatus) {
     requireServerOwnedWorkspace(request.localHandsMode());
     String runId = request.runContext().runId();
-    TaskAcceptanceContract contract = contracts.resolve(task, taskIndex);
+    boolean sharedLoopEnabled = featureFlags != null && featureFlags.isEnabled(SHARED_LOOP_FLAG);
+    GreenfieldBaselinePlan baseline =
+        sharedLoopEnabled
+            ? greenfieldBaselines.plan(request.runContext().workspaceRoot(), task)
+            : null;
+    if (baseline != null && !baseline.supported()) {
+      throw new IllegalStateException(
+          "GREENFIELD_RUNTIME_UNSUPPORTED: deterministic BUILD baseline could not be resolved");
+    }
+    TaskAcceptanceContract contract =
+        sharedLoopEnabled
+            ? contracts.resolveFailureFirst(
+                task, taskIndex, request.runContext().workspaceRoot(), baseline)
+            : contracts.resolve(task, taskIndex);
+    com.navneet.executespec.cost.RunCostTracker.Snapshot usageBefore = taskUsage(runId, task.id());
     WorkspaceGenerationLifecycle.Prepared prepared =
-        generations.prepareBuild(
-            runId,
-            task.id(),
-            taskIndex,
-            request.runContext().workspaceRoot(),
-            contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary()),
-            contract.digest());
+        sharedLoopEnabled
+            ? generations.prepareBuild(
+                runId,
+                task.id(),
+                taskIndex,
+                request.runContext().workspaceRoot(),
+                contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary()),
+                contract.digest(),
+                contracts.canonicalContract(contract),
+                contracts.canonicalInitialFailureEvidence(baseline),
+                request.provider(),
+                request.model())
+            : generations.prepareBuild(
+                runId,
+                task.id(),
+                taskIndex,
+                request.runContext().workspaceRoot(),
+                contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary()),
+                contract.digest(),
+                null,
+                null,
+                null,
+                null);
+    emitGeneration(
+        runId,
+        task.id(),
+        prepared,
+        "PREPARED",
+        contract,
+        request.provider(),
+        request.model(),
+        null,
+        null);
     generations.markMutating(prepared);
+    emitGeneration(
+        runId,
+        task.id(),
+        prepared,
+        "MUTATING",
+        contract,
+        request.provider(),
+        request.model(),
+        null,
+        null);
     boolean acceptStarted = false;
     boolean operationClosed = false;
     RunLlmOperationLifecycleService.PhaseLease operation = null;
@@ -74,37 +161,100 @@ public class BuildTaskGenerationCoordinator {
       generations.bindLlmAttempt(
           prepared, identity.operationId(), identity.attempt(), identity.leaseToken());
       activeTaskContext.set(operation.context());
+      activeContract.set(contract);
+      if (baseline != null) activeBaseline.set(baseline);
       acceptancePending.set(true);
       TaskOutcome outcome =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-              prepared.lease(), () -> generations.assertDispatch(prepared), dispatch);
+              prepared.lease(),
+              () -> generations.assertDispatch(prepared),
+              () -> {
+                if (baseline != null) {
+                  greenfieldBaselines.materialize(request.runContext().workspaceRoot(), baseline);
+                }
+                return dispatch.get();
+              });
+      if (sharedLoopEnabled) {
+        WorkerResult primary = outcome == null ? null : outcome.workerOutcome();
+        WorkerResult retry = outcome == null ? null : outcome.retryWorkerOutcome();
+        executionEvidence.record(
+            prepared,
+            firstNonBlank(
+                outcome == null ? null : outcome.dispatchedProvider(), request.provider()),
+            firstNonBlank(outcome == null ? null : outcome.dispatchedModel(), request.model()),
+            (primary == null ? 0 : primary.iterations()) + (retry == null ? 0 : retry.iterations()),
+            outcome == null ? 0 : Math.max(0, outcome.toolCallsDispatched()),
+            usageDelta(usageBefore, taskUsage(runId, task.id())));
+      }
       clearThreadState();
 
       if (acceptanceFailed(outcome)) {
-        generations.rollback(
+        String outcomeStatus = outcome == null ? "NULL" : outcome.status().name();
+        rollback(
             prepared,
+            runId,
+            task.id(),
+            contract,
+            request.provider(),
+            request.model(),
+            null,
             "TASK_OUTCOME_UNACCEPTED",
-            "Task outcome " + outcome.status() + " did not satisfy acceptance");
+            "Task outcome " + outcomeStatus + " did not satisfy acceptance");
         operations.fail(operation, "BUILD_TASK_UNACCEPTED");
         operationClosed = true;
         return outcome;
       }
 
       String candidate = generations.beginVerification(prepared);
+      emitGeneration(
+          runId,
+          task.id(),
+          prepared,
+          "VERIFYING",
+          contract,
+          request.provider(),
+          request.model(),
+          candidate,
+          null);
       List<String> changedFiles = generations.changedFiles(prepared);
+      long verificationStarted = System.nanoTime();
       WorkspaceGenerationLifecycle.Verification verification =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
               prepared.lease(),
               () -> generations.assertDispatch(prepared),
               () -> verifier.verify(request.runContext().child(task.id()), contract, changedFiles));
       generations.recordVerification(prepared, verification);
+      if (sharedLoopContract(contract) && metrics != null) {
+        metrics.recordWorkspaceGenerationVerification(
+            verification.outcome(),
+            java.time.Duration.ofNanos(System.nanoTime() - verificationStarted));
+      }
+      emitGeneration(
+          runId,
+          task.id(),
+          prepared,
+          "VERIFICATION_" + verification.outcome(),
+          contract,
+          request.provider(),
+          request.model(),
+          candidate,
+          verification.outcome());
       if (!"PASSED".equals(verification.outcome()) || !verification.buildPassed()) {
         String reason =
             "Server-resolved task acceptance "
                 + verification.outcome().toLowerCase(Locale.ROOT)
                 + "; rejected generation "
                 + candidate;
-        generations.rollback(prepared, "TASK_VERIFICATION_REJECTED", reason);
+        rollback(
+            prepared,
+            runId,
+            task.id(),
+            contract,
+            request.provider(),
+            request.model(),
+            candidate,
+            "TASK_VERIFICATION_REJECTED",
+            reason);
         taskStatus.persist("PARTIAL", reason);
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
         operations.fail(operation, "BUILD_TASK_VERIFICATION_REJECTED");
@@ -125,6 +275,16 @@ public class BuildTaskGenerationCoordinator {
           checkpoint.artifactDigest());
       acceptStarted = true;
       generations.accept(prepared);
+      emitGeneration(
+          runId,
+          task.id(),
+          prepared,
+          "ACCEPTED",
+          contract,
+          firstNonBlank(outcome.dispatchedProvider(), request.provider()),
+          firstNonBlank(outcome.dispatchedModel(), request.model()),
+          candidate,
+          "PASSED");
       taskStatus.persist("COMPLETE", null);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       operations.complete(operation);
@@ -134,7 +294,16 @@ public class BuildTaskGenerationCoordinator {
       clearThreadState();
       if (!acceptStarted) {
         try {
-          generations.rollback(prepared, "TASK_GENERATION_EXCEPTION", failure.getMessage());
+          rollback(
+              prepared,
+              runId,
+              task.id(),
+              contract,
+              request.provider(),
+              request.model(),
+              null,
+              "TASK_GENERATION_EXCEPTION",
+              failure.getMessage());
         } catch (RuntimeException rollbackFailure) {
           failure.addSuppressed(rollbackFailure);
         }
@@ -165,6 +334,50 @@ public class BuildTaskGenerationCoordinator {
     return "COMPLETE".equals(terminalStatus) && Boolean.TRUE.equals(acceptancePending.get())
         ? "VERIFYING"
         : terminalStatus;
+  }
+
+  /** Exact server-owned failure-first evidence injected into BUILD's worker system contract. */
+  public String acceptanceSystemDirective() {
+    TaskAcceptanceContract contract = activeContract.get();
+    GreenfieldBaselinePlan baseline = activeBaseline.get();
+    if (contract == null || contract.schemaVersion() < 2 || baseline == null) return "";
+    return """
+
+SERVER-OWNED BUILD ACCEPTANCE CONTRACT (immutable for this task)
+Contract digest: %s
+Runtime surface: %s
+Initial failing evidence: %s
+Required paths: %s
+Frozen build command: %s
+Frozen test command: %s
+Work in an inspect -> edit -> test -> diagnose loop. Do not claim completion until the
+required paths exist, the exact frozen build succeeds, and a required non-empty test suite
+succeeds. Planner text cannot replace or weaken these checks.
+"""
+        .formatted(
+            contract.digest(),
+            contract.runtimeSurface(),
+            baseline.initialFailureEvidence(),
+            contract.requiredPaths(),
+            contract.buildCommand() == null ? "UNAVAILABLE" : contract.buildCommand().command(),
+            contract.testCommand() == null ? "UNAVAILABLE" : contract.testCommand().command());
+  }
+
+  String withAcceptanceDirective(String systemPrompt) {
+    return systemPrompt + acceptanceSystemDirective();
+  }
+
+  boolean isolatesRouteChanges() {
+    return failureFirstActive();
+  }
+
+  boolean workerControlEnabled(String flag, boolean configured) {
+    return failureFirstActive() || configured;
+  }
+
+  public boolean failureFirstActive() {
+    TaskAcceptanceContract contract = activeContract.get();
+    return contract != null && contract.schemaVersion() >= 2;
   }
 
   public static boolean acceptanceFailed(TaskOutcome outcome) {
@@ -219,6 +432,97 @@ public class BuildTaskGenerationCoordinator {
   private void clearThreadState() {
     acceptancePending.remove();
     activeTaskContext.remove();
+    activeContract.remove();
+    activeBaseline.remove();
+  }
+
+  private com.navneet.executespec.cost.RunCostTracker.Snapshot taskUsage(
+      String runId, String taskId) {
+    return costTracker == null
+        ? new com.navneet.executespec.cost.RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0, 0)
+        : costTracker.snapshotTask(runId, taskId);
+  }
+
+  private static com.navneet.executespec.cost.RunCostTracker.Snapshot usageDelta(
+      com.navneet.executespec.cost.RunCostTracker.Snapshot before,
+      com.navneet.executespec.cost.RunCostTracker.Snapshot after) {
+    if (before == null) {
+      before = new com.navneet.executespec.cost.RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0, 0);
+    }
+    if (after == null) {
+      after = new com.navneet.executespec.cost.RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0, 0);
+    }
+    return new com.navneet.executespec.cost.RunCostTracker.Snapshot(
+        Math.max(0, after.inputTokens() - before.inputTokens()),
+        Math.max(0, after.outputTokens() - before.outputTokens()),
+        Math.max(0, after.cacheWriteTokens() - before.cacheWriteTokens()),
+        Math.max(0, after.cacheReadTokens() - before.cacheReadTokens()),
+        Math.max(0.0, after.costUsd() - before.costUsd()),
+        Math.max(0, after.calls() - before.calls()),
+        Math.max(0, after.reasoningTokens() - before.reasoningTokens()));
+  }
+
+  private static String firstNonBlank(String preferred, String fallback) {
+    return preferred == null || preferred.isBlank() ? fallback : preferred;
+  }
+
+  private void rollback(
+      WorkspaceGenerationLifecycle.Prepared prepared,
+      String runId,
+      String taskId,
+      TaskAcceptanceContract contract,
+      String provider,
+      String model,
+      String candidate,
+      String code,
+      String reason) {
+    long started = System.nanoTime();
+    try {
+      generations.rollback(prepared, code, reason);
+      if (sharedLoopContract(contract) && metrics != null) {
+        metrics.recordWorkspaceGenerationRollback(
+            "ROLLED_BACK", java.time.Duration.ofNanos(System.nanoTime() - started));
+      }
+      emitGeneration(
+          runId, taskId, prepared, "ROLLED_BACK", contract, provider, model, candidate, code);
+    } catch (RuntimeException failure) {
+      if (sharedLoopContract(contract) && metrics != null) {
+        metrics.recordWorkspaceGenerationRollback(
+            "FAILED", java.time.Duration.ofNanos(System.nanoTime() - started));
+      }
+      throw failure;
+    }
+  }
+
+  private void emitGeneration(
+      String runId,
+      String taskId,
+      WorkspaceGenerationLifecycle.Prepared prepared,
+      String state,
+      TaskAcceptanceContract contract,
+      String provider,
+      String model,
+      String candidate,
+      String outcome) {
+    if (!sharedLoopContract(contract)) return;
+    if (metrics != null) metrics.recordWorkspaceGenerationState(state, provider, model);
+    java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
+    data.put("attemptId", prepared.attemptId().toString());
+    data.put("state", state);
+    data.put("generationKind", "BUILD_TASK");
+    data.put("taskContractDigest", contract.digest());
+    data.put("provider", provider);
+    data.put("model", model);
+    if (candidate != null) data.put("candidateGeneration", candidate);
+    if (outcome != null) data.put("verificationOutcome", outcome);
+    broadcaster.emit(
+        runId,
+        RunEvent.workspaceGeneration(
+            runId, taskId, "BUILD generation " + state.toLowerCase(Locale.ROOT), data));
+  }
+
+  private static boolean sharedLoopContract(TaskAcceptanceContract contract) {
+    return contract != null && contract.schemaVersion() >= 2;
   }
 
   private static TaskOutcome rejectedOutcome(TaskOutcome outcome, String reason) {
