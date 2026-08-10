@@ -8,6 +8,7 @@ import java.util.List;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.agent.RequirementSpec;
 
 import org.eclipse.jgit.api.Git;
 import org.junit.jupiter.api.Test;
@@ -101,12 +102,51 @@ class TaskAcceptanceContractResolverTest {
     assertThat(contract.requiredPaths()).containsExactly("src/app.py", "tests/test_app.py");
     assertThat(contract.prefixChecks())
         .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
-        .containsExactly(
-            "REQUIRED_PATHS_PRESENT", "BUILD_COMMAND_AVAILABLE", "TEST_COMMAND_AVAILABLE");
+        .containsExactly("BUILD_COMMAND_AVAILABLE", "TEST_COMMAND_AVAILABLE");
     assertThat(contract.finalChecks())
         .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
-        .containsExactly("MEANINGFUL_DIFF", "BUILD_PASSED", "TESTS_PASSED");
+        .containsExactly(
+            "REPOSITORY_SCOPE",
+            "REQUIRED_PATHS_PRESENT",
+            "MEANINGFUL_DIFF",
+            "BUILD_PASSED",
+            "TESTS_PASSED");
     assertThat(contract.digest()).isEqualTo(reordered.digest()).matches("[0-9a-f]{64}");
+  }
+
+  @Test
+  void httpContractFreezesOwnedMethodPathsAndRequiresOpenApiVerification() {
+    PlannedTask task =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Create health API")
+            .description("Implement GET /health and POST /items")
+            .touchesFiles(List.of("src/app.py", "openapi.yaml"))
+            .meetsRequirements(List.of("R1"))
+            .build();
+    Plan plan =
+        Plan.builder()
+            .planTitle("API")
+            .runtimeSurface(Plan.RuntimeSurface.HTTP)
+            .projectType("python")
+            .requirements(
+                List.of(
+                    new RequirementSpec(
+                        "R1",
+                        "GET /health returns readiness; POST /items creates an item",
+                        RequirementSpec.RequirementKind.FUNCTIONAL)))
+            .tasks(List.of(task))
+            .build();
+    GreenfieldBaselinePlan baseline = new GreenfieldBaselineService().plan(workspace, task, plan);
+
+    TaskAcceptanceContract contract =
+        resolver.resolveFailureFirst(task, plan, 0, workspace, baseline);
+
+    assertThat(contract.runtimeSurface()).isEqualTo("HTTP_SERVICE");
+    assertThat(contract.endpointExpectations()).containsExactly("GET /health", "POST /items");
+    assertThat(contract.finalChecks())
+        .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
+        .contains("ENDPOINT_CONTRACT");
   }
 
   @Test

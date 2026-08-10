@@ -156,6 +156,141 @@ class TaskAcceptanceVerifierTest {
     assertThat(result.evidenceJson()).contains("\"frozenBuildMatches\":false");
   }
 
+  @Test
+  void heldOutEndpointCheckRejectsCandidateEvenWhenGeneratedTestsPass() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    Files.writeString(
+        workspace.resolve("openapi.json"),
+        "{\"openapi\":\"3.0.0\",\"paths\":{\"/other\":{\"get\":{}}}}");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary =
+        TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(
+            Optional.of(
+                new DetailedResult(summary, "2 generated tests pass", command.command(), 0)));
+
+    var result =
+        verifier.verify(
+            v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
+
+    assertThat(result.outcome()).isEqualTo("FAILED");
+    assertThat(result.testsPassed()).isEqualTo(2);
+    assertThat(result.evidenceJson())
+        .contains("\"endpointExpectationsPassed\":false")
+        .contains("\"kind\":\"ENDPOINT_CONTRACT\"")
+        .contains("\"status\":\"FAILED\"");
+  }
+
+  @Test
+  void heldOutEndpointCheckPassesOnlyExactMethodAndPath() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    Files.writeString(
+        workspace.resolve("openapi.json"),
+        "{\"openapi\":\"3.0.0\",\"paths\":{\"/health\":{\"get\":{}}}}");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(1).passed(1).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(
+            Optional.of(new DetailedResult(summary, "1 test passes", command.command(), 0)));
+
+    var result =
+        verifier.verify(
+            v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
+
+    assertThat(result.outcome()).isEqualTo("PASSED");
+    assertThat(result.evidenceJson()).contains("\"endpointExpectationsPassed\":true");
+  }
+
+  @Test
+  void initialProbeUsesMissingPathAsExecutableRedSignalWithoutRunningCommands() {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    when(testCommands.resolve(workspace))
+        .thenReturn(Optional.of(new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven")));
+
+    var result = verifier.probeInitial(v2Context, failureFirstContract());
+
+    assertThat(result.observed()).isTrue();
+    assertThat(result.code()).isEqualTo("REQUIRED_PATH_MISSING");
+    assertThat(result.failedTargets()).containsExactly("src/main/App.java");
+    org.mockito.Mockito.verifyNoInteractions(buildTool, testRunner);
+  }
+
+  @Test
+  void initialProbeUsesMissingHeldOutEndpointAsExecutableRedSignal() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    when(testCommands.resolve(workspace))
+        .thenReturn(Optional.of(new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven")));
+
+    var result = verifier.probeInitial(v2Context, endpointContract());
+
+    assertThat(result.observed()).isTrue();
+    assertThat(result.code()).isEqualTo("ENDPOINT_CONTRACT_UNSATISFIED");
+    assertThat(result.failedTargets()).containsExactly("GET /health");
+    org.mockito.Mockito.verifyNoInteractions(buildTool, testRunner);
+  }
+
+  @Test
+  void initialProbeFailsBeforeProviderWhenRequiredTestCommandIsUnavailable() {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    when(testCommands.resolve(workspace)).thenReturn(Optional.empty());
+
+    var result = verifier.probeInitial(v2Context, failureFirstContract());
+
+    assertThat(result.observed()).isFalse();
+    assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
+    assertThat(result.code()).isEqualTo("INITIAL_COMMAND_CONTRACT_DRIFT");
+    org.mockito.Mockito.verifyNoInteractions(buildTool, testRunner);
+  }
+
+  @Test
+  void initialProbeRefusesGreenWorkspaceInsteadOfInventingFailure() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(2).passed(2).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(
+            Optional.of(new DetailedResult(summary, "2 tests passed", command.command(), 0)));
+
+    var result = verifier.probeInitial(v2Context, failureFirstContract());
+
+    assertThat(result.observed()).isFalse();
+    assertThat(result.outcome()).isEqualTo("ALREADY_PASSED");
+    assertThat(result.code()).isEqualTo("NO_INITIAL_FAILURE");
+  }
+
+  @Test
+  void initialProbeCapturesExistingFailingTestEvidence() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary =
+        TestExecutionSummary.builder().totalTests(2).passed(1).failed(1).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(
+            Optional.of(
+                new DetailedResult(summary, "AppTest expected 2 but got 1", command.command(), 1)));
+
+    var result = verifier.probeInitial(v2Context, failureFirstContract());
+
+    assertThat(result.observed()).isTrue();
+    assertThat(result.code()).isEqualTo("INITIAL_TESTS_FAILED");
+    assertThat(result.detail()).contains("expected 2 but got 1");
+  }
+
   private static TaskAcceptanceContract optionalTests() {
     return new TaskAcceptanceContract(
         1,
@@ -190,5 +325,36 @@ class TaskAcceptanceVerifierTest {
         List.of(),
         List.of(),
         "b".repeat(64));
+  }
+
+  private static TaskAcceptanceContract endpointContract() {
+    TaskAcceptanceContract base = failureFirstContract();
+    return new TaskAcceptanceContract(
+        base.schemaVersion(),
+        base.taskId(),
+        base.taskIndex(),
+        base.verificationPolicy(),
+        base.buildRequirement(),
+        base.testRequirement(),
+        List.of("src/main/App.java", "openapi.json"),
+        "HTTP_SERVICE",
+        base.baselineKind(),
+        base.buildCommand(),
+        base.testCommand(),
+        base.requiredPaths(),
+        base.requiredTestSelectors(),
+        List.of("GET /health"),
+        true,
+        base.allowedRepositoryScopes(),
+        base.prefixChecks(),
+        List.of(
+            new TaskAcceptanceContract.AcceptanceCheck("REPOSITORY_SCOPE", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck(
+                "REQUIRED_PATHS_PRESENT", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("TESTS_PASSED", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", true)),
+        "c".repeat(64));
   }
 }

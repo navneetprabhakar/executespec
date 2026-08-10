@@ -103,6 +103,28 @@ class WorkspaceGenerationProtocolPostgresTest {
     assertThatThrownBy(
             () ->
                 jdbc.update(
+                    "UPDATE workspace_generation_attempt SET"
+                        + " initial_failure_observed_at=now() WHERE id=?",
+                    attemptId))
+        .rootCause()
+        .hasMessageContaining("observed initial failure fields must be written together");
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET observed_initial_failure_evidence_json="
+            + "'{\"outcome\":\"FAILURE_OBSERVED\",\"code\":\"INITIAL_TESTS_FAILED\"}'::jsonb,"
+            + "initial_failure_observed_at=now() WHERE id=?",
+        attemptId);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET"
+                        + " observed_initial_failure_evidence_json="
+                        + "'{\"outcome\":\"ALREADY_PASSED\"}'::jsonb WHERE id=?",
+                    attemptId))
+        .rootCause()
+        .hasMessageContaining("observed initial failure is immutable");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
                     "UPDATE workspace_generation_attempt SET effective_model='gpt-5.4-mini'"
                         + " WHERE id=?",
                     attemptId))

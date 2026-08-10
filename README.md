@@ -217,10 +217,13 @@ provider-neutral `CodeChangeLoop`. Supported greenfield BUILD tasks start from a
 executable red baseline; server-frozen schema-v2 commands and paths, not planner prose, determine
 acceptance. Only changed deterministic failure evidence counts as diagnostic progress, and a route
 change starts a new fenced generation attempt from the accepted frontier. V377 makes the exact
-task contract, initial failure, requested/effective route, iterations, tool/model calls, token
-usage and cost immutable and inspectable through run detail. Typed `WORKSPACE_GENERATION` SSE,
-metrics, and Evidence UI facts keep candidate, verification, rollback, and accepted frontier
-separate.
+task contract, planned initial failure, requested/effective route, iterations, tool/model calls,
+token usage and cost immutable and inspectable through run detail. V378 separately freezes the
+deterministic initial acceptance probe executed after baseline materialization and before provider
+dispatch; only an observed red result admits dispatch, while green, drifted, or unavailable probes
+roll back without a model call. Typed
+`WORKSPACE_GENERATION` SSE, metrics, and Evidence UI facts keep candidate, per-check verification,
+rollback, and accepted frontier separate.
 V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
@@ -297,7 +300,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V377`              | V377 freezes BUILD attempt contract, route, usage and cost evidence; next V378 |
+| Flyway head       | `V378`              | V378 freezes observed pre-provider BUILD failure evidence; next V379 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -393,7 +396,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V377; next V378; 363 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V378; next V379; 364 source files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)

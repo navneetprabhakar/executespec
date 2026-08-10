@@ -80,6 +80,15 @@ public class TaskAcceptanceContractResolver {
    */
   public TaskAcceptanceContract resolveFailureFirst(
       PlannedTask task, int taskIndex, Path workspaceRoot, GreenfieldBaselinePlan baseline) {
+    return resolveFailureFirst(task, null, taskIndex, workspaceRoot, baseline);
+  }
+
+  public TaskAcceptanceContract resolveFailureFirst(
+      PlannedTask task,
+      Plan plan,
+      int taskIndex,
+      Path workspaceRoot,
+      GreenfieldBaselinePlan baseline) {
     if (workspaceRoot == null) throw new IllegalArgumentException("workspaceRoot required");
     if (baseline == null) throw new IllegalArgumentException("baseline required");
     String testRequirement = testsRequired(task) ? "REQUIRED" : "OPTIONAL";
@@ -89,19 +98,28 @@ public class TaskAcceptanceContractResolver {
     TaskAcceptanceContract.ResolvedCommand test =
         resolvedTest(workspaceRoot, baseline).orElse(null);
     List<TaskAcceptanceContract.AcceptanceCheck> prefix = new ArrayList<>();
-    prefix.add(new TaskAcceptanceContract.AcceptanceCheck("REQUIRED_PATHS_PRESENT", "task", false));
     prefix.add(
         new TaskAcceptanceContract.AcceptanceCheck("BUILD_COMMAND_AVAILABLE", "workspace", false));
     if ("REQUIRED".equals(testRequirement)) {
       prefix.add(
           new TaskAcceptanceContract.AcceptanceCheck("TEST_COMMAND_AVAILABLE", "workspace", false));
     }
-    List<TaskAcceptanceContract.AcceptanceCheck> finalChecks =
-        List.of(
-            new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false),
-            new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false),
-            new TaskAcceptanceContract.AcceptanceCheck(
-                "TESTS_PASSED", "candidate", "OPTIONAL".equals(testRequirement)));
+    List<String> endpoints = endpointExpectations(task, plan);
+    List<TaskAcceptanceContract.AcceptanceCheck> finalChecks = new ArrayList<>();
+    finalChecks.add(
+        new TaskAcceptanceContract.AcceptanceCheck("REPOSITORY_SCOPE", "candidate", false));
+    finalChecks.add(
+        new TaskAcceptanceContract.AcceptanceCheck("REQUIRED_PATHS_PRESENT", "candidate", false));
+    finalChecks.add(
+        new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false));
+    finalChecks.add(new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false));
+    finalChecks.add(
+        new TaskAcceptanceContract.AcceptanceCheck(
+            "TESTS_PASSED", "candidate", "OPTIONAL".equals(testRequirement)));
+    if (!endpoints.isEmpty()) {
+      finalChecks.add(
+          new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", false));
+    }
 
     Map<String, Object> unsigned = new java.util.LinkedHashMap<>();
     unsigned.put("schemaVersion", 2);
@@ -117,7 +135,7 @@ public class TaskAcceptanceContractResolver {
     unsigned.put("testCommand", test);
     unsigned.put("requiredPaths", baseline.requiredTaskPaths());
     unsigned.put("requiredTestSelectors", List.of());
-    unsigned.put("endpointExpectations", List.of());
+    unsigned.put("endpointExpectations", endpoints);
     unsigned.put("meaningfulDiffRequired", true);
     List<String> repositoryScopes = repositoryScopes(baseline);
     unsigned.put("allowedRepositoryScopes", repositoryScopes);
@@ -138,12 +156,36 @@ public class TaskAcceptanceContractResolver {
         test,
         baseline.requiredTaskPaths(),
         List.of(),
-        List.of(),
+        endpoints,
         true,
         repositoryScopes,
         prefix,
         finalChecks,
         digest);
+  }
+
+  private static List<String> endpointExpectations(PlannedTask task, Plan plan) {
+    if (plan == null || plan.runtimeSurface() != Plan.RuntimeSurface.HTTP) return List.of();
+    StringBuilder source = new StringBuilder();
+    source.append(task.title()).append('\n').append(task.description()).append('\n');
+    task.hardConstraints().forEach(value -> source.append(value).append('\n'));
+    if (plan.requirements() != null) {
+      java.util.Set<String> owned = java.util.Set.copyOf(task.meetsRequirements());
+      plan.requirements().stream()
+          .filter(requirement -> owned.isEmpty() || owned.contains(requirement.id()))
+          .map(com.navneet.executespec.agent.RequirementSpec::text)
+          .filter(java.util.Objects::nonNull)
+          .forEach(value -> source.append(value).append('\n'));
+    }
+    java.util.regex.Matcher matcher =
+        java.util.regex.Pattern.compile(
+                "(?i)\\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\s+(/[A-Za-z0-9._~!$&'()*+,;=:@%{}/-]*)")
+            .matcher(source);
+    java.util.Set<String> endpoints = new java.util.TreeSet<>();
+    while (matcher.find()) {
+      endpoints.add(matcher.group(1).toUpperCase(Locale.ROOT) + " " + matcher.group(2));
+    }
+    return List.copyOf(endpoints);
   }
 
   /** Binds attempts to the exact plan, original goal, and workspace selection admitted to BUILD. */

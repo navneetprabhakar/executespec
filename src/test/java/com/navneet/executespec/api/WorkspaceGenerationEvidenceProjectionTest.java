@@ -51,7 +51,7 @@ class WorkspaceGenerationEvidenceProjectionTest {
             List.of(),
             true,
             List.of("."),
-            List.of(new TaskAcceptanceContract.AcceptanceCheck("INITIAL_FAILURE", "todo", false)),
+            List.of(new TaskAcceptanceContract.AcceptanceCheck("INITIAL_FAILURE", "todo", true)),
             List.of(new TaskAcceptanceContract.AcceptanceCheck("TESTS_GREEN", "npm test", false)),
             "c".repeat(64));
     WorkspaceGenerationAttempt attempt =
@@ -67,6 +67,11 @@ class WorkspaceGenerationEvidenceProjectionTest {
             .candidateGeneration("b".repeat(64))
             .taskContractDigest(contract.digest())
             .taskContractJson(objectMapper.writeValueAsString(contract))
+            .observedInitialFailureEvidenceJson(
+                "{\"outcome\":\"FAILURE_OBSERVED\",\"code\":\"INITIAL_TESTS_FAILED\","
+                    + "\"detail\":\"one test failed\",\"command\":\"npm test\","
+                    + "\"failedTargets\":[\"todo creates an item\"]}")
+            .initialFailureObservedAt(Instant.parse("2026-08-10T00:00:05Z"))
             .requestedProvider("openai")
             .requestedModel("gpt-5.4-mini")
             .effectiveProvider("openai")
@@ -92,6 +97,9 @@ class WorkspaceGenerationEvidenceProjectionTest {
             .testsExecuted(true)
             .testsPassed(2)
             .testsFailed(0)
+            .evidenceJson(
+                "{\"acceptanceCheckResults\":[{\"kind\":\"TESTS_GREEN\","
+                    + "\"status\":\"PASSED\",\"detail\":\"tests passed\"}]}")
             .evidenceDigest("e".repeat(64))
             .build();
     when(attempts.findTop20ByRunIdOrderByCreatedAtDesc("run-1")).thenReturn(List.of(attempt));
@@ -104,10 +112,30 @@ class WorkspaceGenerationEvidenceProjectionTest {
             .getFirst();
 
     assertThat(evidence.taskContractDigest()).isEqualTo(contract.digest());
+    assertThat(evidence.initialFailureEvidence().outcome()).isEqualTo("FAILURE_OBSERVED");
+    assertThat(evidence.initialFailureEvidence().code()).isEqualTo("INITIAL_TESTS_FAILED");
+    assertThat(evidence.initialFailureEvidence().detail())
+        .isEqualTo("The frozen test command failed before generation.");
+    assertThat(evidence.initialFailureEvidence().failedTargets()).isEmpty();
     assertThat(evidence.runtimeSurface()).isEqualTo("NODE");
     assertThat(evidence.buildCommand()).isEqualTo("npm run build");
     assertThat(evidence.testCommand()).isEqualTo("npm test");
     assertThat(evidence.acceptanceChecks()).hasSize(2);
+    assertThat(evidence.acceptanceChecks())
+        .anySatisfy(
+            check -> {
+              assertThat(check.kind()).isEqualTo("INITIAL_FAILURE");
+              assertThat(check.target()).isEqualTo("hidden");
+              assertThat(check.hidden()).isTrue();
+              assertThat(check.detail()).isNull();
+            });
+    assertThat(evidence.acceptanceChecks())
+        .anySatisfy(
+            check -> {
+              assertThat(check.kind()).isEqualTo("TESTS_GREEN");
+              assertThat(check.outcome()).isEqualTo("PASSED");
+              assertThat(check.detail()).isEqualTo("tests passed");
+            });
     assertThat(evidence.requestedModel()).isEqualTo("gpt-5.4-mini");
     assertThat(evidence.effectiveModel()).isEqualTo("gpt-5.4");
     assertThat(evidence.workerIterations()).isEqualTo(7);

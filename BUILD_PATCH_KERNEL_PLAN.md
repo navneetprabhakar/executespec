@@ -1,6 +1,7 @@
 # BUILD/PATCH shared-kernel execution plan
 
-Status: M0-M7 locally complete; separately authorized live M8 remains open. Implementation
+Status: M0-M6 locally implemented; M7 has provider-free mechanism evidence but real paired
+code-generation quality remains open; separately authorized live M8 remains open. Implementation
 baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`.
 
 ## Non-negotiable invariants
@@ -25,12 +26,12 @@ baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`.
 | --- | --- | --- |
 | M0 | Baseline, invariants, corpus, thresholds and rollback-safe flag are frozen. | COMPLETE |
 | M1 | BUILD and PATCH depend on the shared kernel port; PATCH behavior is characterized. | COMPLETE |
-| M2 | Supported BUILD tasks begin with a typed contract, deterministic baseline and executable failure signal. | COMPLETE |
+| M2 | Supported BUILD tasks begin with a typed contract, deterministic baseline and actually observed executable failure signal. | COMPLETE |
 | M3 | Shared BUILD loop runs inside V374/V375 accept-or-rollback authority. | COMPLETE |
 | M4 | Multi-task/repo, routing, context, tool, termination and reviewer semantics are proven. | COMPLETE |
-| M5 | API/UI/SSE/metrics expose independently inspectable attempt and acceptance evidence. | COMPLETE |
+| M5 | API/UI/SSE/metrics expose independently inspectable attempt, observed initial failure and per-check acceptance evidence. | COMPLETE |
 | M6 | Full compatibility, crash, race, rollback and regression gates pass. | COMPLETE |
-| M7 | Provider-free held-out A/B/C mechanism evaluation clears the predeclared local gates. | COMPLETE |
+| M7 | Provider-free held-out A/B/C mechanism evaluation clears transaction gates; real code-generation quality comparison remains required. | PARTIAL |
 | M8 | Documentation, recovery runbook, separately authorized live proof and completion audit close. | LIVE PROOF PENDING |
 
 ## Authoritative baseline
@@ -65,9 +66,10 @@ baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`.
   failure is surfaced instead of treating shell activity as progress.
 - Every provider/model change re-enters a new V374 generation attempt from the accepted frontier.
   A route cannot inherit and later legitimize another route's speculative candidate.
-- V377 freezes contract, initial-failure, requested/effective route, iteration/tool/call/token and
-  cost evidence. Run detail, typed SSE, metrics, and the Evidence UI expose candidate,
-  verification, and rollback as separate trust facts.
+- V377 freezes contract, planned initial-failure, requested/effective route,
+  iteration/tool/call/token and cost evidence. V378 separately freezes the failure actually
+  executed before provider dispatch. Run detail, typed SSE, metrics, and the Evidence UI expose
+  candidate, verification, per-check outcomes, and rollback as separate trust facts.
 
 ## Qualification comparison
 
@@ -87,7 +89,7 @@ node --test scripts/build-kernel-provider-free-qualification.test.mjs
 The 10-category result was A=30%, B=100%, C=100% (70 percentage-point uplift), with zero
 candidate wrong accepts, unresolved attempts, rollback mismatches, or PATCH regressions. This is
 mechanism evidence using scripted mutations and zero model calls; it is deliberately not presented
-as live-model quality evidence. The generated report is
+as real code-generation quality evidence and does not close M7 by itself. The generated report is
 `target/build-kernel-qualification/provider-free-v1.json`.
 
 Required corpus categories: empty Python library, empty REST API, empty TypeScript library, empty

@@ -359,6 +359,7 @@ public class RunDetail {
       String beforeGeneration,
       String candidateGeneration,
       String taskContractDigest,
+      WorkspaceGenerationInitialFailureEvidence initialFailureEvidence,
       String runtimeSurface,
       String baselineKind,
       String buildCommand,
@@ -392,7 +393,16 @@ public class RunDetail {
       Instant createdAt,
       Instant resolvedAt) {}
 
-  public record WorkspaceGenerationAcceptanceCheck(String kind, String target, boolean hidden) {}
+  public record WorkspaceGenerationInitialFailureEvidence(
+      String outcome,
+      String code,
+      String detail,
+      String command,
+      List<String> failedTargets,
+      Instant observedAt) {}
+
+  public record WorkspaceGenerationAcceptanceCheck(
+      String kind, String target, boolean hidden, String outcome, String detail) {}
 
   /** Token usage for a non-task agent (planner, reviewer, compiler). */
   public record AgentTokenEntry(

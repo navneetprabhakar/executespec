@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 
 import org.springframework.stereotype.Component;
@@ -32,6 +33,10 @@ public class GreenfieldBaselineService {
       Set.of(".git", ".agent-context", ".executespec", ".DS_Store");
 
   public GreenfieldBaselinePlan plan(Path workspaceRoot, PlannedTask task) {
+    return plan(workspaceRoot, task, null);
+  }
+
+  public GreenfieldBaselinePlan plan(Path workspaceRoot, PlannedTask task, Plan plan) {
     Path root = normalizedRoot(workspaceRoot);
     List<String> requiredPaths = requiredPaths(task);
     if (!effectivelyEmpty(root)) {
@@ -54,7 +59,7 @@ public class GreenfieldBaselineService {
     boolean supported = kind != GreenfieldBaselinePlan.Kind.UNSUPPORTED && !requiredPaths.isEmpty();
     return new GreenfieldBaselinePlan(
         kind,
-        runtimeSurface(kind),
+        runtimeSurface(kind, plan),
         true,
         supported,
         files,
@@ -424,6 +429,19 @@ public class GreenfieldBaselineService {
   }
 
   private static String runtimeSurface(GreenfieldBaselinePlan.Kind kind) {
+    return runtimeSurface(kind, null);
+  }
+
+  private static String runtimeSurface(GreenfieldBaselinePlan.Kind kind, Plan plan) {
+    if (plan != null) {
+      return switch (plan.runtimeSurface()) {
+        case HTTP -> "HTTP_SERVICE";
+        case CLI -> "CLI_APPLICATION";
+        case LIBRARY -> runtimeSurface(kind);
+        case STATIC_WEB -> "STATIC_WEB";
+        case MOBILE_APP -> "MOBILE_APP";
+      };
+    }
     return switch (kind) {
       case EXISTING -> "EXISTING_REPOSITORY";
       case PYTHON -> "PYTHON_LIBRARY";
