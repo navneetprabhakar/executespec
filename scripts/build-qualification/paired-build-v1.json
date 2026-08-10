@@ -51,7 +51,7 @@
   ],
   "harness": {
     "path": "scripts/build-eval.sh",
-    "sha256": "efc1d60ff46177ffe03dd666cf18dbfe7d40db3aafa2d2ea96ce6c0e75ba9ddb"
+    "sha256": "2989b8778cb5e59e63442f345f823b46fb816818d5f74bedc3d674d1e7b18b9a"
   },
   "pairedEqualFields": [
     "runMode",
@@ -90,6 +90,8 @@
     "acceptanceCheckCount",
     "sharedKernelFlagEnabledAtSubmission",
     "releaseIdentityAuthority",
+    "attestedRunningSha",
+    "releaseIdentityReadAt",
     "generatedCodeReview"
   ],
   "requiredRolledBackEvidence": [

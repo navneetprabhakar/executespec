@@ -83,6 +83,13 @@ function validateAccepted(key, record, review, errors) {
   if (record.releaseIdentityAuthority !== "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA") {
     errors.push(`${key} lacks deployment-host RUNNING_SHA authority`);
   }
+  if (record.attestedRunningSha !== record.releaseSha || !/^[a-f0-9]{40}$/.test(record.attestedRunningSha || "")) {
+    errors.push(`${key} attested running SHA does not match its candidate release`);
+  }
+  if (typeof record.releaseIdentityReadAt !== "string"
+      || !/^\d{4}-\d{2}-\d{2}T.*Z$/.test(record.releaseIdentityReadAt)) {
+    errors.push(`${key} lacks a valid release-identity read timestamp`);
+  }
   if (record.initialFailureOutcome !== "FAILURE_OBSERVED"
       || typeof record.initialFailureCode !== "string" || !record.initialFailureCode.trim()) {
     errors.push(`${key} lacks the observed failure-first evidence required by the shared kernel`);
