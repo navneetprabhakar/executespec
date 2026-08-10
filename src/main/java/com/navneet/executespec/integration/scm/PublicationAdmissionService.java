@@ -16,10 +16,10 @@ import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.WorkflowConfigEvidence;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import lombok.RequiredArgsConstructor;
 
 /**
  * Final deterministic correctness admission shared by SCM publication and permanent deployment.
@@ -29,7 +29,6 @@ import lombok.RequiredArgsConstructor;
  * every user-approved continuation.
  */
 @Service
-@RequiredArgsConstructor
 public class PublicationAdmissionService {
 
   private final ValidationReportRepository validationReportRepository;
@@ -41,6 +40,55 @@ public class PublicationAdmissionService {
   private final RunEffectiveRouteService effectiveRoutes;
   private final DurableCorrectionLifecycle durableCorrections;
   private final RunWorkspaceAuthorityService workspaceAuthorities;
+  private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery;
+
+  @Autowired
+  public PublicationAdmissionService(
+      ValidationReportRepository validationReportRepository,
+      AgentTaskRepository taskRepository,
+      CorrectionWorkspaceTransaction workspaceGenerations,
+      AgentProperties agentProperties,
+      ObjectMapper objectMapper,
+      BrownfieldHttpContractGuard brownfieldHttpContractGuard,
+      RunEffectiveRouteService effectiveRoutes,
+      DurableCorrectionLifecycle durableCorrections,
+      RunWorkspaceAuthorityService workspaceAuthorities,
+      WorkspaceGenerationRecoveryService workspaceGenerationRecovery) {
+    this.validationReportRepository = validationReportRepository;
+    this.taskRepository = taskRepository;
+    this.workspaceGenerations = workspaceGenerations;
+    this.agentProperties = agentProperties;
+    this.objectMapper = objectMapper;
+    this.brownfieldHttpContractGuard = brownfieldHttpContractGuard;
+    this.effectiveRoutes = effectiveRoutes;
+    this.durableCorrections = durableCorrections;
+    this.workspaceAuthorities = workspaceAuthorities;
+    this.workspaceGenerationRecovery = workspaceGenerationRecovery;
+  }
+
+  /** Compatibility constructor for focused publication tests predating BUILD generations. */
+  public PublicationAdmissionService(
+      ValidationReportRepository validationReportRepository,
+      AgentTaskRepository taskRepository,
+      CorrectionWorkspaceTransaction workspaceGenerations,
+      AgentProperties agentProperties,
+      ObjectMapper objectMapper,
+      BrownfieldHttpContractGuard brownfieldHttpContractGuard,
+      RunEffectiveRouteService effectiveRoutes,
+      DurableCorrectionLifecycle durableCorrections,
+      RunWorkspaceAuthorityService workspaceAuthorities) {
+    this(
+        validationReportRepository,
+        taskRepository,
+        workspaceGenerations,
+        agentProperties,
+        objectMapper,
+        brownfieldHttpContractGuard,
+        effectiveRoutes,
+        durableCorrections,
+        workspaceAuthorities,
+        null);
+  }
 
   public Admission assertEligible(PipelineRun run) {
     if (run == null || run.getRunId() == null || run.getRunId().isBlank()) {
@@ -94,6 +142,21 @@ public class PublicationAdmissionService {
           null,
           null);
     }
+    try {
+      if (workspaceGenerationRecovery != null) {
+        workspaceGenerationRecovery.assertNoUnresolvedAttempt(run.getRunId());
+      }
+    } catch (RuntimeException unresolved) {
+      return blockedEligibility(
+          "WORKSPACE_GENERATION_UNRESOLVED",
+          "BUILD_GENERATION_RECOVERY",
+          "An incomplete BUILD generation still owns this run workspace",
+          false,
+          "Wait for BUILD generation recovery. Publication remains blocked until exact rollback or"
+              + " acceptance is proven.",
+          null,
+          null);
+    }
     String currentGeneration;
     try {
       currentGeneration = currentGeneration(run);
@@ -106,6 +169,48 @@ public class PublicationAdmissionService {
           "Restore or sync the run workspace, then regenerate validation evidence.",
           null,
           null);
+    }
+    java.util.Optional<String> acceptedCorrection;
+    try {
+      acceptedCorrection = durableCorrections.latestAcceptedGeneration(run.getRunId());
+    } catch (RuntimeException invalidCorrection) {
+      return blockedEligibility(
+          "CORRECTION_ACCEPTANCE_INVALID",
+          "CORRECTION_GENERATION_FRONTIER",
+          "The accepted correction generation is missing or malformed",
+          false,
+          "Recover or audit the durable correction receipt before publication.",
+          null,
+          currentGeneration);
+    }
+    if (acceptedCorrection.isPresent()) {
+      if (!acceptedCorrection.get().equals(currentGeneration)) {
+        return blockedEligibility(
+            "CORRECTION_GENERATION_FRONTIER_MISMATCH",
+            "CORRECTION_GENERATION_FRONTIER",
+            "The current workspace is not the exact accepted correction generation",
+            false,
+            "Restore the accepted correction generation and regenerate validation before"
+                + " publication.",
+            acceptedCorrection.get(),
+            currentGeneration);
+      }
+    } else {
+      try {
+        if (workspaceGenerationRecovery != null) {
+          workspaceGenerationRecovery.assertAcceptedFrontier(run.getRunId(), currentGeneration);
+        }
+      } catch (RuntimeException mismatch) {
+        return blockedEligibility(
+            "WORKSPACE_GENERATION_FRONTIER_MISMATCH",
+            "BUILD_GENERATION_FRONTIER",
+            "The current workspace is not the exact accepted BUILD generation",
+            false,
+            "Recover or roll back the unresolved generation and regenerate validation on the"
+                + " accepted frontier.",
+            null,
+            currentGeneration);
+      }
     }
     ValidationReport report = validationReportRepository.findByRunId(run.getRunId()).orElse(null);
     if (report == null) {

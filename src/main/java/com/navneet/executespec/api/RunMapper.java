@@ -59,6 +59,8 @@ public class RunMapper {
   private final com.navneet.executespec.billing.repository.RunQuotaRefundRepository
       runQuotaRefundRepository;
 
+  private final WorkspaceGenerationEvidenceProjection workspaceGenerationEvidenceProjection;
+
   public RunSummary toSummary(PipelineRun r) {
     return toSummary(r, null, null, null);
   }
@@ -249,6 +251,10 @@ public class RunMapper {
     // Validation report scoring snapshot — mirrored into RunDetail so UI doesn't
     // need a second request for the headline verifiedScore / accuracyScore.
     ValidationReport report = validationReportRepository.findByRunId(r.getRunId()).orElse(null);
+    List<RunDetail.WorkspaceGenerationAttemptEvidence> generationAttempts =
+        workspaceGenerationEvidenceProjection == null
+            ? List.of()
+            : workspaceGenerationEvidenceProjection.forRun(r.getRunId());
     // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
@@ -378,6 +384,16 @@ public class RunMapper {
             .routePinned(r.isRoutePinned())
             .harnessVersion(r.getHarnessVersion())
             .runMode(r.getRunMode())
+            .acceptedWorkspaceGeneration(r.getAcceptedWorkspaceGeneration())
+            .acceptedTaskIndex(r.getAcceptedTaskIndex())
+            .acceptedGenerationAttemptId(
+                r.getAcceptedGenerationAttemptId() == null
+                    ? null
+                    : r.getAcceptedGenerationAttemptId().toString())
+            .acceptedCheckpointKind(r.getAcceptedCheckpointKind())
+            .acceptedCheckpointDigest(r.getAcceptedCheckpointDigest())
+            .acceptedCheckpointCompletedAt(r.getAcceptedCheckpointCompletedAt())
+            .workspaceGenerationAttempts(generationAttempts)
             .triggeredByFinding(r.getTriggeredByFinding())
             .isRetry(r.getSourceRunId() != null)
             .sourceRunId(r.getSourceRunId())

@@ -32,6 +32,7 @@ import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.RunChangeEvidenceService;
 import com.navneet.executespec.router.AgentTier;
@@ -66,27 +67,15 @@ import lombok.extern.slf4j.Slf4j;
  *       hint
  *   <li>Invoke {@link WorkerAgent} with the composed prompts and the run's ExecutionContext
  *       (substituting the task ID)
- *   <li>If worker didn't reach {@code COMPLETED}: record {@code WORKER_FAILED}, continue to next
- *       task (current policy — Phase 5 baseline. A future supervisor could upgrade to ABORT on
- *       catastrophic failures.)
+ *   <li>If worker didn't reach {@code COMPLETED}: record {@code WORKER_FAILED} and stop before a
+ *       dependent task can consume the unaccepted workspace generation.
  *   <li>Worker completed → run smoke test via {@link BuildProjectTool} using the plan's {@code
  *       buildCommand}
  *   <li>Smoke test passed → {@code SUCCESS}, next task
  *   <li>Smoke test failed → ONE retry: re-invoke worker with the build error injected into the user
  *       message
- *   <li>Retry passed → {@code SUCCESS_AFTER_RETRY}; retry failed → {@code COMPLETED_WITH_WARNING},
- *       continue anyway (reviewer phase — Phase 7 — will catch residual issues)
+ *   <li>Retry passed → {@code SUCCESS_AFTER_RETRY}; retry failure stops before the next task.
  * </ol>
- *
- * <p>Phase 5 baseline scope:
- *
- * <ul>
- *   <li>Rule-based failure handling (retry once, then warn). A future TaskSupervisorV2 can add
- *       LLM-tier triage (CASCADING / FIXABLE / STRUCTURAL) for smarter decisions.
- *   <li>No SSE events, no Redis context persistence, no cross-task context sharing.
- *   <li>Smoke tests default to the plan's {@code smokeTestStrategy} (currently only BUILD is fully
- *       wired — PREVIEW_HEALTH / TEST_SUITE planned for later phases).
- * </ul>
  */
 @Service
 @Slf4j
@@ -379,6 +368,8 @@ to boot — skip it for those.""";
   private com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
       brownfieldHttpContractGuard;
 
+  private BuildTaskGenerationCoordinator buildTaskGenerations;
+
   /**
    * Legacy construction seam retained for focused unit tests. Production uses the fully injected
    * constructor below and always supplies {@link TaskStatusPersistenceService}.
@@ -487,7 +478,8 @@ to boot — skip it for those.""";
       com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService,
       RunChangeEvidenceService runChangeEvidenceService,
       com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
-          brownfieldHttpContractGuard) {
+          brownfieldHttpContractGuard,
+      BuildTaskGenerationCoordinator buildTaskGenerations) {
     this(
         worker,
         buildProjectTool,
@@ -511,6 +503,7 @@ to boot — skip it for those.""";
     this.initialRoutingService = initialRoutingService;
     this.runChangeEvidenceService = runChangeEvidenceService;
     this.brownfieldHttpContractGuard = brownfieldHttpContractGuard;
+    this.buildTaskGenerations = buildTaskGenerations;
   }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
@@ -664,7 +657,7 @@ to boot — skip it for those.""";
     List<TaskOutcome> outcomes = new ArrayList<>();
     Plan plan = req.plan();
     String runId = req.runContext().runId();
-    boolean abortedByGoalDecision = false;
+    boolean abortedByExecutionPolicy = false;
     boolean cancelled = false;
     continuationConfirmationRequiredByRun.put(
         runId,
@@ -754,45 +747,7 @@ to boot — skip it for those.""";
         //   - run fresh
         TaskOutcome outcome;
         try {
-          if (resume != null) {
-            ResumeAction action =
-                resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
-            ProviderModelOverride approvedRoute =
-                providerModelOverrideFor(resume, runId, task.id());
-            switch (action.kind()) {
-              case SKIP_TERMINAL -> {
-                log.info(
-                    "Executor RESUME skip task={} status={} (already terminal pre-resume)",
-                    task.id(),
-                    action.persistedStatus());
-                outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
-              }
-              case RESUME_FROM_SNAPSHOT -> {
-                log.info(
-                    "Executor RESUME task={} from snapshot iter={}",
-                    task.id(),
-                    action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-                outcome =
-                    executeOne(
-                        task, plan, req, isFinalTask, action.snapshot(), approvedRoute, runJournal);
-              }
-              case RUN_FRESH ->
-                  outcome =
-                      executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
-              default ->
-                  outcome =
-                      executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
-            }
-          } else {
-            outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-          }
-
-          // A continuation action is another provider dispatch. Re-check the durable fence after
-          // the primary task and before the continuation policy can spend again.
-          throwIfCancellationRequested(runId, task.id());
-          if (resume == null) {
-            outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
-          }
+          outcome = executeTaskGeneration(i, task, plan, req, resume, isFinalTask, runJournal);
         } catch (CancellationException cancelledTask) {
           // A raw thread interrupt/provider unwind is not proof that the durable run was
           // cancelled. Leave the task non-terminal so startup recovery can resume it. Only the
@@ -824,10 +779,6 @@ to boot — skip it for those.""";
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
 
-        // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
-        // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
-        gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
-
         GoalDonenessDecision goalDecision = outcome.goalDonenessDecision();
         if (shouldEnforceGoalStop(goalDecision)) {
           int remaining = taskCount - i - 1;
@@ -853,14 +804,26 @@ to boot — skip it for those.""";
                       + " remaining task"
                       + (remaining == 1 ? "" : "s")));
           appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
-          abortedByGoalDecision = true;
+          abortedByExecutionPolicy = true;
           break;
+        }
+
+        int remaining = taskCount - i - 1;
+        if (BuildTaskGenerationCoordinator.emitStopIfUnaccepted(
+            outcome, runId, task, remaining, broadcaster)) {
+          if (remaining > 0) appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
+          abortedByExecutionPolicy = true;
+          break;
+        }
+
+        if (buildTaskGenerations == null) {
+          gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
         }
       }
 
       ExecutionResult result =
           ExecutionResultSummarizer.summarize(
-              outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision, cancelled);
+              outcomes, System.currentTimeMillis() - runStart, abortedByExecutionPolicy, cancelled);
       log.info(
           "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
               + " latency={}ms",
@@ -921,6 +884,68 @@ to boot — skip it for those.""";
     }
     throwIfCancellationRequested(runId, taskId);
     return result;
+  }
+
+  private TaskOutcome executeTaskGeneration(
+      int taskIndex,
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      ResumeRequest resume,
+      boolean isFinalTask,
+      List<String> runJournal) {
+    String runId = req.runContext().runId();
+    ResumeAction resumeAction =
+        resume == null
+            ? new ResumeAction(ResumeKind.RUN_FRESH, null, null)
+            : resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
+    if (resumeAction.kind() == ResumeKind.SKIP_TERMINAL) {
+      log.info(
+          "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+          task.id(),
+          resumeAction.persistedStatus());
+      return synthesizeSkippedOutcome(task, resumeAction.persistedStatus());
+    }
+
+    ProviderModelOverride approvedRoute =
+        resume == null ? null : providerModelOverrideFor(resume, runId, task.id());
+    java.util.function.Supplier<TaskOutcome> dispatch =
+        () -> {
+          TaskOutcome outcome;
+          if (resumeAction.kind() == ResumeKind.RESUME_FROM_SNAPSHOT) {
+            log.info(
+                "Executor RESUME task={} from snapshot iter={}",
+                task.id(),
+                resumeAction.snapshot() == null ? "n/a" : resumeAction.snapshot().iteration());
+            outcome =
+                executeOne(
+                    task,
+                    plan,
+                    req,
+                    isFinalTask,
+                    resumeAction.snapshot(),
+                    approvedRoute,
+                    runJournal);
+          } else {
+            outcome = executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
+          }
+          throwIfCancellationRequested(runId, task.id());
+          return resume == null
+              ? maybeActOnContinuation(task, plan, req, isFinalTask, outcome)
+              : outcome;
+        };
+
+    if (buildTaskGenerations == null
+        || RunWorkspaceAuthorityService.currentCorrectionToolLease() != null) {
+      return dispatch.get();
+    }
+    return buildTaskGenerations.execute(
+        taskIndex,
+        task,
+        plan,
+        req,
+        dispatch,
+        (status, reason) -> persistTaskStatus(runId, task.id(), status, reason));
   }
 
   private void recordTaskOutcomeMetric(
@@ -1812,7 +1837,10 @@ to boot — skip it for those.""";
       List<String> runJournal) {
     long taskStart = System.currentTimeMillis();
     rememberRecoveryAttempt(req.runContext().runId(), task.id());
-    ExecutionContext taskCtx = req.runContext().child(task.id());
+    ExecutionContext taskCtx =
+        buildTaskGenerations == null
+            ? req.runContext().child(task.id())
+            : buildTaskGenerations.childContext(req.runContext(), task.id());
     String requestedProvider =
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
@@ -1978,14 +2006,8 @@ to boot — skip it for those.""";
             .strictProvider(providerModelOverride != null || Boolean.TRUE.equals(req.routePinned()))
             .zeroWriteSalvageAllowed(providerModelOverride == null)
             .mutationChurnForceAfter(maxEditChurn())
-            // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
-            // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
-            // the smoke gate at executeOne's multiTask check) so an intermediate task isn't blocked
-            // by a later task's not-yet-implemented tests. Decoupled from V217 (runner called
-            // directly), no model-visible schema change. Byte-identical until the flag flips.
             .verifyBeforeComplete(
-                isFinalTask
-                    && featureFlagService != null
+                featureFlagService != null
                     && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
             // progress-v2 (V255, default OFF): novelty-based progress + repetition-based force +
             // bounded text-only retries; the v1 write-only engine is byte-identical when off.
@@ -2147,50 +2169,17 @@ to boot — skip it for those.""";
     if (!req.enableSmokeTests()) {
       TaskOutcome.Status status =
           softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
+      String persistedStatus = softCompletion ? "PARTIAL" : acceptancePendingStatus("COMPLETE");
       log.info(
           "Executor task={} {}{}",
           task.id(),
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
           " (smoke tests disabled)");
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      persistTaskStatus(runId, task.id(), persistedStatus, softWarnReason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
-      return TaskOutcome.builder()
-          .taskId(task.id())
-          .taskTitle(task.title())
-          .status(status)
-          .workerOutcome(primary)
-          .totalLatencyMs(System.currentTimeMillis() - taskStart)
-          .toolCallsDispatched(primary.toolCallsDispatched())
-          .dispatchedProvider(cfg.provider)
-          .dispatchedModel(cfg.model)
-          .goalDonenessDecision(goalDecision.doneness())
-          .continuationDecision(goalDecision.continuation())
-          .build();
-    }
-
-    // Skip per-task smoke for non-final tasks in multi-task plans:
-    // intermediate tasks (T1 scaffold, T2 partial wiring, ...) cannot
-    // possibly satisfy a full project build because later tasks haven't
-    // landed yet. The reviewer's final build at the end of the run is
-    // the authoritative gate. This eliminates false-negative PARTIAL
-    // statuses on tasks whose code is later wired up correctly.
-    boolean multiTask = plan.tasks().size() > 1;
-    if (multiTask && !isFinalTask) {
-      TaskOutcome.Status status =
-          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
-      log.info(
-          "Executor task={} {} (intermediate smoke skipped — multi-task plan, final task +"
-              + " reviewer are authoritative)",
-          task.id(),
-          softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS");
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      GoalTaskDecision goalDecision =
-          emitGoalDecision(
-              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model, true);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2209,14 +2198,15 @@ to boot — skip it for those.""";
     if (smoke.passed()) {
       TaskOutcome.Status status =
           softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
+      String persistedStatus = softCompletion ? "PARTIAL" : acceptancePendingStatus("COMPLETE");
       log.info(
           "Executor task={} {} (smoke exit={}, took {}ms)",
           task.id(),
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
           smoke.exitCode(),
           smoke.latencyMs());
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      persistTaskStatus(runId, task.id(), persistedStatus, softWarnReason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model);
@@ -2440,8 +2430,9 @@ to boot — skip it for those.""";
     SmokeTestResult retrySmoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (retrySmoke.passed()) {
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
-      persistTaskStatus(runId, task.id(), "COMPLETE");
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      String persistedStatus = acceptancePendingStatus("COMPLETE");
+      persistTaskStatus(runId, task.id(), persistedStatus);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId,
@@ -2571,8 +2562,9 @@ to boot — skip it for those.""";
         SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
         if (retry2Smoke.passed()) {
           log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
-          persistTaskStatus(runId, task.id(), "COMPLETE");
-          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          String persistedStatus = acceptancePendingStatus("COMPLETE");
+          persistTaskStatus(runId, task.id(), persistedStatus);
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
           GoalTaskDecision goalDecision =
               emitGoalDecision(
                   runId,
@@ -4213,6 +4205,12 @@ to boot — skip it for those.""";
 
   public void persistTaskStatus(String runId, String taskIdShort, String status) {
     persistTaskStatus(runId, taskIdShort, status, null);
+  }
+
+  private String acceptancePendingStatus(String terminalStatus) {
+    return buildTaskGenerations == null
+        ? terminalStatus
+        : buildTaskGenerations.pendingStatus(terminalStatus);
   }
 
   /**

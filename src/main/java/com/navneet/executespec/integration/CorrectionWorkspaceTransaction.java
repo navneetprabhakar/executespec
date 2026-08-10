@@ -111,6 +111,30 @@ public class CorrectionWorkspaceTransaction {
         GENERATION_PREIMAGE_VERSION + String.join("\n", trees));
   }
 
+  /**
+   * Captures the current trees while retaining the checkpoint's exact repository identities and
+   * original HEAD fence. This is the archive boundary: callers receive the concrete candidate tree
+   * objects, not merely their aggregate generation digest.
+   */
+  public Checkpoint snapshotCurrent(Checkpoint checkpoint, Runnable authorityFence) {
+    Objects.requireNonNull(checkpoint, "checkpoint");
+    Objects.requireNonNull(authorityFence, "authorityFence");
+    List<RepositoryCheckpoint> current = new ArrayList<>();
+    for (RepositoryCheckpoint repository : checkpoint.repositories()) {
+      authorityFence.run();
+      assertHeadUnchanged(repository);
+      current.add(
+          new RepositoryCheckpoint(
+              repository.repository(),
+              repository.head(),
+              writeTree(
+                  repository.repository(),
+                  checkpoint.nestedRepositoriesOf(repository),
+                  authorityFence)));
+    }
+    return new Checkpoint(checkpoint.workspaceRoot(), current);
+  }
+
   /** Accepts the current workspace only when it differs from no uncommitted caller-owned index. */
   public Accepted accept(Checkpoint checkpoint) {
     String generation = currentGeneration(checkpoint);

@@ -67,9 +67,12 @@ class FlywayMigrationInventoryTest {
     // the exact inventory to 357. V372 binds cost history to the exact effective route and task
     // complexity shape, bringing the exact inventory to 358. V373 binds existing-PR runs to their
     // immutable checkout branch, repository, pull request, and admitted head SHA, bringing the
-    // exact inventory to 359.
-    assertThat(migrations).hasSize(359);
-    assertThat(migrations.getLast().version()).isEqualTo("373");
+    // exact inventory to 359. V374 introduces the durable workspace-generation transaction,
+    // immutable verification receipts, and the accepted-generation run frontier, bringing the
+    // exact inventory to 360. V375 preserves original BUILD rejection evidence while recording
+    // recovery failures separately, bringing the exact inventory to 361.
+    assertThat(migrations).hasSize(361);
+    assertThat(migrations.getLast().version()).isEqualTo("375");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

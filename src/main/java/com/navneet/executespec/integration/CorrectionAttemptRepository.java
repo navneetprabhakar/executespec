@@ -16,6 +16,9 @@ interface CorrectionAttemptRepository extends JpaRepository<CorrectionAttempt, U
   Optional<CorrectionAttempt> findFirstByRunIdAndPhaseInOrderByCreatedAtDesc(
       String runId, List<String> phases);
 
+  Optional<CorrectionAttempt> findFirstByRunIdAndPhaseOrderByCreatedAtDesc(
+      String runId, String phase);
+
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @org.springframework.transaction.annotation.Transactional
   @Query(

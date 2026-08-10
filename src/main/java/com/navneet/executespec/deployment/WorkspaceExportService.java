@@ -16,9 +16,13 @@ import java.util.zip.ZipOutputStream;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
 import com.navneet.executespec.deployment.preview.PreviewProjectType;
+import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
+import com.navneet.executespec.integration.DurableCorrectionLifecycle;
 import com.navneet.executespec.security.ArtifactPublicationGuard;
+import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService;
 
 import org.springframework.stereotype.Service;
 
@@ -43,6 +47,9 @@ public class WorkspaceExportService {
   private final DevDockerfileGenerator dockerfileGen;
   private final WorkspaceRestoreService restoreService;
   private final ArtifactPublicationGuard publicationGuard;
+  private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery;
+  private final DurableCorrectionLifecycle durableCorrections;
+  private final CorrectionWorkspaceTransaction workspaceGenerations;
 
   /**
    * Excluded patterns — internal agent machinery, build artifacts, and VCS metadata that don't
@@ -97,6 +104,13 @@ public class WorkspaceExportService {
   public static final class ExportTooLargeException extends IOException {
     ExportTooLargeException(String message) {
       super(message);
+    }
+  }
+
+  /** BUILD exports fail closed until the local bytes equal the durable accepted frontier. */
+  public static final class UnacceptedWorkspaceException extends IllegalStateException {
+    UnacceptedWorkspaceException(String message, Throwable cause) {
+      super(message, cause);
     }
   }
 
@@ -159,7 +173,7 @@ public class WorkspaceExportService {
    * @throws IOException on filesystem errors
    */
   public Path exportWorkspace(String runId) throws IOException {
-    Path workspacePath = workspaceRoot(runId);
+    Path workspacePath = acceptedExportRoot(runId);
     if (!Files.isDirectory(workspacePath)) {
       // Workspace not on local disk — check GCS archive
       return stateStore
@@ -261,7 +275,7 @@ public class WorkspaceExportService {
    * responsible for cleanup (the controller registers it for deletion on exit).
    */
   public Path exportAsRepoZip(String runId) throws IOException {
-    Path resolved = workspaceRoot(runId);
+    Path resolved = acceptedExportRoot(runId);
     if (!Files.isDirectory(resolved)) {
       // Try restoring from GCS before giving up
       resolved = restoreService.ensureWorkspaceAvailable(runId);
@@ -356,6 +370,37 @@ public class WorkspaceExportService {
         runId.substring(0, Math.min(8, runId.length())),
         humanReadableSize(Files.size(zipPath)));
     return zipPath;
+  }
+
+  /**
+   * Default customer/retention exports of BUILD runs may consume only the exact accepted task
+   * prefix. Recovery is attempted first so a replacement node can reconstruct that prefix from its
+   * immutable generation archive; unresolved, missing, or mismatched proof blocks export.
+   */
+  private Path acceptedExportRoot(String runId) {
+    Path root = workspaceRoot(runId);
+    PipelineRun run = stateStore.findRun(runId).orElse(null);
+    if (run == null || !RunMode.BUILD.equalsIgnoreCase(run.getRunMode())) return root;
+    try {
+      durableCorrections.recoverRunOrThrow(runId);
+      java.util.Optional<String> acceptedCorrection =
+          durableCorrections.latestAcceptedGeneration(runId);
+      if (acceptedCorrection.isPresent()) {
+        Path correctedRoot =
+            Files.isDirectory(root) ? root : restoreService.ensureWorkspaceAvailable(runId);
+        String current = workspaceGenerations.captureGeneration(correctedRoot);
+        if (!acceptedCorrection.get().equals(current)) {
+          throw new IllegalStateException("CORRECTION_GENERATION_FRONTIER_MISMATCH");
+        }
+        return correctedRoot;
+      }
+      workspaceGenerationRecovery.recoverRunOrThrow(runId);
+      workspaceGenerationRecovery.assertAcceptedFrontier(runId, root);
+      return root;
+    } catch (RuntimeException unaccepted) {
+      throw new UnacceptedWorkspaceException(
+          "WORKSPACE_EXPORT_ACCEPTED_FRONTIER_UNPROVEN: " + unaccepted.getMessage(), unaccepted);
+    }
   }
 
   private String generateGitignore(Path workspace) {

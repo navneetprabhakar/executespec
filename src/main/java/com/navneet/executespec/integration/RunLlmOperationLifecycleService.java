@@ -41,6 +41,21 @@ public class RunLlmOperationLifecycleService {
     return claim(context, runId, "execution", "RUN_EXECUTION", provider + "|" + model);
   }
 
+  /** Claims one independently fenced BUILD task under the run's durable LLM context. */
+  public PhaseLease claimBuildTask(
+      ExecutionContext context,
+      String runId,
+      String taskId,
+      int taskIndex,
+      String immutableIdentity) {
+    return claim(
+        context,
+        runId,
+        "build-task:" + taskId,
+        "RUN_BUILD_TASK",
+        taskIndex + "|" + taskId + "|" + immutableIdentity);
+  }
+
   public PhaseLease claimReview(
       ExecutionContext context, String runId, String provider, String model) {
     return claim(context, runId, "review", "RUN_REVIEW", provider + "|" + model);
@@ -216,6 +231,11 @@ public class RunLlmOperationLifecycleService {
     if (!coordinator.heartbeat(lease.delegate(), LEASE_DURATION)) {
       throw new IllegalStateException("Run operation heartbeat lost its lease: " + lease.phase());
     }
+  }
+
+  public LlmExecutionOperationCoordinator.LeaseIdentity identity(PhaseLease lease) {
+    if (lease == null) throw new IllegalArgumentException("lease required");
+    return coordinator.identity(lease.delegate());
   }
 
   public void closeFromPersistedState(String runId, PhaseLease lease) {

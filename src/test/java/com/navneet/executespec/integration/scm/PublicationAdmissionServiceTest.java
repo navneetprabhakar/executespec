@@ -3,6 +3,7 @@ package com.navneet.executespec.integration.scm;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -32,6 +33,7 @@ import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +61,8 @@ class PublicationAdmissionServiceTest {
       mock(RunWorkspaceAuthorityService.class);
   private final RunWorkspaceAuthorityService.Lease publicationLease =
       mock(RunWorkspaceAuthorityService.Lease.class);
+  private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery =
+      mock(WorkspaceGenerationRecoveryService.class);
   private final PublicationAdmissionService service =
       new PublicationAdmissionService(
           reports,
@@ -69,7 +73,8 @@ class PublicationAdmissionServiceTest {
           brownfieldGuard,
           effectiveRoutes,
           durableCorrections,
-          workspaceAuthorities);
+          workspaceAuthorities,
+          workspaceGenerationRecovery);
 
   @BeforeEach
   void setUp() {
@@ -86,6 +91,36 @@ class PublicationAdmissionServiceTest {
   @Test
   void admitsFreshBuildAndVerifiedTests() {
     assertThat(service.assertEligible(run()).workspaceGeneration()).isEqualTo(GENERATION);
+    verify(workspaceGenerationRecovery).assertAcceptedFrontier(RUN_ID, GENERATION);
+  }
+
+  @Test
+  void acceptedCorrectionSupersedesInitialBuildFrontierForPublication() {
+    when(durableCorrections.latestAcceptedGeneration(RUN_ID)).thenReturn(Optional.of(GENERATION));
+
+    assertThat(service.evaluate(run()).eligible()).isTrue();
+
+    verify(workspaceGenerationRecovery, never()).assertAcceptedFrontier(anyString(), anyString());
+  }
+
+  @Test
+  void workspaceMustEqualLatestAcceptedCorrectionGeneration() {
+    when(durableCorrections.latestAcceptedGeneration(RUN_ID))
+        .thenReturn(Optional.of("b".repeat(64)));
+
+    assertBlocked("CORRECTION_GENERATION_FRONTIER_MISMATCH");
+
+    verify(workspaceGenerationRecovery, never()).assertAcceptedFrontier(anyString(), anyString());
+  }
+
+  @Test
+  void malformedAcceptedCorrectionFailsClosed() {
+    when(durableCorrections.latestAcceptedGeneration(RUN_ID))
+        .thenThrow(new IllegalStateException("CORRECTION_ACCEPTED_GENERATION_INVALID"));
+
+    assertBlocked("CORRECTION_ACCEPTANCE_INVALID");
+
+    verify(workspaceGenerationRecovery, never()).assertAcceptedFrontier(anyString(), anyString());
   }
 
   @Test

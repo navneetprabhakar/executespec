@@ -137,6 +137,8 @@ public class RunOrchestrator implements RunControlPort {
   private final OutlinePlannerAgent outlinePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
   private final SequentialExecutor executor;
+  private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+      workspaceGenerationRecovery;
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
@@ -2216,30 +2218,10 @@ public class RunOrchestrator implements RunControlPort {
 
       op = runOperationLifecycle.claimReview(baseRootCtx, runId, provider, model);
       ExecutionContext reviewRootCtx = op.context();
-      // Run deterministic formatters against the workspace before the LLM reviewer sees it.
-      // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
-      // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
-      // "fix this whitespace" noise per task. Gated by feature flag so ops can disable in
-      // environments without prettier / black / gofmt on PATH (the per-tool timeout already
-      // makes failure non-fatal, but the flag short-circuits the whole pass when known broken).
-      if (featureFlagService.isEnabled("lint.autofix.enabled")) {
-        try {
-          com.navneet.executespec.lint.LintPass.LintReport lintReport =
-              lintPass.run(runId, reviewRootCtx.workspaceRoot());
-          if (lintReport.changedAnything()) {
-            log.info("RunOrchestrator run={} lint auto-fix: {}", runId, lintReport.summary());
-            broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
-          } else if (!lintReport.skipped()) {
-            log.debug("RunOrchestrator run={} lint auto-fix: no changes", runId);
-          }
-        } catch (Exception e) {
-          // Never abort the run on a formatter error — reviewer still runs against unmodified code.
-          log.warn(
-              "RunOrchestrator run={} lint auto-fix failed (continuing): {}",
-              runId,
-              e.getMessage());
-        }
-      }
+      // The accepted task frontier is immutable at this point. Post-task formatter writes used to
+      // mutate it outside any generation transaction, making the review/report evidence stale by
+      // construction. Formatting must happen inside a task generation or a durable correction.
+      workspaceGenerationRecovery.assertAcceptedFrontier(runId, reviewRootCtx.workspaceRoot());
 
       persistenceWriter.updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
@@ -2299,12 +2281,14 @@ public class RunOrchestrator implements RunControlPort {
                         RunReviewerScope.repoRoots(projectRepoService, projectId, selectedRepoIds))
                     .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
                     .allowBuildManifestCreation(false)
+                    .readOnly(true)
                     .originalGoal(userRequest)
                     .requirements(plan.requirements())
                     .planAdvisories(
                         com.navneet.executespec.agent.TaskExpanderAgent
                             .advisoryPlanContractViolations(plan))
                     .build());
+        workspaceGenerationRecovery.assertAcceptedFrontier(runId, reviewRootCtx.workspaceRoot());
         persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
         RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);

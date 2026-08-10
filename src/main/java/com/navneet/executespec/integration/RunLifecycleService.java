@@ -337,16 +337,20 @@ public class RunLifecycleService {
     run.setPauseCount(run.getPauseCount() + 1);
     runRepo.save(run);
 
-    // Interrupt the pipeline thread. The pipeline isn't fully cancellation-aware at every step,
-    // but its terminal writes are no-ops because the run is already PAUSED. Files already written
-    // to <workspace>/<runId>/ stay on disk — that's what the resume path picks up.
+    // Interrupt the pipeline thread. V374 dispatch fences observe PAUSED before another provider
+    // or tool call; the in-flight candidate rolls back while the last accepted generation remains
+    // the resume baseline.
     java.util.concurrent.Future<?> future = controlPort.removeActiveRun(runId);
     if (future != null) future.cancel(true);
 
     broadcaster.emit(runId, RunEvent.runStatus(runId, "PAUSED"));
     broadcaster.emit(
         runId,
-        RunEvent.log(runId, "pause", "Run paused. Workspace files preserved. Resume to continue."));
+        RunEvent.log(
+            runId,
+            "pause",
+            "Run paused. The last accepted workspace generation is preserved; in-flight changes"
+                + " are rolled back before resume."));
     return true;
   }
 
@@ -1154,6 +1158,14 @@ public class RunLifecycleService {
     if (!java.util.List.of("PARTIAL", "FAILED", "COMPLETE").contains(status)) {
       throw new IllegalStateException(
           "Task retry requires PARTIAL / FAILED / COMPLETE run (current: " + status + ")");
+    }
+    if (override == null
+        && "COMPLETE".equals(task.getStatus())
+        && run.getAcceptedGenerationAttemptId() != null) {
+      throw new IllegalStateException(
+          "This task is already part of the accepted BUILD prefix and cannot be retried in place. "
+              + "Use an approved correction or start a fresh run so downstream acceptance evidence "
+              + "is not silently invalidated.");
     }
     // Execution locality is run authority, not a per-dispatch default. A run the customer submitted
     // as local-hands must never be retried through the server-side worker/tool path: that would

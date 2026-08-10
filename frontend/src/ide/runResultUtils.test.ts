@@ -208,6 +208,27 @@ describe('publicationTrustFacts', () => {
       totalInputTokens: 100,
       totalOutputTokens: 20,
       actualCostUsd: 0.25,
+      runMode: 'BUILD',
+      acceptedWorkspaceGeneration: 'b'.repeat(64),
+      acceptedTaskIndex: 0,
+      acceptedGenerationAttemptId: '12345678-1234-1234-1234-123456789012',
+      acceptedCheckpointKind: 'GCS',
+      acceptedCheckpointDigest: 'c'.repeat(64),
+      acceptedCheckpointCompletedAt: '2026-08-10T12:00:00Z',
+      workspaceGenerationAttempts: [
+        {
+          attemptId: '12345678-1234-1234-1234-123456789012',
+          taskId: 'T1',
+          taskIndex: 0,
+          attemptNumber: 1,
+          attemptKind: 'BUILD_TASK',
+          state: 'ACCEPTED',
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          createdAt: '2026-08-10T11:59:00Z',
+          resolvedAt: '2026-08-10T12:00:00Z',
+        },
+      ],
     } as unknown as RunDetail;
     const publication = {
       eligible: true,
@@ -225,6 +246,8 @@ describe('publicationTrustFacts', () => {
 
     expect(Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))).toMatchObject({
       'Tasks terminal': '1/1 terminal · 1/1 completed',
+      'Accepted BUILD frontier': 'Task 1 · bbbbbbbbbbbb · receipt 12345678 · GCS cccccccccccc',
+      'BUILD generation attempts': '1 recent · 0 rejected · 0 unresolved',
       'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
       'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
       Build: 'Passed',
@@ -268,6 +291,35 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'Tests')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
+  });
+
+  it('surfaces rejected and unresolved BUILD generation evidence independently of the frontier', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-recovery',
+          taskId: 'T2',
+          taskIndex: 1,
+          attemptNumber: 2,
+          attemptKind: 'BUILD_TASK',
+          state: 'RECOVERY_FAILED',
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          rejectedDiffDigest: 'c'.repeat(64),
+          failureCode: 'TASK_VERIFICATION_REJECTED',
+          recoveryFailureCode: 'ROLLBACK_PROOF_FAILED',
+          createdAt: '2026-08-10T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'BUILD generation attempts')).toMatchObject({
+      value:
+        '1 recent · 1 rejected · 1 unresolved · latest ROLLBACK_PROOF_FAILED · diff cccccccccccc',
+      kind: 'bad',
+    });
   });
 
   it('treats a verified green suite with explicit skips as passing evidence', () => {

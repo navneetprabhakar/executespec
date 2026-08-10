@@ -301,6 +301,16 @@ export function publicationTrustFacts(
     testsPassed > 0 &&
     testsSkipped >= 0 &&
     testsPassed + testsSkipped === testsTotal;
+  const generationAttempts = run.workspaceGenerationAttempts ?? [];
+  const rejectedGenerations = generationAttempts.filter((attempt) =>
+    ['ROLLED_BACK', 'RECOVERY_FAILED'].includes(attempt.state),
+  );
+  const unresolvedGenerations = generationAttempts.filter(
+    (attempt) => !['ACCEPTED', 'ROLLED_BACK'].includes(attempt.state),
+  );
+  const latestGenerationFailure = generationAttempts.find(
+    (attempt) => attempt.failureCode || attempt.recoveryFailureCode,
+  );
 
   const facts: PublicationTrustFact[] = [
     {
@@ -312,6 +322,40 @@ export function publicationTrustFacts(
           : failedOrBlocked > 0
             ? 'bad'
             : 'warn',
+    },
+    {
+      label: 'Accepted BUILD frontier',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : run.acceptedWorkspaceGeneration && run.acceptedGenerationAttemptId
+            ? `Task ${(run.acceptedTaskIndex ?? -1) + 1} · ${run.acceptedWorkspaceGeneration.slice(0, 12)} · receipt ${run.acceptedGenerationAttemptId.slice(0, 8)}${run.acceptedCheckpointKind && run.acceptedCheckpointDigest ? ` · ${run.acceptedCheckpointKind} ${run.acceptedCheckpointDigest.slice(0, 12)}` : ''}`
+            : 'No durable accepted generation',
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : run.acceptedWorkspaceGeneration && run.acceptedGenerationAttemptId
+            ? 'ok'
+            : 'bad',
+    },
+    {
+      label: 'BUILD generation attempts',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : generationAttempts.length === 0
+            ? 'No generation-attempt evidence'
+            : `${generationAttempts.length} recent · ${rejectedGenerations.length} rejected · ${unresolvedGenerations.length} unresolved${latestGenerationFailure ? ` · latest ${latestGenerationFailure.recoveryFailureCode || latestGenerationFailure.failureCode} · diff ${latestGenerationFailure.rejectedDiffDigest?.slice(0, 12) || 'unavailable'}` : ''}`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : unresolvedGenerations.length > 0
+            ? 'bad'
+            : rejectedGenerations.length > 0
+              ? 'warn'
+              : generationAttempts.length > 0
+                ? 'ok'
+                : 'bad',
     },
     {
       label: 'Approved correction route',

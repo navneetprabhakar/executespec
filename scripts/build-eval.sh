@@ -35,7 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CASES_DIR="${SCRIPT_DIR}/build-eval-cases"
-OUT_DIR="${SCRIPT_DIR}/build-eval-results"
+OUT_DIR="${OUT_DIR:-${SCRIPT_DIR}/build-eval-results}"
 WORKSPACE_ROOT="${ROOT_DIR}/workspace"
 mkdir -p "$OUT_DIR"
 # Keep a self-contained archive for every completed BUILD run.  The held-out evaluator must not
@@ -49,12 +49,17 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-revalidate-ent@test.local}"
 PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 PROVIDER="${PROVIDER:-anthropic}"
+MODEL="${MODEL:-}"
 TIMEOUT="${TIMEOUT:-1200}"
+RELEASE_SHA="${RELEASE_SHA:-}"
+QUALIFICATION_ARM="${QUALIFICATION_ARM:-}"
+USER_COST_CAP="${USER_COST_CAP:-}"
 ONLY_CASE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --provider) PROVIDER="$2"; shift 2 ;;
+    --model)    MODEL="$2"; shift 2 ;;
     --case)     ONLY_CASE="$2"; shift 2 ;;
     --timeout)  TIMEOUT="$2"; shift 2 ;;
     -h|--help)  sed -n '3,33p' "$0"; exit 0 ;;
@@ -104,20 +109,26 @@ run_case() {
   local spec_file="${case_dir}/spec.md"
   [[ -f "$spec_file" ]] || { log "skip $id: no spec.md"; return 0; }
   local band; band="$(cat "${case_dir}/band" 2>/dev/null || echo unknown)"
-  log "submit  $id (band=$band, provider=$PROVIDER)"
+  log "submit  $id (band=$band, provider=$PROVIDER, model=${MODEL:-tier-default})"
 
   local body run_id
   body=$(jq -n --arg req "$(cat "$spec_file")" --arg prov "$(api_provider "$PROVIDER")" \
-    '{userRequest:$req, skipApproval:true, executionMode:"PROTOTYPE", aiProvider:$prov}')
+    --arg model "$MODEL" --arg costCap "$USER_COST_CAP" \
+    '{userRequest:$req, skipApproval:true, executionMode:"PROTOTYPE", runMode:"BUILD", aiProvider:$prov,
+      requireConfirmationBeforeExpensiveContinuation:true,
+      requireBenchmarkPriorForAutomaticContinuation:false}
+      + (if $model == "" then {} else {modelName:$model} end)
+      + (if $costCap == "" then {} else {userCostCap:($costCap | tonumber)} end)')
   run_id=$(curl -s -X POST "$BASE_URL/api/runs" -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' -d "$body" | jq -r '.runId // empty')
   [[ -z "$run_id" ]] && { log "submit $id FAILED"; echo "$id,$band,SUBMIT_FAILED,0,0"; return 0; }
   log "  $id runId=$run_id"
 
   # Poll to terminal.
-  local elapsed=0 status=""
+  local elapsed=0 status="" run_json="{}"
   while [[ $elapsed -lt $TIMEOUT ]]; do
-    status=$(curl -s "$BASE_URL/api/runs/$run_id" -H "Authorization: Bearer $TOKEN" | jq -r '.status // ""')
+    run_json=$(curl -s "$BASE_URL/api/runs/$run_id" -H "Authorization: Bearer $TOKEN")
+    status=$(jq -r '.status // ""' <<<"$run_json")
     case "$status" in COMPLETE|PARTIAL|FAILED|CANCELLED) break ;; esac
     sleep 5; elapsed=$((elapsed + 5))
   done
@@ -178,8 +189,30 @@ run_case() {
   # run without parsing the CSV or depending on the source VM.  Never include credentials/tokens.
   local sha=""
   [[ -n "$archive" ]] && sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
-  printf '{"case":"%s","runId":"%s","status":"%s","artifactSource":"%s","archive":"%s","archiveSha256":"%s","heldOutPassed":%s,"heldOutTotal":%s}\n' \
-    "$id" "$run_id" "$status" "$artifact_source" "$archive" "$sha" "$passed" "$total" \
+  local effective_provider effective_model cost accepted_generation latest_attempt_state unresolved
+  effective_provider=$(jq -r '.effectiveProvider // .aiProvider // ""' <<<"$run_json")
+  effective_model=$(jq -r '.effectiveModel // ""' <<<"$run_json")
+  cost=$(jq -r '.actualCostUsd // 0' <<<"$run_json")
+  accepted_generation=$(jq -r '.acceptedWorkspaceGeneration // ""' <<<"$run_json")
+  latest_attempt_state=$(jq -r '.workspaceGenerationAttempts[0].state // ""' <<<"$run_json")
+  unresolved=$(jq '[.workspaceGenerationAttempts[]? | select(.state != "ACCEPTED" and .state != "ROLLED_BACK")] | length' <<<"$run_json")
+  jq -cn \
+    --arg arm "$QUALIFICATION_ARM" --arg releaseSha "$RELEASE_SHA" \
+    --arg caseId "$id" --arg runId "$run_id" --arg status "$status" \
+    --arg requestedProvider "$PROVIDER" --arg requestedModel "$MODEL" \
+    --arg provider "$effective_provider" --arg model "$effective_model" \
+    --arg artifactSource "$artifact_source" --arg archive "$archive" \
+    --arg archiveSha256 "$sha" --arg acceptedWorkspaceGeneration "$accepted_generation" \
+    --arg latestWorkspaceGenerationAttemptState "$latest_attempt_state" \
+    --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
+    --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
+    '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,runId:$runId,terminalStatus:$status,
+      requestedProvider:$requestedProvider,requestedModel:$requestedModel,provider:$provider,model:$model,
+      costUsd:$costUsd,artifactSource:$artifactSource,archive:$archive,
+      workspaceArchiveSha256:$archiveSha256,acceptedWorkspaceGeneration:$acceptedWorkspaceGeneration,
+      latestWorkspaceGenerationAttemptState:$latestWorkspaceGenerationAttemptState,
+      unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
+      heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \
     >> "${ARTIFACT_DIR}/completed-runs.jsonl"
   echo "$id,$band,$status,$passed,$total"
 }

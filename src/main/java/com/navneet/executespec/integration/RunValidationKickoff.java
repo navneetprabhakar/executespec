@@ -65,6 +65,8 @@ class RunValidationKickoff {
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
   private final PerkyMessenger perky;
   private final RunValidationFailureReporter failureReporter;
+  private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+      workspaceGenerationRecovery;
 
   void refreshRunGoalDecisionAfterTerminal(String runId) {
     validationReportService.refreshRunGoalDecisionAfterTerminal(runId);
@@ -148,6 +150,9 @@ class RunValidationKickoff {
       // Resolve the baseline-to-final Git change set. The previous implementation walked the
       // final workspace and treated every pre-existing brownfield file as generated code.
       Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+      if (correctionWorkspaceGeneration == null) {
+        workspaceGenerationRecovery.assertAcceptedFrontier(runId, workspace);
+      }
       if (brownfieldHttpContractGuard.hasBaseline(runId)) {
         brownfieldHttpContractGuard.assertCompatible(runId);
       }
