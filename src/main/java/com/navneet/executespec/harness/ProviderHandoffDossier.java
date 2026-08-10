@@ -106,6 +106,31 @@ final class ProviderHandoffDossier {
         + " the stated failure before editing.";
   }
 
+  static String writeAndReadRecoveryNote(
+      Path workspace,
+      String runId,
+      String taskId,
+      String fromProvider,
+      String fromModel,
+      String toProvider,
+      String toModel,
+      String decision,
+      String reason,
+      String failure) {
+    write(
+        workspace,
+        runId,
+        taskId,
+        fromProvider,
+        fromModel,
+        toProvider,
+        toModel,
+        decision,
+        reason,
+        failure);
+    return read(workspace, runId, taskId).map(ProviderHandoffDossier::recoveryNote).orElse(null);
+  }
+
   private static String cap(String value) {
     if (value == null) return "";
     return value.length() <= MAX_TEXT ? value : value.substring(0, MAX_TEXT) + "…";

@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
@@ -26,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.Plan;
@@ -2219,6 +2221,80 @@ class SequentialExecutorSoftCompletionTest {
         "Expected selected continuation outcome to persist COMPLETE after the primary failure. Saw:"
             + " "
             + saveLog);
+  }
+
+  @Test
+  void transactionalBuildRouteChangeStartsFreshCoordinatorAttemptBeforeReplacementDispatch() {
+    stubTaskRow();
+    when(availableProviderResolver.resolve("run-soft"))
+        .thenReturn(Set.of(LlmProvider.ANTHROPIC, LlmProvider.OPENAI));
+    AtomicBoolean replacementAttemptActive = new AtomicBoolean();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenAnswer(
+            ignored -> {
+              assertFalse(replacementAttemptActive.get());
+              return workerCompleted(2);
+            })
+        .thenAnswer(
+            ignored -> {
+              assertTrue(
+                  replacementAttemptActive.get(),
+                  "replacement provider dispatched outside its physical generation attempt");
+              return workerCompleted(1);
+            });
+    when(buildProjectTool.execute(any(), any()))
+        .thenReturn(
+            new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
+            new ToolResult.Ok("exit=0\nbuild ok"));
+    GoalContinuationAdvisor advisor = mock(GoalContinuationAdvisor.class);
+    when(advisor.advise(any()))
+        .thenReturn(
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STEP_UP_MODEL,
+                Optional.of(candidate("openai", "gpt-5.4")),
+                List.of("quality is insufficient; stronger eligible model clears threshold")),
+            new GoalContinuationPolicyDecision(
+                RunContinuationDecision.STOP_DONE,
+                Optional.empty(),
+                List.of("goal satisfied with validation evidence and required outputs present")));
+    BuildTaskGenerationCoordinator generations = mock(BuildTaskGenerationCoordinator.class);
+    when(generations.childContext(any(ExecutionContext.class), anyString()))
+        .thenAnswer(
+            invocation ->
+                ((ExecutionContext) invocation.getArgument(0))
+                    .child(invocation.getArgument(1, String.class)));
+    when(generations.pendingStatus(anyString()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(generations.isolatesRouteChanges()).thenReturn(true);
+    when(generations.execute(anyInt(), any(), any(), any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(4);
+              return dispatch.get();
+            });
+    when(generations.execute(anyInt(), any(), any(), any(), anyString(), anyString(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              assertEquals("openai", invocation.getArgument(4));
+              assertEquals("gpt-5.4", invocation.getArgument(5));
+              replacementAttemptActive.set(true);
+              try {
+                java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(6);
+                return dispatch.get();
+              } finally {
+                replacementAttemptActive.set(false);
+              }
+            });
+
+    ExecutionResult result = newExecutor(advisor, generations).execute(req(singleTaskPlan(), true));
+
+    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
+    assertEquals("openai", result.perTask().get(0).dispatchedProvider());
+    assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
+    verify(generations).execute(anyInt(), any(), any(), any(), any(), any());
+    verify(generations)
+        .execute(anyInt(), any(), any(), any(), eq("openai"), eq("gpt-5.4"), any(), any());
+    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
   }
 
   @Test

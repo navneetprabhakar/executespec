@@ -9,6 +9,23 @@
 **BUILD/PATCH shared-kernel convergence:** [`BUILD_PATCH_KERNEL_PLAN.md`](BUILD_PATCH_KERNEL_PLAN.md)
 defines the milestone gates and frozen go/no-go thresholds. M1 introduces the provider-neutral
 `engine.CodeChangeLoop` port while BUILD and PATCH retain separate orchestration and policy.
+V378's executed red count/signature seeds the first post-edit auto-verifier; same-route retries
+retain the seed and history compaction pins the active deterministic failure outside generated
+summaries. Hidden HTTP verifier targets remain internal to the immutable contract/receipt and are
+omitted from both worker directives and customer API projections. Run detail exposes additive
+`priorAcceptedGeneration` and `acceptedGeneration` fields while retaining `beforeGeneration` for
+historical clients.
+Continuation provider/model changes start a new physical V374 generation/LLM attempt before
+replacement dispatch or handoff-dossier construction. Canonical BUILD ZIP export holds PUBLICATION
+authority through traversal and returns `X-ExecuteSpec-Workspace-Generation`; qualification binds
+that value to the accepted frontier. The frozen schema-v2 cohort permits exactly two fresh dev
+candidates (Sonnet 5 and GLM 5.2, $5 each); its two ROLLED_BACK arms are immutable historical
+controls, not additional paid runs.
+The operator-only
+`GET /api/admin/workspace-generation-attempts/{attemptId}/qualification-evidence` route is
+SUPER_ADMIN + no-store and exposes preserved rejected-diff evidence only for manual qualification;
+customer run detail remains redacted. Historical pre-verification rollbacks are labeled
+`LEGACY_REJECTED_DIFF_ONLY` rather than assigned invented candidate/receipt values.
 
 **V374 forward/recovery fence clarification:** every candidate-bearing transition repeats the
 exact live LLM/workspace lease plus `pipeline_run.status=WORKING`; pause/cancel can roll back but

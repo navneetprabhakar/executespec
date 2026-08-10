@@ -62,14 +62,24 @@ baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`.
   and path-explicit multi-repository tasks receive an executable red acceptance surface without
   product implementation.
 - Deterministic failure deltas are typed as INITIAL_FAILURE, IMPROVED, REGRESSED, CHANGED,
-  UNCHANGED, or PASSED. Only changed/improved/passed evidence resets progress; repeated identical
-  failure is surfaced instead of treating shell activity as progress.
+  UNCHANGED, or PASSED. V378's exact red count/signature seeds the first post-edit comparison;
+  subsequent active failure evidence is pinned outside generated compaction summaries. Only
+  changed/improved/passed evidence resets progress; repeated identical failure is surfaced instead
+  of treating shell activity as progress.
 - Every provider/model change re-enters a new V374 generation attempt from the accepted frontier.
   A route cannot inherit and later legitimize another route's speculative candidate.
 - V377 freezes contract, planned initial-failure, requested/effective route,
   iteration/tool/call/token and cost evidence. V378 separately freezes the failure actually
   executed before provider dispatch. Run detail, typed SSE, metrics, and the Evidence UI expose
   candidate, verification, per-check outcomes, and rollback as separate trust facts.
+- Hidden HTTP acceptance targets stay internal: the worker receives generic actionable failure
+  context and the public API exposes only the hidden check outcome/generic label.
+- Customer workspace export obtains publication authority, repeats the accepted-frontier proof
+  under that lease and holds it through traversal. The download response and qualification harness
+  bind the ZIP to the accepted generation; lease loss aborts and removes any partial archive.
+- Acceptance commands are classified as reproduction, narrowest-available iteration evidence or
+  broad verification. Metrics keep those classes, attempt/route outcomes and authority/recovery
+  controls independently visible.
 
 ## Qualification comparison
 
@@ -91,6 +101,20 @@ candidate wrong accepts, unresolved attempts, rollback mismatches, or PATCH regr
 mechanism evidence using scripted mutations and zero model calls; it is deliberately not presented
 as real code-generation quality evidence and does not close M7 by itself. The generated report is
 `target/build-kernel-qualification/provider-free-v1.json`.
+
+The paid qualification manifest is schema v2 and deliberately permits exactly two fresh
+`LIVE_CANDIDATE` runs: Anthropic `claude-sonnet-5` and OpenRouter `glm-5.2`, each capped at $5. The
+pinned historical Sonnet and GLM `ROLLED_BACK` runs are immutable controls, not additional paid
+runs. The harness validates those controls, release/spec/harness digests, exact routes, frontier
+restoration and independently reviewed rejected diffs before it can dispatch either candidate.
+Those controls rolled back before `beginVerification`; their null candidate generation is recorded
+as `LEGACY_REJECTED_DIFF_ONLY` and corroborated by durable failed task-smoke evidence. The
+SUPER_ADMIN-only no-store qualification endpoint exposes the preserved rejected diff for review
+without widening customer run detail.
+After the candidate release is deployed, `scripts/capture-paired-build-controls.sh` performs only
+read-only API capture and writes review templates; it never submits a run or certifies the rejected
+diff. `run-paired-build-qualification.sh --execute` refuses both candidate submissions until the
+completed manual reviews make the controls-only validator pass.
 
 Required corpus categories: empty Python library, empty REST API, empty TypeScript library, empty
 frontend component, brownfield feature addition, brownfield bug fix, multi-file wiring, database

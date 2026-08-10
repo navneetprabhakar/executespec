@@ -58,7 +58,12 @@ public class WorkspaceGenerationEvidenceProjection {
         attempt.getAttemptKind().name(),
         attempt.getState().name(),
         attempt.getBeforeGeneration(),
+        attempt.getBeforeGeneration(),
         attempt.getCandidateGeneration(),
+        attempt.getState()
+                == com.navneet.executespec.workspacegeneration.WorkspaceGenerationState.ACCEPTED
+            ? attempt.getCandidateGeneration()
+            : null,
         attempt.getTaskContractDigest(),
         initialFailure(attempt),
         contract == null ? null : contract.runtimeSurface(),
@@ -105,6 +110,7 @@ public class WorkspaceGenerationEvidenceProjection {
     if (json == null || json.isBlank()) return null;
     try {
       com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(json);
+      if (!node.isObject()) return null;
       String code = node.path("code").asText(null);
       return new RunDetail.WorkspaceGenerationInitialFailureEvidence(
           node.path("outcome").asText(null),

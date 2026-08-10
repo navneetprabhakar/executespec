@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -208,7 +209,8 @@ class WorkerAgentToolDispatchTest {
                 anyLong(),
                 anyString(),
                 any(),
-                anyList()))
+                anyList(),
+                isNull()))
         .thenAnswer(invocation -> invocation.getArgument(0));
     WorkerAgent worker =
         newWorker(
@@ -229,7 +231,8 @@ class WorkerAgentToolDispatchTest {
             eq(0L),
             eq("do thing"),
             eq(4096),
-            anyList());
+            anyList(),
+            isNull());
   }
 
   @Test
@@ -246,7 +249,8 @@ class WorkerAgentToolDispatchTest {
                 anyLong(),
                 anyString(),
                 any(),
-                anyList()))
+                anyList(),
+                isNull()))
         .thenAnswer(invocation -> invocation.getArgument(0));
     List<org.springframework.ai.tool.ToolCallback> boundTools =
         List.of(
@@ -273,7 +277,8 @@ class WorkerAgentToolDispatchTest {
             anyLong(),
             eq("do thing"),
             eq(4096),
-            compactorTools.capture());
+            compactorTools.capture(),
+            isNull());
     ArgumentCaptor<LlmRequest> routerRequest = ArgumentCaptor.forClass(LlmRequest.class);
     verify(lastRouter).call(routerRequest.capture());
     assertThat(compactorTools.getValue()).isSameAs(routerRequest.getValue().toolsOverride());

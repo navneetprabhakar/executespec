@@ -31,6 +31,7 @@ public final class WorkerTaskRequestControls {
         .verifyBeforeComplete(primary.verifyBeforeComplete())
         .progressV2(primary.progressV2())
         .autoVerify(primary.autoVerify())
+        .initialFailureSnapshot(primary.initialFailureSnapshot())
         .agentRole(primary.agentRole())
         .stepPrefix(primary.stepPrefix())
         .build();

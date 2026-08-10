@@ -932,24 +932,20 @@ to boot — skip it for those.""";
             outcome = executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
           }
           throwIfCancellationRequested(runId, task.id());
-          if (buildTaskGenerations != null && buildTaskGenerations.isolatesRouteChanges())
-            return outcome;
-          return resume == null
-              ? maybeActOnContinuation(task, plan, req, isFinalTask, outcome)
-              : outcome;
+          return outcome;
         };
-
     if (buildTaskGenerations == null
         || RunWorkspaceAuthorityService.currentCorrectionToolLease() != null) {
-      return dispatch.get();
+      TaskOutcome outcome = dispatch.get();
+      return resume == null
+          ? maybeActOnContinuation(task, plan, req, isFinalTask, outcome)
+          : outcome;
     }
-    return buildTaskGenerations.execute(
-        taskIndex,
-        task,
-        plan,
-        req,
-        dispatch,
-        (status, reason) -> persistTaskStatus(runId, task.id(), status, reason));
+    BuildTaskGenerationCoordinator.TaskStatusSink taskStatus =
+        (status, reason) -> persistTaskStatus(runId, task.id(), status, reason);
+    var outcome = buildTaskGenerations.execute(taskIndex, task, plan, req, dispatch, taskStatus);
+    if (resume != null) return outcome;
+    return maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
   }
 
   private void recordTaskOutcomeMetric(
@@ -1289,18 +1285,6 @@ to boot — skip it for those.""";
     appendContinuationActionHistory(
         runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
-    ProviderHandoffDossier.write(
-        req.runContext().workspaceRoot(),
-        runId,
-        task.id(),
-        outcome.dispatchedProvider(),
-        outcome.dispatchedModel(),
-        candidate.provider(),
-        candidate.model(),
-        decision.decision().name(),
-        reason,
-        outcome.smokeTestOutput());
-
     // Clear the primary attempt's terminal marker before executeOne() publishes WORKING; otherwise
     // persistTaskStatus() rejects the rerun's WORKING/COMPLETE writes as a "terminal overwrite".
     // RR-266: a false return means a concurrent cancellation or a rolling-restart takeover owns the
@@ -1316,20 +1300,39 @@ to boot — skip it for those.""";
     // A different provider/model gets the current workspace plus a compact deterministic dossier,
     // never the previous model's full transcript. Replaying that transcript across models grows
     // every subsequent prompt and anchors the replacement model to the failed reasoning path.
-    String recoveryNote =
-        ProviderHandoffDossier.read(req.runContext().workspaceRoot(), runId, task.id())
-            .map(ProviderHandoffDossier::recoveryNote)
-            .orElse(null);
-    TaskOutcome rerun =
-        executeOne(
-            task,
-            plan,
-            req,
-            isFinalTask,
-            null,
-            new ProviderModelOverride(
-                candidate.provider(), candidate.model(), decision.decision(), recoveryNote));
-    return mergeContinuationAttempt(outcome, rerun, decision, candidate);
+    java.util.function.Supplier<ProviderModelOverride> routeOverride =
+        () -> {
+          String recoveryNote =
+              ProviderHandoffDossier.writeAndReadRecoveryNote(
+                  req.runContext().workspaceRoot(),
+                  runId,
+                  task.id(),
+                  outcome.dispatchedProvider(),
+                  outcome.dispatchedModel(),
+                  candidate.provider(),
+                  candidate.model(),
+                  decision.decision().name(),
+                  reason,
+                  outcome.smokeTestOutput());
+          return new ProviderModelOverride(
+              candidate.provider(), candidate.model(), decision.decision(), recoveryNote);
+        };
+    TaskOutcome rerunOutcome;
+    if (buildTaskGenerations != null && buildTaskGenerations.isolatesRouteChanges()) {
+      rerunOutcome =
+          buildTaskGenerations.execute(
+              plan.tasks().indexOf(task),
+              task,
+              plan,
+              req,
+              candidate.provider(),
+              candidate.model(),
+              () -> executeOne(task, plan, req, isFinalTask, null, routeOverride.get()),
+              (status, statusReason) -> persistTaskStatus(runId, task.id(), status, statusReason));
+    } else {
+      rerunOutcome = executeOne(task, plan, req, isFinalTask, null, routeOverride.get());
+    }
+    return mergeContinuationAttempt(outcome, rerunOutcome, decision, candidate);
   }
 
   /**
@@ -2002,6 +2005,10 @@ to boot — skip it for those.""";
             // auto-verify (V259, default ON): server-side edit-burst test runs with
             // failure-output injection (schema-free; supersedes V209/V217 on graduation).
             .autoVerify(sharedWorkerControl("worker.auto-verify.enabled"))
+            .initialFailureSnapshot(
+                buildTaskGenerations == null
+                    ? null
+                    : buildTaskGenerations.activeInitialFailureSnapshot())
             .workerStartedAtEpochMs(taskStart)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
@@ -2781,6 +2788,9 @@ to boot — skip it for those.""";
     TaskOutcome preRetryOutcome =
         preRetryContinuationOutcome(
             task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+    if (buildTaskGenerations != null && buildTaskGenerations.isolatesRouteChanges()) {
+      return preRetryOutcome;
+    }
     return executeContinuationAction(
         task, plan, req, isFinalTask, preRetryOutcome, continuationDecision, candidate, false);
   }

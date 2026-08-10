@@ -6,8 +6,10 @@ export interface WorkspaceGenerationAttemptEvidence {
   attemptNumber: number;
   attemptKind: string;
   state: string;
+  priorAcceptedGeneration?: string | null;
   beforeGeneration: string;
   candidateGeneration?: string | null;
+  acceptedGeneration?: string | null;
   taskContractDigest?: string | null;
   initialFailureEvidence?: {
     outcome?: string | null;

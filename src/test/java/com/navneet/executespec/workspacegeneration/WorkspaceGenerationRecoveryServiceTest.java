@@ -144,7 +144,8 @@ class WorkspaceGenerationRecoveryServiceTest {
             archives,
             runs,
             mock(WorkspaceIgnoredArtifactGuard.class),
-            properties);
+            properties,
+            mock(WorkspaceGenerationTelemetry.class));
 
     recovery.ensureAcceptedWorkspaceAvailable(runId);
 
@@ -209,7 +210,8 @@ class WorkspaceGenerationRecoveryServiceTest {
             archives,
             runs,
             mock(WorkspaceIgnoredArtifactGuard.class),
-            properties);
+            properties,
+            mock(WorkspaceGenerationTelemetry.class));
 
     recovery.ensureAcceptedWorkspaceAvailable(runId);
 
@@ -267,7 +269,8 @@ class WorkspaceGenerationRecoveryServiceTest {
             mock(WorkspaceGenerationArchiveService.class),
             runs,
             mock(WorkspaceIgnoredArtifactGuard.class),
-            properties);
+            properties,
+            mock(WorkspaceGenerationTelemetry.class));
 
     assertThatThrownBy(() -> recovery.ensureAcceptedWorkspaceAvailable(runId))
         .isInstanceOf(IllegalStateException.class)
@@ -455,7 +458,8 @@ class WorkspaceGenerationRecoveryServiceTest {
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
         mock(PipelineRunRepository.class),
         ignored,
-        properties);
+        properties,
+        mock(WorkspaceGenerationTelemetry.class));
   }
 
   private WorkspaceGenerationRecoveryService recovery(
@@ -472,7 +476,8 @@ class WorkspaceGenerationRecoveryServiceTest {
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
         runs,
         mock(WorkspaceIgnoredArtifactGuard.class),
-        new AgentProperties());
+        new AgentProperties(),
+        mock(WorkspaceGenerationTelemetry.class));
   }
 
   private static void stubAcceptedFrontier(

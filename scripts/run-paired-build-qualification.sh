@@ -2,27 +2,18 @@
 #
 # Authorization-gated executor for scripts/build-qualification/paired-build-v1.json.
 # Validation and --dry-run are provider-free. --execute performs paid BUILD submissions and must
-# only be used after the user has separately authorized both deployment/release arms and spend.
+# only be used after the user has separately authorized the candidate release and two $5 runs.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLAN="${BUILD_QUAL_PLAN:-${SCRIPT_DIR}/build-qualification/paired-build-v1.json}"
 MODE="dry-run"
-ARM_FILTER=""
 case "${1:-}" in
   ""|--dry-run) MODE="dry-run" ;;
   --execute) MODE="execute" ;;
-  --execute-arm)
-    MODE="execute"
-    ARM_FILTER="${2:-}"
-    [[ "$ARM_FILTER" == "control" || "$ARM_FILTER" == "candidate" ]] || {
-      echo "--execute-arm requires control or candidate" >&2
-      exit 2
-    }
-    ;;
   *)
-    echo "usage: $0 [--dry-run|--execute|--execute-arm control|candidate]" >&2
+    echo "usage: $0 [--dry-run|--execute]" >&2
     exit 2
     ;;
 esac
@@ -43,8 +34,15 @@ fi
 SUITE_ID="$(jq -r '.suiteId' "$PLAN")"
 RESULT_ROOT="${BUILD_QUAL_RESULT_ROOT:-${SCRIPT_DIR}/build-qualification/results/${SUITE_ID}}"
 
+while IFS=$'\t' read -r route run_id; do
+  printf 'control: historical immutable evidence\n  %s, runId=%s, expected=ROLLED_BACK\n' "$route" "$run_id"
+done < <(jq -r '.arms[] | select(.id=="control") | .runIdsByRoute | to_entries[] | [.key,.value] | @tsv' "$PLAN")
+
+if [[ "$MODE" == "execute" ]]; then
+  node "${SCRIPT_DIR}/validate-paired-build-results.mjs" "$PLAN" "$RESULT_ROOT" --controls-only
+fi
+
 while IFS=$'\t' read -r arm base_url_env release_sha_env; do
-  [[ -z "$ARM_FILTER" || "$arm" == "$ARM_FILTER" ]] || continue
   base_url="${!base_url_env}"
   release_sha="${!release_sha_env}"
   while IFS=$'\t' read -r provider model cap; do
@@ -60,7 +58,7 @@ while IFS=$'\t' read -r arm base_url_env release_sha_env; do
       fi
     done < <(jq -r '.cases[].id' "$PLAN")
   done < <(jq -r '.routes[] | [.provider,.model,(.safeMaxUsdPerRun|tostring)] | @tsv' "$PLAN")
-done < <(jq -r '.arms[] | [.id,.baseUrlEnv,.releaseShaEnv] | @tsv' "$PLAN")
+done < <(jq -r '.arms[] | select(.source=="LIVE_CANDIDATE") | [.id,.baseUrlEnv,.releaseShaEnv] | @tsv' "$PLAN")
 
 if [[ "$MODE" == "dry-run" ]]; then
   echo "Dry run only: no authentication, deployment, provider call, or BUILD submission occurred."

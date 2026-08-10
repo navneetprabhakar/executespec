@@ -91,7 +91,7 @@ class PublicationAdmissionServiceTest {
   @Test
   void admitsFreshBuildAndVerifiedTests() {
     assertThat(service.assertEligible(run()).workspaceGeneration()).isEqualTo(GENERATION);
-    verify(workspaceGenerationRecovery).assertAcceptedFrontier(RUN_ID, GENERATION);
+    verify(workspaceGenerationRecovery).assertAcceptedFrontier(RUN_ID, GENERATION, "PUBLICATION");
   }
 
   @Test
@@ -100,7 +100,8 @@ class PublicationAdmissionServiceTest {
 
     assertThat(service.evaluate(run()).eligible()).isTrue();
 
-    verify(workspaceGenerationRecovery, never()).assertAcceptedFrontier(anyString(), anyString());
+    verify(workspaceGenerationRecovery, never())
+        .assertAcceptedFrontier(anyString(), anyString(), anyString());
   }
 
   @Test
@@ -110,7 +111,8 @@ class PublicationAdmissionServiceTest {
 
     assertBlocked("CORRECTION_GENERATION_FRONTIER_MISMATCH");
 
-    verify(workspaceGenerationRecovery, never()).assertAcceptedFrontier(anyString(), anyString());
+    verify(workspaceGenerationRecovery, never())
+        .assertAcceptedFrontier(anyString(), anyString(), anyString());
   }
 
   @Test
@@ -120,7 +122,8 @@ class PublicationAdmissionServiceTest {
 
     assertBlocked("CORRECTION_ACCEPTANCE_INVALID");
 
-    verify(workspaceGenerationRecovery, never()).assertAcceptedFrontier(anyString(), anyString());
+    verify(workspaceGenerationRecovery, never())
+        .assertAcceptedFrontier(anyString(), anyString(), anyString());
   }
 
   @Test

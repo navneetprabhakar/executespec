@@ -78,21 +78,33 @@ safe_extract_zip() {
 # or the short-lived GCS signed redirect, and validates the archive before it is retained.
 download_workspace_archive() {
   local run_id="$1" archive="${ARTIFACT_DIR}/workspace-${run_id}.zip"
-  [[ -s "$archive" ]] && { unzip -tqq "$archive" >/dev/null 2>&1; return $?; }
-  local partial="${archive}.part"
+  local generation_file="${archive}.generation"
+  [[ -s "$archive" && -s "$generation_file" ]] \
+    && { unzip -tqq "$archive" >/dev/null 2>&1; return $?; }
+  local partial="${archive}.part" headers="${archive}.headers"
   rm -f "$partial"
   if ! curl --fail --silent --show-error --location --max-time 300 \
+      --dump-header "$headers" \
       -H "Authorization: Bearer ${TOKEN}" \
       "$BASE_URL/api/runs/${run_id}/download?format=zip" -o "$partial"; then
-    rm -f "$partial"
+    rm -f "$partial" "$headers"
     return 1
   fi
   if ! unzip -tqq "$partial" >/dev/null 2>&1; then
     log "  $run_id archive failed ZIP validation"
-    rm -f "$partial"
+    rm -f "$partial" "$headers"
     return 1
   fi
+  local archive_generation
+  archive_generation="$(awk 'BEGIN{IGNORECASE=1} /^X-ExecuteSpec-Workspace-Generation:/ {gsub("\\r", "", $2); print $2}' "$headers" | tail -1)"
+  rm -f "$headers"
+  [[ "$archive_generation" =~ ^[a-f0-9]{64}$ ]] || {
+    log "  $run_id archive response lacked an accepted-generation binding"
+    rm -f "$partial"
+    return 1
+  }
   mv "$partial" "$archive"
+  printf '%s\n' "$archive_generation" > "$generation_file"
   return 0
 }
 
@@ -187,29 +199,36 @@ run_case() {
   log "  $id acceptance: ${passed}/${total} held-out tests passed"
   # A small sidecar is intentionally plain JSONL: external adjudicators can consume one completed
   # run without parsing the CSV or depending on the source VM.  Never include credentials/tokens.
-  local sha=""
+  local sha="" archive_generation=""
   [[ -n "$archive" ]] && sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
-  local effective_provider effective_model cost accepted_generation latest_attempt_state unresolved
+  [[ -n "$archive" ]] && archive_generation="$(cat "${archive}.generation" 2>/dev/null || true)"
+  local effective_provider effective_model cost accepted_generation prior_generation latest_attempt_state unresolved spec_sha
   effective_provider=$(jq -r '.effectiveProvider // .aiProvider // ""' <<<"$run_json")
   effective_model=$(jq -r '.effectiveModel // ""' <<<"$run_json")
   cost=$(jq -r '.actualCostUsd // 0' <<<"$run_json")
   accepted_generation=$(jq -r '.acceptedWorkspaceGeneration // ""' <<<"$run_json")
+  prior_generation=$(jq -r '.workspaceGenerationAttempts[0].priorAcceptedGeneration // ""' <<<"$run_json")
   latest_attempt_state=$(jq -r '.workspaceGenerationAttempts[0].state // ""' <<<"$run_json")
   unresolved=$(jq '[.workspaceGenerationAttempts[]? | select(.state != "ACCEPTED" and .state != "ROLLED_BACK")] | length' <<<"$run_json")
+  spec_sha="$(shasum -a 256 "$spec_file" | awk '{print $1}')"
   jq -cn \
     --arg arm "$QUALIFICATION_ARM" --arg releaseSha "$RELEASE_SHA" \
-    --arg caseId "$id" --arg runId "$run_id" --arg status "$status" \
+    --arg caseId "$id" --arg specSha256 "$spec_sha" --arg runId "$run_id" --arg status "$status" \
     --arg requestedProvider "$PROVIDER" --arg requestedModel "$MODEL" \
     --arg provider "$effective_provider" --arg model "$effective_model" \
     --arg artifactSource "$artifact_source" --arg archive "$archive" \
-    --arg archiveSha256 "$sha" --arg acceptedWorkspaceGeneration "$accepted_generation" \
+    --arg archiveSha256 "$sha" --arg workspaceArchiveGeneration "$archive_generation" \
+    --arg priorAcceptedWorkspaceGeneration "$prior_generation" \
+    --arg acceptedWorkspaceGeneration "$accepted_generation" \
     --arg latestWorkspaceGenerationAttemptState "$latest_attempt_state" \
     --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
     --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
-    '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,runId:$runId,terminalStatus:$status,
+    '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,specSha256:$specSha256,runId:$runId,terminalStatus:$status,
       requestedProvider:$requestedProvider,requestedModel:$requestedModel,provider:$provider,model:$model,
       costUsd:$costUsd,artifactSource:$artifactSource,archive:$archive,
-      workspaceArchiveSha256:$archiveSha256,acceptedWorkspaceGeneration:$acceptedWorkspaceGeneration,
+      workspaceArchiveSha256:$archiveSha256,workspaceArchiveGeneration:$workspaceArchiveGeneration,
+      priorAcceptedWorkspaceGeneration:$priorAcceptedWorkspaceGeneration,
+      acceptedWorkspaceGeneration:$acceptedWorkspaceGeneration,
       latestWorkspaceGenerationAttemptState:$latestWorkspaceGenerationAttemptState,
       unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
       heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \

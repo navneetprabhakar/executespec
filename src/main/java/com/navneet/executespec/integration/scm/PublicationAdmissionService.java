@@ -144,7 +144,7 @@ public class PublicationAdmissionService {
     }
     try {
       if (workspaceGenerationRecovery != null) {
-        workspaceGenerationRecovery.assertNoUnresolvedAttempt(run.getRunId());
+        workspaceGenerationRecovery.assertNoUnresolvedAttempt(run.getRunId(), "PUBLICATION");
       }
     } catch (RuntimeException unresolved) {
       return blockedEligibility(
@@ -198,7 +198,8 @@ public class PublicationAdmissionService {
     } else {
       try {
         if (workspaceGenerationRecovery != null) {
-          workspaceGenerationRecovery.assertAcceptedFrontier(run.getRunId(), currentGeneration);
+          workspaceGenerationRecovery.assertAcceptedFrontier(
+              run.getRunId(), currentGeneration, "PUBLICATION");
         }
       } catch (RuntimeException mismatch) {
         return blockedEligibility(

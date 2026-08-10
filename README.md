@@ -221,9 +221,18 @@ task contract, planned initial failure, requested/effective route, iterations, t
 token usage and cost immutable and inspectable through run detail. V378 separately freezes the
 deterministic initial acceptance probe executed after baseline materialization and before provider
 dispatch; only an observed red result admits dispatch, while green, drifted, or unavailable probes
-roll back without a model call. Typed
+roll back without a model call. The exact red count/signature seeds the first post-edit verifier,
+and the latest deterministic failure is pinned outside any generated history-compaction summary.
+Hidden endpoint assertions are omitted from both the worker directive and customer API. Typed
 `WORKSPACE_GENERATION` SSE, metrics, and Evidence UI facts keep candidate, per-check verification,
 rollback, and accepted frontier separate.
+Route changes enter a fresh physical generation/LLM attempt before replacement dispatch. Customer
+BUILD ZIP export holds publication authority through file traversal and binds the archive to the
+accepted frontier with `X-ExecuteSpec-Workspace-Generation`; a lease loss aborts and removes the
+partial archive.
+Separately authorized operators can inspect a preserved rejected candidate through the
+SUPER_ADMIN-only, no-store qualification-evidence endpoint; ordinary run detail never exposes the
+raw rejected diff.
 V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361

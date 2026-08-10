@@ -456,7 +456,7 @@ export function publicationTrustFacts(
           : !latestGeneration
             ? 'No generation attempt'
             : latestGeneration.state === 'ROLLED_BACK'
-              ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${latestGeneration.beforeGeneration.slice(0, 12)}`
+              ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${(latestGeneration.priorAcceptedGeneration || latestGeneration.beforeGeneration).slice(0, 12)}`
               : latestGeneration.state === 'RECOVERY_FAILED'
                 ? `Rollback recovery failed · ${latestGeneration.recoveryFailureCode || 'operator action required'}`
                 : latestGeneration.state === 'ACCEPTED'

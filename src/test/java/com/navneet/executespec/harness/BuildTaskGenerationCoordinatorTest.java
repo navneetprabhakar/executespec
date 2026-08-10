@@ -43,6 +43,7 @@ import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,8 +62,8 @@ class BuildTaskGenerationCoordinatorTest {
   private SseBroadcaster broadcaster;
   private GreenfieldBaselineService greenfieldBaselines;
   private FeatureFlagService featureFlags;
-  private com.navneet.executespec.cost.RunCostTracker costTracker;
-  private com.navneet.executespec.observability.Metrics metrics;
+  private BuildTaskUsageEvidence usageEvidence;
+  private WorkspaceGenerationTelemetry telemetry;
   private BuildTaskGenerationCoordinator coordinator;
   private PlannedTask task;
   private Plan plan;
@@ -93,8 +94,12 @@ class BuildTaskGenerationCoordinatorTest {
     broadcaster = mock(SseBroadcaster.class);
     greenfieldBaselines = mock(GreenfieldBaselineService.class);
     featureFlags = mock(FeatureFlagService.class);
-    costTracker = mock(com.navneet.executespec.cost.RunCostTracker.class);
-    metrics = mock(com.navneet.executespec.observability.Metrics.class);
+    usageEvidence = mock(BuildTaskUsageEvidence.class);
+    com.navneet.executespec.cost.RunCostTracker.Snapshot zeroUsage =
+        new com.navneet.executespec.cost.RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0, 0);
+    when(usageEvidence.snapshot(anyString(), anyString())).thenReturn(zeroUsage);
+    when(usageEvidence.delta(any(), anyString(), anyString())).thenReturn(zeroUsage);
+    telemetry = mock(WorkspaceGenerationTelemetry.class);
     coordinator =
         new BuildTaskGenerationCoordinator(
             generations,
@@ -107,8 +112,8 @@ class BuildTaskGenerationCoordinatorTest {
             broadcaster,
             greenfieldBaselines,
             featureFlags,
-            costTracker,
-            metrics);
+            usageEvidence,
+            telemetry);
 
     task = PlannedTask.builder().id("T1").title("Build API").description("Implement API").build();
     plan = Plan.builder().planTitle("Build").tasks(List.of(task)).build();
@@ -248,8 +253,7 @@ class BuildTaskGenerationCoordinatorTest {
     order.verify(operations).complete(operation);
     verify(generations, org.mockito.Mockito.times(2)).assertDispatch(prepared);
     verify(generations, never()).rollback(any(), anyString(), anyString());
-    verify(metrics, never()).recordWorkspaceGenerationState(anyString(), anyString(), anyString());
-    verify(metrics, never()).recordWorkspaceGenerationVerification(anyString(), any());
+    verify(telemetry, never()).verification(anyString(), anyString(), anyString(), any());
     verify(broadcaster, never())
         .emit(eq("run-1"), argThat(event -> "WORKSPACE_GENERATION".equals(event.type())));
   }
@@ -387,7 +391,9 @@ class BuildTaskGenerationCoordinatorTest {
           assertThat(coordinator.acceptanceSystemDirective())
               .contains("Contract digest: " + contract.digest())
               .contains("REQUIRED_PATH_MISSING: Required path assertions are red: [src/app.py]")
-              .contains("python3 -m pytest -q");
+              .contains("python3 -m pytest -q")
+              .doesNotContain("targets=");
+          assertThat(coordinator.activeInitialFailureSnapshot().failed()).isEqualTo(1);
           return successfulOutcome();
         },
         mock(BuildTaskGenerationCoordinator.TaskStatusSink.class));
@@ -400,19 +406,29 @@ class BuildTaskGenerationCoordinatorTest {
     verify(initialFailures).record(prepared, observedFailure);
     verify(executionEvidence)
         .record(eq(prepared), eq("anthropic"), eq("claude-sonnet"), eq(0), eq(0), any());
-    verify(metrics, atLeastOnce())
-        .recordWorkspaceGenerationState(anyString(), eq("anthropic"), eq("claude-sonnet"));
-    verify(metrics).recordWorkspaceGenerationVerification(eq("PASSED"), any());
-    verify(broadcaster, atLeastOnce())
-        .emit(eq("run-1"), argThat(event -> "WORKSPACE_GENERATION".equals(event.type())));
-    verify(broadcaster)
-        .emit(
+    verify(telemetry, atLeastOnce())
+        .state(
             eq("run-1"),
-            argThat(
-                event ->
-                    "WORKSPACE_GENERATION".equals(event.type())
-                        && "INITIAL_FAILURE_FAILURE_OBSERVED".equals(event.data().get("state"))
-                        && "REQUIRED_PATH_MISSING".equals(event.data().get("initialFailureCode"))));
+            eq("T1"),
+            eq(prepared),
+            anyString(),
+            eq(contract),
+            eq("anthropic"),
+            eq("claude-sonnet"),
+            any(),
+            any());
+    verify(telemetry).verification(eq("PASSED"), eq("PYTHON_LIBRARY"), eq("BROAD_FINAL"), any());
+    verify(telemetry)
+        .state(
+            "run-1",
+            "T1",
+            prepared,
+            "INITIAL_FAILURE_FAILURE_OBSERVED",
+            contract,
+            "anthropic",
+            "claude-sonnet",
+            null,
+            "REQUIRED_PATH_MISSING");
   }
 
   @Test
@@ -492,6 +508,8 @@ class BuildTaskGenerationCoordinatorTest {
             contract.digest());
     when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
     when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(v2);
+    when(operations.claimBuildTask(any(), eq("run-1"), eq("T1"), eq(0), eq(v2.digest())))
+        .thenReturn(operation);
     TaskAcceptanceVerifier.InitialFailure noFailure =
         new TaskAcceptanceVerifier.InitialFailure(
             "ALREADY_PASSED", "NO_INITIAL_FAILURE", "2 tests passed", "mvn test", List.of());
@@ -518,6 +536,77 @@ class BuildTaskGenerationCoordinatorTest {
     verify(generations).rollback(eq(prepared), eq("NO_INITIAL_FAILURE"), anyString());
     verify(executionEvidence, never())
         .record(any(), anyString(), anyString(), anyInt(), anyInt(), any());
+  }
+
+  @Test
+  void hiddenInitialVerifierTargetsNeverEnterTheWorkerDirective() {
+    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    GreenfieldBaselinePlan baseline =
+        new GreenfieldBaselinePlan(
+            GreenfieldBaselinePlan.Kind.PYTHON,
+            "HTTP_SERVICE",
+            true,
+            true,
+            java.util.Map.of("requirements.txt", "pytest\n"),
+            List.of("src/app.py"),
+            List.of("ENDPOINT_CONTRACT_UNSATISFIED"));
+    TaskAcceptanceContract v2 =
+        new TaskAcceptanceContract(
+            2,
+            "T1",
+            0,
+            "SERVER_RESOLVED_FAILURE_FIRST_V2",
+            "REQUIRED_NON_NOOP",
+            "REQUIRED",
+            List.of("src/app.py"),
+            "HTTP_SERVICE",
+            "PYTHON",
+            new TaskAcceptanceContract.ResolvedCommand(
+                "python3 -m compileall -q .", 120, "inferred:python", "PYTHON"),
+            new TaskAcceptanceContract.ResolvedCommand(
+                "python3 -m pytest -q", 600, "pytest", "PYTEST"),
+            List.of("src/app.py"),
+            List.of(),
+            List.of("GET /operator-only"),
+            true,
+            List.of("."),
+            List.of(),
+            List.of(
+                new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", true)),
+            "d".repeat(64));
+    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
+    when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(v2);
+    when(operations.claimBuildTask(any(), eq("run-1"), eq("T1"), eq(0), eq(v2.digest())))
+        .thenReturn(operation);
+    when(verifier.probeInitial(any(), eq(v2)))
+        .thenReturn(
+            new TaskAcceptanceVerifier.InitialFailure(
+                "FAILURE_OBSERVED",
+                "ENDPOINT_CONTRACT_UNSATISFIED",
+                "The admitted interface is not yet satisfied",
+                null,
+                List.of("GET /operator-only")));
+
+    TaskOutcome outcome =
+        coordinator.execute(
+            0,
+            task,
+            plan,
+            request,
+            () -> {
+              assertThat(coordinator.acceptanceSystemDirective())
+                  .contains("The admitted interface is not yet satisfied")
+                  .doesNotContain("GET /operator-only");
+              return TaskOutcome.builder()
+                  .taskId("T1")
+                  .taskTitle("Build API")
+                  .status(TaskOutcome.Status.WORKER_FAILED)
+                  .build();
+            },
+            mock(BuildTaskGenerationCoordinator.TaskStatusSink.class));
+
+    assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.WORKER_FAILED);
+    verify(generations).rollback(eq(prepared), eq("TASK_OUTCOME_UNACCEPTED"), anyString());
   }
 
   private WorkspaceGenerationLifecycle.Verification verification(
