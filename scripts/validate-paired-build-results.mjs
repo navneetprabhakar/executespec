@@ -80,6 +80,9 @@ function validateAccepted(key, record, review, errors) {
   if (record.sharedKernelFlagEnabledAtSubmission !== true) {
     errors.push(`${key} was not submitted with the shared BUILD kernel flag enabled`);
   }
+  if (record.releaseIdentityAuthority !== "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA") {
+    errors.push(`${key} lacks deployment-host RUNNING_SHA authority`);
+  }
   if (record.initialFailureOutcome !== "FAILURE_OBSERVED"
       || typeof record.initialFailureCode !== "string" || !record.initialFailureCode.trim()) {
     errors.push(`${key} lacks the observed failure-first evidence required by the shared kernel`);

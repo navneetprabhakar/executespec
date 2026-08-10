@@ -39,5 +39,7 @@ test("authorized preflight permits only the dev app deployment and immutable can
   assert.ok(validateAuthorizedEnvironment(plan, { ...good, BUILD_QUAL_CANDIDATE_URL: "https://benchmark.executespec.ai" })
     .some((error) => error.includes("app.executespec.ai")));
   assert.ok(validateAuthorizedEnvironment(plan, { ...good, BUILD_QUAL_CANDIDATE_SHA: "dev" })
-    .some((error) => error.includes("40/64-char")));
+    .some((error) => error.includes("40-char")));
+  assert.ok(validateAuthorizedEnvironment(plan, { ...good, BUILD_QUAL_CANDIDATE_SHA: "b".repeat(64) })
+    .some((error) => error.includes("40-char")));
 });

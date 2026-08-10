@@ -483,7 +483,10 @@ $10 total. `scripts/run-paired-build-qualification.sh --dry-run` performs no log
 provider call, flag mutation, or deployment. `--execute` additionally requires
 `BUILD_QUAL_AUTHORIZATION_ID`, credentials, the exact candidate SHA, reviewed controls, and a
 read-only pre-submit proof that `build.shared-code-change-loop.enabled=true`; that proof is repeated
-immediately before each paid submission. Candidate results are rejected unless the accepted attempt
+immediately before each paid submission. It also compares the candidate SHA with the SUPER_ADMIN
+no-store `GET /api/admin/release-identity` response, whose authority is the deploy workflow's
+`/opt/app/RUNNING_SHA`; missing, malformed or mismatched identity aborts before run creation.
+Candidate results are rejected unless the accepted attempt
 also contains an observed failure-first result and frozen acceptance checks. The harness never
 enables the global flag itself. `scripts/validate-paired-build-results.mjs` refuses an incomplete
 pair or system score in place of the held-out and manual evidence.

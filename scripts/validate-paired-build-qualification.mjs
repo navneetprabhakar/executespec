@@ -27,6 +27,7 @@ const REQUIRED_ACCEPTED = new Set([
   "workspaceArchiveGeneration", "heldOutPassed", "heldOutTotal", "generatedCodeReview",
   "initialFailureOutcome", "initialFailureCode", "acceptanceCheckCount",
   "sharedKernelFlagEnabledAtSubmission",
+  "releaseIdentityAuthority",
 ]);
 const REQUIRED_ROLLED_BACK = new Set([
   "priorAcceptedWorkspaceGeneration", "candidateEvidenceKind", "rejectedDiffSha256",
@@ -178,8 +179,8 @@ export function validateAuthorizedEnvironment(plan, environment = process.env) {
   } catch {
     errors.push(`${candidate?.baseUrlEnv || "candidate URL"} is not a valid URL`);
   }
-  if (!RELEASE_SHA.test(sha || "")) {
-    errors.push(`${candidate?.releaseShaEnv || "candidate SHA"} must be a 40/64-char lowercase SHA`);
+  if (!/^[a-f0-9]{40}$/.test(sha || "")) {
+    errors.push(`${candidate?.releaseShaEnv || "candidate SHA"} must be an exact 40-char lowercase commit SHA`);
   }
   return errors;
 }
