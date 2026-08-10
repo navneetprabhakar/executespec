@@ -54,6 +54,7 @@ TIMEOUT="${TIMEOUT:-1200}"
 RELEASE_SHA="${RELEASE_SHA:-}"
 QUALIFICATION_ARM="${QUALIFICATION_ARM:-}"
 USER_COST_CAP="${USER_COST_CAP:-}"
+BUILD_SHARED_KERNEL_ENABLED="${BUILD_SHARED_KERNEL_ENABLED:-false}"
 ONLY_CASE=""
 
 while [[ $# -gt 0 ]]; do
@@ -122,6 +123,10 @@ run_case() {
   [[ -f "$spec_file" ]] || { log "skip $id: no spec.md"; return 0; }
   local band; band="$(cat "${case_dir}/band" 2>/dev/null || echo unknown)"
   log "submit  $id (band=$band, provider=$PROVIDER, model=${MODEL:-tier-default})"
+  if [[ "$QUALIFICATION_ARM" == "candidate" && "$BUILD_SHARED_KERNEL_ENABLED" != "true" ]]; then
+    log "refuse $id: candidate qualification lacks a positive shared-kernel flag preflight"
+    return 1
+  fi
 
   local body run_id
   body=$(jq -n --arg req "$(cat "$spec_file")" --arg prov "$(api_provider "$PROVIDER")" \
@@ -203,12 +208,17 @@ run_case() {
   [[ -n "$archive" ]] && sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
   [[ -n "$archive" ]] && archive_generation="$(cat "${archive}.generation" 2>/dev/null || true)"
   local effective_provider effective_model cost accepted_generation prior_generation latest_attempt_state unresolved spec_sha
+  local accepted_attempt initial_failure_outcome initial_failure_code acceptance_check_count
   effective_provider=$(jq -r '.effectiveProvider // .aiProvider // ""' <<<"$run_json")
   effective_model=$(jq -r '.effectiveModel // ""' <<<"$run_json")
   cost=$(jq -r '.actualCostUsd // 0' <<<"$run_json")
   accepted_generation=$(jq -r '.acceptedWorkspaceGeneration // ""' <<<"$run_json")
-  prior_generation=$(jq -r '.workspaceGenerationAttempts[0].priorAcceptedGeneration // ""' <<<"$run_json")
-  latest_attempt_state=$(jq -r '.workspaceGenerationAttempts[0].state // ""' <<<"$run_json")
+  accepted_attempt=$(jq -c '[.workspaceGenerationAttempts[]? | select(.state == "ACCEPTED")][0] // {}' <<<"$run_json")
+  prior_generation=$(jq -r '.priorAcceptedGeneration // ""' <<<"$accepted_attempt")
+  latest_attempt_state=$(jq -r '.state // ""' <<<"$accepted_attempt")
+  initial_failure_outcome=$(jq -r '.initialFailureEvidence.outcome // ""' <<<"$accepted_attempt")
+  initial_failure_code=$(jq -r '.initialFailureEvidence.code // ""' <<<"$accepted_attempt")
+  acceptance_check_count=$(jq '[.acceptanceChecks[]?] | length' <<<"$accepted_attempt")
   unresolved=$(jq '[.workspaceGenerationAttempts[]? | select(.state != "ACCEPTED" and .state != "ROLLED_BACK")] | length' <<<"$run_json")
   spec_sha="$(shasum -a 256 "$spec_file" | awk '{print $1}')"
   jq -cn \
@@ -221,6 +231,10 @@ run_case() {
     --arg priorAcceptedWorkspaceGeneration "$prior_generation" \
     --arg acceptedWorkspaceGeneration "$accepted_generation" \
     --arg latestWorkspaceGenerationAttemptState "$latest_attempt_state" \
+    --arg initialFailureOutcome "$initial_failure_outcome" \
+    --arg initialFailureCode "$initial_failure_code" \
+    --argjson acceptanceCheckCount "$acceptance_check_count" \
+    --argjson sharedKernelFlagEnabledAtSubmission "$BUILD_SHARED_KERNEL_ENABLED" \
     --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
     --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
     '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,specSha256:$specSha256,runId:$runId,terminalStatus:$status,
@@ -230,6 +244,9 @@ run_case() {
       priorAcceptedWorkspaceGeneration:$priorAcceptedWorkspaceGeneration,
       acceptedWorkspaceGeneration:$acceptedWorkspaceGeneration,
       latestWorkspaceGenerationAttemptState:$latestWorkspaceGenerationAttemptState,
+      initialFailureOutcome:$initialFailureOutcome,initialFailureCode:$initialFailureCode,
+      acceptanceCheckCount:$acceptanceCheckCount,
+      sharedKernelFlagEnabledAtSubmission:$sharedKernelFlagEnabledAtSubmission,
       unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
       heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \
     >> "${ARTIFACT_DIR}/completed-runs.jsonl"

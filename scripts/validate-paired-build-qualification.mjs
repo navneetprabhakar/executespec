@@ -25,6 +25,8 @@ const REQUIRED_ACCEPTED = new Set([
   "terminalStatus", "priorAcceptedWorkspaceGeneration", "acceptedWorkspaceGeneration",
   "latestWorkspaceGenerationAttemptState", "workspaceArchiveSha256",
   "workspaceArchiveGeneration", "heldOutPassed", "heldOutTotal", "generatedCodeReview",
+  "initialFailureOutcome", "initialFailureCode", "acceptanceCheckCount",
+  "sharedKernelFlagEnabledAtSubmission",
 ]);
 const REQUIRED_ROLLED_BACK = new Set([
   "priorAcceptedWorkspaceGeneration", "candidateEvidenceKind", "rejectedDiffSha256",
@@ -152,6 +154,7 @@ export function validatePlan(plan) {
     "rollbackMustRestorePriorFrontier", "systemVerifiedScoreIsNonAuthoritative",
     "manualGeneratedCodeReviewRequired", "allHeldOutTestsMustPassOnAcceptedArm",
     "legacyRejectedDiffMaySubstituteForUnfrozenCandidateGeneration",
+    "sharedKernelFlagMustBeEnabledAtSubmission",
   ]) if (rules[field] !== true) errors.push(`qualificationRules.${field} must be true`);
   if (rules.freshRunCount !== 2 || rules.safeMaxUsdPerRun !== 5) {
     errors.push("qualificationRules must pin two fresh runs at $5 each");

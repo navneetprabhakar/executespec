@@ -474,16 +474,19 @@ Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run
 
 The authorization-gated paired BUILD qualification is defined by
 `scripts/build-qualification/paired-build-v1.json`. It binds the control/candidate arms to distinct
-release SHAs on one HTTPS host in explicit control-before-deploy/candidate-after-deploy order, pins the same held-out spec/evaluator digests and exact
+release SHAs on one HTTPS host, pins the same held-out spec/evaluator digests and exact
 Anthropic/Sonnet 5 plus OpenRouter/GLM 5.2 routes, and requires accepted-generation evidence, zero
 unresolved generation attempts, a content-addressed export, all held-out tests, and an independent
-archive-bound code review. `scripts/run-paired-build-qualification.sh --dry-run` performs no login,
-submission, provider call, or deployment. `--execute-arm control|candidate` additionally requires
-`BUILD_QUAL_AUTHORIZATION_ID`, credentials, distinct release SHAs, and the per-route cost caps in
-the manifest. The committed matrix caps each run at $5 and the complete four-run suite at $20, so
-the sum of every arm/route/case cap cannot exceed the authorized total. The arm-specific command prevents candidate evidence from being collected before the
-same-host deployment boundary. `scripts/validate-paired-build-results.mjs` refuses an incomplete pair or system score
-in place of the held-out and manual evidence.
+archive-bound code review. The control arm is two immutable historical rollbacks and creates no
+fresh run. The candidate arm permits exactly two fresh runs, one per route, capped at $5 each and
+$10 total. `scripts/run-paired-build-qualification.sh --dry-run` performs no login, submission,
+provider call, flag mutation, or deployment. `--execute` additionally requires
+`BUILD_QUAL_AUTHORIZATION_ID`, credentials, the exact candidate SHA, reviewed controls, and a
+read-only pre-submit proof that `build.shared-code-change-loop.enabled=true`; that proof is repeated
+immediately before each paid submission. Candidate results are rejected unless the accepted attempt
+also contains an observed failure-first result and frozen acceptance checks. The harness never
+enables the global flag itself. `scripts/validate-paired-build-results.mjs` refuses an incomplete
+pair or system score in place of the held-out and manual evidence.
 
 Before any paid live qualification, run the provider-free mechanism corpus:
 

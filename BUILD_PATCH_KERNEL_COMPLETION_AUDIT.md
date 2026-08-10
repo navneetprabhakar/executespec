@@ -2,22 +2,24 @@
 
 Audit date: 2026-08-10
 Implementation baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`
-Local implementation commits: `dc40635de`, `8378774bf`, plus the final uncommitted audit closure
-described here.
+Deployed candidate fix: `b7630ce7f93036254e756f1e856ded8e53cffb02`
 
-This is a proof ledger, not a launch declaration. `app.executespec.ai` deployment and paid live
-qualification remain outside the current authorization. ExecuteSpec score is never acceptance
-authority.
+This is a proof ledger, not a launch declaration. ExecuteSpec score is never acceptance authority.
 
 ## Current verdict
 
 - M0-M5 are implemented locally.
-- M6 is locally complete: the final tree passed the full backend/PostgreSQL and frontend gates
-  listed below.
+- M6 is complete: the final tree passed the full backend/PostgreSQL and frontend gates listed below
+  and the planner normalization fix was deployed successfully to `app.executespec.ai`.
 - M7 has provider-free transaction/mechanism evidence. It does **not** yet have a real paired-model
   code-delivery-quality result; the scripted 30%/100%/100% comparison cannot prove model quality.
-- M8 is open: no push, deployment, paid model call or live run was authorized in this goal turn.
-- The product flag remains default-off. This audit does not authorize enabling it in dev.
+- M8 is open. The authorized Sonnet/GLM candidate pair spent $0.033108 total but both stopped in
+  planner recovery with zero tasks and zero workspace-generation attempts. They qualify neither
+  positive acceptance nor kernel rollback.
+- The product flag remains default-off. A newly discovered harness gap allowed paid qualification
+  to run against that legacy path. The executor now rechecks the flag before each submission and
+  candidate validation requires durable failure-first/check evidence. No flag mutation or new paid
+  run is authorized by this audit.
 
 ## Requirement-by-requirement evidence
 
@@ -39,9 +41,9 @@ authority.
 | 14 | API/UI evidence | Implemented | Run detail exposes attempt, route, explicit prior accepted/candidate/accepted generations, contract, initial acceptance-probe result, usage/cost, receipt, rejected diff and every check outcome. UI distinguishes candidate, failed verification, rollback and acceptance and renders each check. The API redacts hidden check targets/details and raw initial verifier output; immutable internal evidence remains available to verification and operators. Projection and `runResultUtils` tests. |
 | 15 | Observability | Implemented for shared-kernel additions | Typed replayable `WORKSPACE_GENERATION` events include the initial acceptance-probe result and lifecycle states. Metrics distinguish attempt, execution, command class, verification, rollback, recovery, authority/publication control and failure-delta outcomes with bounded route labels; an unresolved-attempt gauge is explicit. `WorkspaceGenerationTelemetryTest`, existing SSE/metrics tests and coordinator assertions. |
 | 16 | Compatibility/migration | Implemented | V376 rollout flag is default-off; V377/V378 are forward-only. Historical null fields are tolerated. PATCH callers continue using PATCH policy over the same port. Flyway inventory, DTO compatibility and PATCH/autofix tests. |
-| 17 | Required tests | Passed locally | Full Maven verification passed 7,068/7,068 with zero failures, errors or skips, including clean V1→V378 PostgreSQL migration and Hibernate validation. Frontend passed 94 files/742 tests, production build, Prettier and ESLint with zero errors (nine pre-existing warnings). |
-| 18 | Qualification | Partial | Ten-category provider-free A/B/C mechanism corpus passes transaction/no-leak gates with zero model spend. Because mutations are scripted, it is not evidence of real model correctness. The schema-v2 paired manifest permits exactly two fresh dev candidates—Sonnet 5 and GLM 5.2, each capped at $5—and treats the two pinned ROLLED_BACK runs only as immutable historical negative controls. Candidate execution fails closed until those controls, exact release/spec/harness digests and independent archive/diff review evidence validate. Paid execution and positive ACCEPTED proof remain open. |
-| 19 | Documentation | Implemented locally, external docs pending final sync | Root/package docs, architecture, API, runbook, migration inventory, qualification method and this audit are updated. External docs live in the separate docs worktree and must be committed without absorbing unrelated branch changes. |
+| 17 | Required tests | Passed | Full Maven verification passed 7,069/7,069 with zero failures, errors or skips, including clean V1→V378 PostgreSQL migration and Hibernate validation. Frontend passed 94 files/742 tests, production build, Prettier and ESLint with zero errors (nine pre-existing warnings). Qualification validators now pass 9/9. |
+| 18 | Qualification | Partial | Ten-category provider-free A/B/C mechanism corpus passes transaction/no-leak gates with zero model spend. The first paid pair stopped before kernel entry and is diagnostic only. A replacement pair remains unauthorized. The hardened executor now refuses a flag-off deployment before each paid submission, and accepted result validation requires durable observed-red and frozen-check evidence in addition to accepted generation, held-out tests and independent review. |
+| 19 | Documentation | Implemented | Root/package docs, architecture, API, runbook, migration inventory, qualification method and this audit are synchronized; external docs were committed separately. |
 | 20 | Definition of done | Not complete | Local architecture, containment and full verification are complete. Real paired quality evidence and separately authorized dev positive proof are still required; historical negative controls must validate against immutable evidence before either fresh candidate can start. |
 
 ## Acceptance-strength boundary

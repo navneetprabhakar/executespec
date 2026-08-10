@@ -34,6 +34,8 @@ function completeEvidence() {
         ...common, terminalStatus: "COMPLETE", acceptedWorkspaceGeneration: "c".repeat(64),
         latestWorkspaceGenerationAttemptState: "ACCEPTED", workspaceArchiveSha256: "d".repeat(64),
         workspaceArchiveGeneration: "c".repeat(64), heldOutPassed: 5, heldOutTotal: 5,
+        initialFailureOutcome: "FAILURE_OBSERVED", initialFailureCode: "REQUIRED_PATH_MISSING",
+        acceptanceCheckCount: 4, sharedKernelFlagEnabledAtSubmission: true,
       };
       records.push(record);
       reviews.set(key, { verdict: "PASS", runId: record.runId, workspaceArchiveSha256: record.workspaceArchiveSha256,
@@ -75,6 +77,18 @@ test("candidate evidence fails on route drift, cap breach, archive drift, and mi
   assert.ok(errors.some((error) => error.includes("per-run cap")));
   assert.ok(errors.some((error) => error.includes("archive is not bound")));
   assert.ok(errors.some((error) => error.includes("independent")));
+});
+
+test("candidate evidence fails when the run did not prove shared-kernel admission", () => {
+  const { records, reviews } = completeEvidence();
+  const candidate = records.find((record) => record.qualificationArm === "candidate");
+  candidate.sharedKernelFlagEnabledAtSubmission = false;
+  candidate.initialFailureOutcome = "";
+  candidate.acceptanceCheckCount = 0;
+  const errors = validateResultRecords(plan, records, reviews);
+  assert.ok(errors.some((error) => error.includes("shared BUILD kernel flag")));
+  assert.ok(errors.some((error) => error.includes("failure-first evidence")));
+  assert.ok(errors.some((error) => error.includes("acceptance checks")));
 });
 
 test("negative evidence fails unless exact prior frontier is restored and rejected diff reviewed", () => {

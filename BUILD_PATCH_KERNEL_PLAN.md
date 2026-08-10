@@ -1,8 +1,9 @@
 # BUILD/PATCH shared-kernel execution plan
 
-Status: M0-M6 locally implemented; M7 has provider-free mechanism evidence but real paired
-code-generation quality remains open; separately authorized live M8 remains open. Implementation
-baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`.
+Status: M0-M6 implemented and deployed at `b7630ce7f93036254e756f1e856ded8e53cffb02`;
+M7 has provider-free mechanism evidence but real paired code-generation quality remains open. The
+first authorized candidate pair stopped in planner recovery before any task or shared-kernel
+attempt, so it is diagnostic evidence only. A replacement pair is not authorized.
 
 ## Non-negotiable invariants
 
@@ -114,7 +115,16 @@ without widening customer run detail.
 After the candidate release is deployed, `scripts/capture-paired-build-controls.sh` performs only
 read-only API capture and writes review templates; it never submits a run or certifies the rejected
 diff. `run-paired-build-qualification.sh --execute` refuses both candidate submissions until the
-completed manual reviews make the controls-only validator pass.
+completed manual reviews make the controls-only validator pass. It also authenticates and reads the
+global rollout flag immediately before each paid submission; `false` or missing aborts before run
+creation. A candidate record is inadmissible unless the accepted attempt proves
+`FAILURE_OBSERVED`, names the initial failure code, and exposes at least one frozen acceptance
+check. The harness never mutates the flag.
+
+The first live candidate pair produced runs `52a21e50-c9dd-4330-92e4-eb6845e79706` and
+`1ee17f50-52d0-4a94-8bec-1b47cf60e0ee`. Both failed in planner recovery with zero tasks and zero
+workspace-generation attempts. Root-route normalization was corrected in `b7630ce7f`; these runs
+cannot serve as either ACCEPTED or ROLLED_BACK kernel proof and are not silently reused.
 
 Required corpus categories: empty Python library, empty REST API, empty TypeScript library, empty
 frontend component, brownfield feature addition, brownfield bug fix, multi-file wiring, database
