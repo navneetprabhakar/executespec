@@ -328,5 +328,8 @@ fails closed; unrelated entities' generic `id` fields are never conflated.
 - **SINGLE_SHOT surface fallback:** explicit CLI, library/module, HTTP/API/server, and static-web
   wording remains authoritative. When the requirement states none of those runtime boundaries,
   deterministic synthesis defaults to `LIBRARY`, not `HTTP`; absence of a boundary is not evidence
-  for endpoint scoring or independent HTTP test generation.
+  for endpoint scoring or independent HTTP test generation. Backticked HTTP operations retain the
+  method/path whitespace for every absolute route, including root-level paths such as
+  `GET /health`; normalizing inline-code slash spacing must never collapse that to `GET/health`
+  because the exact source-route gate would then reject the synthesized plan before worker spend.
 - **Prompts** in `src/main/resources/prompts/*.md` plus active `.txt` prompts loaded by specific non-tool agents. Dead rollback archives (`planner.v*.txt`, legacy `planner.txt`, `triage.txt`, `reviewer-v2.txt`) were removed in the 2026-07-02 prompt-audit cleanup; rollback uses `PromptAuditEntry.previousContent` and dynamically-created backups for live prompt files, not inert classpath archives.

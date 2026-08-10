@@ -270,7 +270,11 @@ final class PlanSafetyTextSupport {
         // the dot is immediately followed by an identifier (the shell hidden-path shape).
         .replaceAll("(?<=[A-Za-z0-9_])(?:\\.\\s+|\\s+\\.\\s+)(?=[A-Za-z0-9_])", ".")
         .replaceAll("\\s*/\\s*", "/")
-        .replaceAll("(?i)\\b(GET|POST|PUT|PATCH|DELETE)/api/", "$1 /api/");
+        // Slash-spacing cleanup above also compacts backticked HTTP operations such as
+        // `GET /health` into `GET/health`. Restore the required method/path boundary for every
+        // absolute route, not only `/api/...`; otherwise the exact-route gate loses root-level
+        // operations and rejects a valid SINGLE_SHOT plan before any worker can run.
+        .replaceAll("(?i)\\b(GET|POST|PUT|PATCH|DELETE)/", "$1 /");
   }
 
   static String rewriteFrontendMoneyParsing(String value) {
