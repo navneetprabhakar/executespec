@@ -191,6 +191,28 @@ class SequentialExecutorTierConfigTest {
   }
 
   @Test
+  void outputBudgetIsClampedToTheSelectedModelsRegisteredCapability() throws Exception {
+    ModelMatrixProperties matrix = new ModelMatrixProperties();
+    ModelMatrixProperties.ModelConfig constrained = new ModelMatrixProperties.ModelConfig();
+    constrained.setMaxOutputTokens(2048);
+    matrix.setModels(Map.of("small-model", constrained));
+    ModelResolver resolver = mock(ModelResolver.class);
+    lenient()
+        .when(resolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenThrow(new RuntimeException("use exact run route"));
+
+    Cfg c =
+        invoke(
+            newExecutor(resolver, matrix),
+            PlannedTask.Complexity.MEDIUM,
+            "openai",
+            "small-model",
+            false);
+
+    assertEquals(2048, c.maxTokens, "model capability must bound the complexity budget");
+  }
+
+  @Test
   void low_project_iter_cap_is_120() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "claude-foo", true);
     assertEquals(120, c.maxIter, "LOW iter cap 60; project ×2 = 120");

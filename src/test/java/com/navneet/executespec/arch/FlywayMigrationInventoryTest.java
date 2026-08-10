@@ -70,9 +70,12 @@ class FlywayMigrationInventoryTest {
     // exact inventory to 359. V374 introduces the durable workspace-generation transaction,
     // immutable verification receipts, and the accepted-generation run frontier, bringing the
     // exact inventory to 360. V375 preserves original BUILD rejection evidence while recording
-    // recovery failures separately, bringing the exact inventory to 361.
-    assertThat(migrations).hasSize(361);
-    assertThat(migrations.getLast().version()).isEqualTo("375");
+    // recovery failures separately, bringing the exact inventory to 361. V376 seeds the
+    // default-off BUILD shared-code-change-loop rollout control, bringing the exact inventory to
+    // 362. V377 adds immutable BUILD attempt contract, route, token, call, and cost evidence,
+    // bringing the exact inventory to 363.
+    assertThat(migrations).hasSize(363);
+    assertThat(migrations.getLast().version()).isEqualTo("377");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

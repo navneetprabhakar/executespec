@@ -186,6 +186,33 @@ class RunEventContractTest {
   }
 
   @Test
+  void workspaceGenerationCarriesTypedTransactionalAttemptEvidence() {
+    RunEvent event =
+        RunEvent.workspaceGeneration(
+            "run-1",
+            "task-1",
+            "BUILD generation verifying",
+            Map.of(
+                "attemptId", "attempt-1",
+                "state", "VERIFYING",
+                "generationKind", "BUILD_TASK",
+                "taskContractDigest", "contract-digest",
+                "provider", "openai",
+                "model", "gpt-5.4",
+                "candidateGeneration", "candidate-digest"));
+
+    assertEquals("WORKSPACE_GENERATION", event.type());
+    assertEquals("run-1", event.runId());
+    assertEquals("task-1", event.taskId());
+    assertEquals("BUILD generation verifying", event.payload());
+    assertEquals(1, event.schemaVersion());
+    assertEquals("attempt-1", event.data().get("attemptId"));
+    assertEquals("VERIFYING", event.data().get("state"));
+    assertEquals("contract-digest", event.data().get("taskContractDigest"));
+    assertEquals("candidate-digest", event.data().get("candidateGeneration"));
+  }
+
+  @Test
   void continuationActionCarriesTypedRerunEnvelope() {
     RunEvent event =
         RunEvent.continuationAction(

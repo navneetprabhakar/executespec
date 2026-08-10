@@ -60,7 +60,11 @@ public class WorkspaceGenerationLifecycle {
       int taskIndex,
       Path workspaceRoot,
       String authorityDigest,
-      String taskContractDigest) {
+      String taskContractDigest,
+      String taskContractJson,
+      String initialFailureEvidenceJson,
+      String requestedProvider,
+      String requestedModel) {
     requireHash(authorityDigest, "WORKSPACE_GENERATION_AUTHORITY_DIGEST_INVALID");
     requireHash(taskContractDigest, "WORKSPACE_GENERATION_TASK_CONTRACT_DIGEST_INVALID");
     if (taskIndex < 0)
@@ -96,6 +100,20 @@ public class WorkspaceGenerationLifecycle {
               .ignoredArtifactBaselineDigest(ignoredBaseline.digest())
               .authorityDigest(authorityDigest)
               .taskContractDigest(taskContractDigest)
+              .taskContractJson(
+                  taskContractJson == null || taskContractJson.isBlank()
+                      ? null
+                      : canonicalJson(taskContractJson))
+              .initialFailureEvidenceJson(
+                  initialFailureEvidenceJson == null || initialFailureEvidenceJson.isBlank()
+                      ? null
+                      : canonicalJson(initialFailureEvidenceJson))
+              .requestedProvider(
+                  requestedProvider == null || requestedProvider.isBlank()
+                      ? null
+                      : requestedProvider)
+              .requestedModel(
+                  requestedModel == null || requestedModel.isBlank() ? null : requestedModel)
               .workspaceLeaseToken(lease.ownerToken())
               .beforeCheckpointKind(beforeCheckpoint.kind())
               .beforeCheckpointKey(beforeCheckpoint.key())

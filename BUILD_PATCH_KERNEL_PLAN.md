@@ -1,0 +1,114 @@
+# BUILD/PATCH shared-kernel execution plan
+
+Status: M0-M7 locally complete; separately authorized live M8 remains open. Implementation
+baseline: `86fa732bbb89cb9629f84c64036e1b62c88d3c7c`.
+
+## Non-negotiable invariants
+
+1. BUILD orchestration never invokes PATCH orchestration as a black box.
+2. BUILD and PATCH execute mutations through one provider-neutral `CodeChangeLoop` port.
+3. Only a verified workspace generation may advance the accepted frontier.
+4. A rejected or unresolved generation cannot feed another task, reviewer, checkpoint, validation,
+   preview, deployment, or SCM publication.
+5. Provider calls and mutating tools remain bound to the exact active generation/LLM lease.
+6. Server-resolved commands, not planner/model-authored commands, are acceptance authority.
+7. Shell activity alone is not progress. Progress requires a mutation, changed deterministic
+   evidence, or acceptance-check advancement.
+8. Route changes create a separately fenced physical attempt and never inherit accepted authority.
+9. Existing PATCH, benchmark, and autofix callers retain their current mode-specific policy.
+10. Streaming, prompt tuning, token increases, reviewer mutation, or internal score changes cannot
+    substitute for these invariants.
+
+## Milestone gates
+
+| Milestone | Outcome gate | Status |
+| --- | --- | --- |
+| M0 | Baseline, invariants, corpus, thresholds and rollback-safe flag are frozen. | COMPLETE |
+| M1 | BUILD and PATCH depend on the shared kernel port; PATCH behavior is characterized. | COMPLETE |
+| M2 | Supported BUILD tasks begin with a typed contract, deterministic baseline and executable failure signal. | COMPLETE |
+| M3 | Shared BUILD loop runs inside V374/V375 accept-or-rollback authority. | COMPLETE |
+| M4 | Multi-task/repo, routing, context, tool, termination and reviewer semantics are proven. | COMPLETE |
+| M5 | API/UI/SSE/metrics expose independently inspectable attempt and acceptance evidence. | COMPLETE |
+| M6 | Full compatibility, crash, race, rollback and regression gates pass. | COMPLETE |
+| M7 | Provider-free held-out A/B/C mechanism evaluation clears the predeclared local gates. | COMPLETE |
+| M8 | Documentation, recovery runbook, separately authorized live proof and completion audit close. | LIVE PROOF PENDING |
+
+## Authoritative baseline
+
+- PATCH entry: `engine.CodeGenEngineImpl` constructs PATCH policy and dispatches one prepared
+  workspace into the mutation loop.
+- BUILD entry: `harness.SequentialExecutor` constructs per-task BUILD policy and delegates the
+  entire attempt to `BuildTaskGenerationCoordinator`.
+- Shared implementation before M1: both callers directly depended on `WorkerAgent`; reuse existed
+  but was not an enforceable architecture port.
+- Transaction authority: `workspacegeneration.WorkspaceGenerationLifecycle`, coordinated through
+  `BuildTaskGenerationCoordinator`.
+- Acceptance authority: `TaskAcceptanceContractResolver` plus `TaskAcceptanceVerifier`; the M0
+  schema is server-owned but does not yet freeze the complete runtime/check/command contract before
+  mutation.
+- Live negative-path baseline: Sonnet run `df74e82f-f593-44e3-8e81-eed3b42b6c5e` and GLM run
+  `1572b2eb-bb24-4b3b-84eb-a5c34375827e` both wrote three files, failed deterministic tests and
+  reached `ROLLED_BACK` without downstream leakage.
+- Positive live accepted-generation proof remains absent and cannot be claimed from unit tests.
+
+## Implemented kernel
+
+- `engine.CodeChangeLoop` is the provider-neutral inspect/edit/test/diagnose port. `WorkerAgent` is
+  its production implementation; PATCH `CodeGenEngineImpl` and BUILD `SequentialExecutor` depend
+  on that port while keeping separate orchestration and policy.
+- With `build.shared-code-change-loop.enabled`, BUILD freezes a schema-v2 acceptance contract and
+  deterministic greenfield baseline before mutation. Python, Node/TypeScript, Java/Maven, React,
+  and path-explicit multi-repository tasks receive an executable red acceptance surface without
+  product implementation.
+- Deterministic failure deltas are typed as INITIAL_FAILURE, IMPROVED, REGRESSED, CHANGED,
+  UNCHANGED, or PASSED. Only changed/improved/passed evidence resets progress; repeated identical
+  failure is surfaced instead of treating shell activity as progress.
+- Every provider/model change re-enters a new V374 generation attempt from the accepted frontier.
+  A route cannot inherit and later legitimize another route's speculative candidate.
+- V377 freezes contract, initial-failure, requested/effective route, iteration/tool/call/token and
+  cost evidence. Run detail, typed SSE, metrics, and the Evidence UI expose candidate,
+  verification, and rollback as separate trust facts.
+
+## Qualification comparison
+
+- A: current BUILD behavior at the M0 baseline.
+- B: BUILD through the shared failure-first kernel.
+- C: current PATCH behavior where the case has an existing-repository/failing-check equivalent.
+
+The evaluator must be held out from the model and must not read ExecuteSpec's verified score.
+
+The provider-free scripted mechanism run is reproducible with:
+
+```bash
+node scripts/build-kernel-provider-free-qualification.mjs
+node --test scripts/build-kernel-provider-free-qualification.test.mjs
+```
+
+The 10-category result was A=30%, B=100%, C=100% (70 percentage-point uplift), with zero
+candidate wrong accepts, unresolved attempts, rollback mismatches, or PATCH regressions. This is
+mechanism evidence using scripted mutations and zero model calls; it is deliberately not presented
+as live-model quality evidence. The generated report is
+`target/build-kernel-qualification/provider-free-v1.json`.
+
+Required corpus categories: empty Python library, empty REST API, empty TypeScript library, empty
+frontend component, brownfield feature addition, brownfield bug fix, multi-file wiring, database
+migration, multi-task dependency, and multi-repository contract change.
+
+## Predeclared go/no-go thresholds
+
+- leaked or wrongly accepted generations: exactly zero;
+- unresolved attempts at terminal: exactly zero;
+- held-out correctness: at least 20 percentage points above baseline BUILD once the corpus has an
+  adequate comparable sample;
+- PATCH regressions: zero on deterministic existing passing cases;
+- positive proof: at least one accepted case per supported ecosystem;
+- negative proof: at least one exact rollback per major failure class;
+- identical failing command repetition: must stop at the configured threshold;
+- acceptance receipt, accepted frontier and checkpoint generation: exact equality;
+- cost and wall-clock: reported by route and bounded by the request; no hidden fail-open budget.
+
+## Authorization boundary
+
+Local edits and tests are authorized. Push, deployment, benchmark execution, paid provider calls,
+and live qualification require separate explicit authorization. A later live approval must state the
+provider/model matrix and per-run cost cap.

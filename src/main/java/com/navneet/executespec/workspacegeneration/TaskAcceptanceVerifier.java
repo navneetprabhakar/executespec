@@ -1,5 +1,7 @@
 package com.navneet.executespec.workspacegeneration;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,9 +51,14 @@ public class TaskAcceptanceVerifier {
     boolean actualCodeChanged =
         changedFiles.stream().anyMatch(TaskAcceptanceContractResolver::isCodePath);
     boolean testRequired = "REQUIRED".equals(contract.testRequirement()) || actualCodeChanged;
+    boolean schemaV2 = contract.schemaVersion() >= 2;
+    boolean requiredPathsPresent =
+        requiredPathsPresent(context.workspaceRoot(), contract.requiredPaths());
+    boolean frozenBuildMatches = !schemaV2 || matches(contract.buildCommand(), build);
+    boolean frozenTestMatches = !schemaV2 || matches(contract.testCommand(), test.orElse(null));
 
     Map<String, Object> commandContract = new LinkedHashMap<>();
-    commandContract.put("schemaVersion", 1);
+    commandContract.put("schemaVersion", contract.schemaVersion());
     commandContract.put("policy", contract.verificationPolicy());
     commandContract.put("buildSource", build.sourceDescription());
     commandContract.put("buildCommand", build.command());
@@ -59,6 +66,14 @@ public class TaskAcceptanceVerifier {
     commandContract.put("testRequirement", contract.testRequirement());
     commandContract.put("effectiveTestRequirement", testRequired ? "REQUIRED" : "OPTIONAL");
     commandContract.put("actualChangedFiles", changedFiles);
+    commandContract.put("runtimeSurface", contract.runtimeSurface());
+    commandContract.put("baselineKind", contract.baselineKind());
+    commandContract.put("frozenBuildCommand", contract.buildCommand());
+    commandContract.put("frozenTestCommand", contract.testCommand());
+    commandContract.put("requiredPaths", contract.requiredPaths());
+    commandContract.put("requiredPathsPresent", requiredPathsPresent);
+    commandContract.put("frozenBuildMatches", frozenBuildMatches);
+    commandContract.put("frozenTestMatches", frozenTestMatches);
     commandContract.put("testSource", test.map(TestCommand::source).orElse(null));
     commandContract.put("testCommand", test.map(TestCommand::command).orElse(null));
     commandContract.put("testTimeoutSeconds", test.map(TestCommand::timeoutSeconds).orElse(null));
@@ -77,7 +92,12 @@ public class TaskAcceptanceVerifier {
     boolean exactResolvedBuild =
         buildOutput.contains("command=" + build.command() + "\n")
             && buildOutput.contains("source=" + build.sourceDescription());
-    boolean buildPassed = parsed.passed() && !noOp && exactResolvedBuild;
+    boolean buildPassed =
+        parsed.passed()
+            && !noOp
+            && exactResolvedBuild
+            && frozenBuildMatches
+            && requiredPathsPresent;
     String outcome;
 
     Optional<DetailedResult> testResult = Optional.empty();
@@ -95,7 +115,9 @@ public class TaskAcceptanceVerifier {
             && summary.getFailed() == 0
             && summary.getErrors() == 0;
 
-    if (!mutationPresent) {
+    if (schemaV2 && (!frozenBuildMatches || !frozenTestMatches || !requiredPathsPresent)) {
+      outcome = "FAILED";
+    } else if (!mutationPresent) {
       outcome = "FAILED";
     } else if (noOp || parsed.status() == BuildVerificationResult.Status.UNAVAILABLE) {
       outcome = "UNAVAILABLE";
@@ -112,10 +134,13 @@ public class TaskAcceptanceVerifier {
     }
 
     Map<String, Object> evidence = new LinkedHashMap<>();
-    evidence.put("schemaVersion", 1);
+    evidence.put("schemaVersion", contract.schemaVersion());
     evidence.put("taskContractDigest", contract.digest());
     evidence.put("buildStatus", parsed.status().name());
     evidence.put("exactResolvedBuild", exactResolvedBuild);
+    evidence.put("frozenBuildMatches", frozenBuildMatches);
+    evidence.put("frozenTestMatches", frozenTestMatches);
+    evidence.put("requiredPathsPresent", requiredPathsPresent);
     evidence.put("actualChangedFiles", changedFiles);
     evidence.put("actualCodeChanged", actualCodeChanged);
     evidence.put("buildExitCode", parsed.exitCode());
@@ -155,6 +180,34 @@ public class TaskAcceptanceVerifier {
     } catch (JsonProcessingException impossible) {
       throw new IllegalStateException("TASK_ACCEPTANCE_EVIDENCE_SERIALIZATION_FAILED", impossible);
     }
+  }
+
+  private static boolean matches(
+      TaskAcceptanceContract.ResolvedCommand frozen, BuildCommand actual) {
+    if (frozen == null || actual == null) return false;
+    return java.util.Objects.equals(frozen.command(), actual.command())
+        && frozen.timeoutSeconds() == actual.timeoutSeconds()
+        && java.util.Objects.equals(frozen.source(), actual.sourceDescription());
+  }
+
+  private static boolean matches(
+      TaskAcceptanceContract.ResolvedCommand frozen, TestCommand actual) {
+    if (frozen == null && actual == null) return true;
+    if (frozen == null || actual == null) return false;
+    return java.util.Objects.equals(frozen.command(), actual.command())
+        && frozen.timeoutSeconds() == actual.timeoutSeconds()
+        && java.util.Objects.equals(frozen.source(), actual.source())
+        && java.util.Objects.equals(frozen.framework(), actual.framework().name());
+  }
+
+  private static boolean requiredPathsPresent(Path workspaceRoot, List<String> requiredPaths) {
+    Path root = workspaceRoot.toAbsolutePath().normalize();
+    for (String required : requiredPaths) {
+      if (required == null || required.isBlank() || required.startsWith("/")) return false;
+      Path resolved = root.resolve(required).normalize();
+      if (!resolved.startsWith(root) || !Files.exists(resolved)) return false;
+    }
+    return true;
   }
 
   private static String bounded(String value) {

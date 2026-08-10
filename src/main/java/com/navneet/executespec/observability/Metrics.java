@@ -173,6 +173,38 @@ public class Metrics {
         .increment();
   }
 
+  public void recordWorkspaceGenerationState(String state, String provider, String model) {
+    Counter.builder(NS + "workspace_generation.state")
+        .tags(
+            Tags.of(
+                Tag.of("state", nonNull(state)),
+                Tag.of("provider", nonNull(provider)),
+                Tag.of("model", nonNull(model))))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordWorkspaceGenerationVerification(String outcome, Duration elapsed) {
+    Timer.builder(NS + "workspace_generation.verification")
+        .tag("outcome", nonNull(outcome))
+        .register(registry)
+        .record(elapsed);
+  }
+
+  public void recordWorkspaceGenerationRollback(String outcome, Duration elapsed) {
+    Timer.builder(NS + "workspace_generation.rollback")
+        .tag("outcome", nonNull(outcome))
+        .register(registry)
+        .record(elapsed);
+  }
+
+  public void recordDeterministicFailureDelta(String delta) {
+    Counter.builder(NS + "worker.failure_delta")
+        .tag("delta", nonNull(delta))
+        .register(registry)
+        .increment();
+  }
+
   public void recordLlmLatency(String provider, String model, String outcome, Duration elapsed) {
     Timer.builder(NS + "llm.latency")
         .tags(

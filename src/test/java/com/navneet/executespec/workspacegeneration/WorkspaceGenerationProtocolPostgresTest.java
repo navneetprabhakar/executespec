@@ -92,6 +92,30 @@ class WorkspaceGenerationProtocolPostgresTest {
         .hasMessageContaining("illegal workspace generation transition");
 
     jdbc.update("UPDATE workspace_generation_attempt SET state='MUTATING' WHERE id=?", attemptId);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET task_contract_json='{}'::jsonb,"
+            + "initial_failure_evidence_json='{}'::jsonb,requested_provider='openai',"
+            + "requested_model='gpt-5.4',effective_provider='openai',effective_model='gpt-5.4',"
+            + "worker_iterations=3,worker_tool_calls=5,model_calls=4,input_tokens=100,"
+            + "output_tokens=20,cache_read_tokens=10,cache_write_tokens=2,reasoning_tokens=7,"
+            + "cost_usd=0.125 WHERE id=?",
+        attemptId);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET effective_model='gpt-5.4-mini'"
+                        + " WHERE id=?",
+                    attemptId))
+        .rootCause()
+        .hasMessageContaining("workspace generation execution evidence is immutable");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET task_contract_json="
+                        + "'{\"changed\":true}'::jsonb WHERE id=?",
+                    attemptId))
+        .rootCause()
+        .hasMessageContaining("workspace generation task contract is immutable");
     UUID competingAttemptId = UUID.randomUUID();
     assertThatThrownBy(
             () ->

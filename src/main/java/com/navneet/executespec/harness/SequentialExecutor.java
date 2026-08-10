@@ -20,6 +20,8 @@ import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.context.ContextPlanner;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.CodeChangeLoop;
+import com.navneet.executespec.engine.CodeChangeMode;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -314,7 +316,7 @@ completeTask:
 This applies ONLY to apps meant to run; pure libraries, scripts, and config-only tasks have nothing
 to boot — skip it for those.""";
 
-  private final WorkerAgent worker;
+  private final CodeChangeLoop worker;
   private final BuildProjectTool buildProjectTool;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
@@ -375,7 +377,7 @@ to boot — skip it for those.""";
    * constructor below and always supplies {@link TaskStatusPersistenceService}.
    */
   public SequentialExecutor(
-      WorkerAgent worker,
+      CodeChangeLoop worker,
       BuildProjectTool buildProjectTool,
       ObjectMapper objectMapper,
       Metrics metrics,
@@ -414,7 +416,7 @@ to boot — skip it for those.""";
   }
 
   public SequentialExecutor(
-      WorkerAgent worker,
+      CodeChangeLoop worker,
       BuildProjectTool buildProjectTool,
       ObjectMapper objectMapper,
       Metrics metrics,
@@ -456,7 +458,7 @@ to boot — skip it for those.""";
 
   @Autowired
   public SequentialExecutor(
-      WorkerAgent worker,
+      CodeChangeLoop worker,
       BuildProjectTool buildProjectTool,
       ObjectMapper objectMapper,
       Metrics metrics,
@@ -930,6 +932,8 @@ to boot — skip it for those.""";
             outcome = executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
           }
           throwIfCancellationRequested(runId, task.id());
+          if (buildTaskGenerations != null && buildTaskGenerations.isolatesRouteChanges())
+            return outcome;
           return resume == null
               ? maybeActOnContinuation(task, plan, req, isFinalTask, outcome)
               : outcome;
@@ -962,34 +966,16 @@ to boot — skip it for those.""";
         runId,
         TaskCategoryClassifier.classify(task),
         task.complexity().name(),
-        taskLanguage(task),
+        TaskOutcomeMetricDimensions.language(task),
         outcome.retryAttempted() ? 2 : 1,
         outcome,
         usage == null ? 0 : RunCostTracker.saturatedInt(usage.outputTokens()),
-        maxOutputTokens(task.complexity()),
+        ModelOutputTokenBudget.clamp(
+            matrixProps,
+            outcome.dispatchedModel(),
+            TaskOutcomeMetricDimensions.desiredOutputTokens(task.complexity())),
         iterations,
         usage == null ? 0.0 : usage.costUsd());
-  }
-
-  private static int maxOutputTokens(PlannedTask.Complexity complexity) {
-    return switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
-      case LOW -> 4096;
-      case MEDIUM -> 8192;
-      case HIGH -> 16384;
-    };
-  }
-
-  private static String taskLanguage(PlannedTask task) {
-    for (String file : taskValues(task.touchesFiles())) {
-      String lower = file.toLowerCase(Locale.ROOT);
-      if (lower.endsWith(".java")) return "java";
-      if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
-      if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
-      if (lower.endsWith(".py")) return "python";
-      if (lower.endsWith(".rs")) return "rust";
-      if (lower.endsWith(".go")) return "go";
-    }
-    return null;
   }
 
   /** Conservative, provider-neutral task prompt budget used before model selection. */
@@ -1894,6 +1880,8 @@ to boot — skip it for those.""";
             requestedProvider,
             requestedModel,
             req.localHandsMode());
+    if (buildTaskGenerations != null)
+      systemPrompt = buildTaskGenerations.withAcceptanceDirective(systemPrompt);
     String workerEvidence =
         PromptComposer.assembleWorkerEvidence(
             task,
@@ -1992,6 +1980,7 @@ to boot — skip it for those.""";
             .systemPrompt(systemPrompt)
             .userPrompt(userPrompt)
             .context(taskCtx)
+            .changeMode(CodeChangeMode.BUILD)
             .maxIterations(
                 req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
             .temperature(0.0)
@@ -2006,19 +1995,13 @@ to boot — skip it for those.""";
             .strictProvider(providerModelOverride != null || Boolean.TRUE.equals(req.routePinned()))
             .zeroWriteSalvageAllowed(providerModelOverride == null)
             .mutationChurnForceAfter(maxEditChurn())
-            .verifyBeforeComplete(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+            .verifyBeforeComplete(sharedWorkerControl("worker.verify-before-complete.enabled"))
             // progress-v2 (V255, default OFF): novelty-based progress + repetition-based force +
             // bounded text-only retries; the v1 write-only engine is byte-identical when off.
-            .progressV2(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+            .progressV2(sharedWorkerControl("worker.progress-v2.enabled"))
             // auto-verify (V259, default ON): server-side edit-burst test runs with
             // failure-output injection (schema-free; supersedes V209/V217 on graduation).
-            .autoVerify(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+            .autoVerify(sharedWorkerControl("worker.auto-verify.enabled"))
             .workerStartedAtEpochMs(taskStart)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
@@ -2336,6 +2319,7 @@ to boot — skip it for those.""";
                 .systemPrompt(systemPrompt)
                 .userPrompt(retryPrompt)
                 .context(taskCtx)
+                .changeMode(CodeChangeMode.BUILD)
                 .maxIterations(retryMaxIter)
                 .temperature(0.0)
                 .maxTokensPerCall(cfg.maxTokens)
@@ -2532,6 +2516,7 @@ to boot — skip it for those.""";
                   .systemPrompt(systemPrompt)
                   .userPrompt(retry2Prompt)
                   .context(taskCtx)
+                  .changeMode(CodeChangeMode.BUILD)
                   .maxIterations(
                       req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
                   .temperature(0.0)
@@ -4080,6 +4065,7 @@ to boot — skip it for those.""";
       LlmProvider p =
           runProvider == null ? LlmProvider.OPENAI : LlmProvider.valueOf(runProvider.toUpperCase());
       ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
+      maxTokens = ModelOutputTokenBudget.clamp(matrixProps, resolved.getModel(), maxTokens);
       int[] profileThresholds =
           capabilityStagnationThresholds(resolved.providerName(), resolved.getModel());
       return new TierConfig(
@@ -4100,6 +4086,7 @@ to boot — skip it for those.""";
           runProvider,
           runModel);
       int[] profileThresholds = capabilityStagnationThresholds(runProvider, runModel);
+      maxTokens = ModelOutputTokenBudget.clamp(matrixProps, runModel, maxTokens);
       return new TierConfig(
           runProvider,
           runModel,
@@ -4111,6 +4098,13 @@ to boot — skip it for those.""";
           wallClockSeconds,
           forceSalvageTool);
     }
+  }
+
+  private boolean sharedWorkerControl(String flag) {
+    boolean configured = featureFlagService != null && featureFlagService.isEnabled(flag);
+    return buildTaskGenerations == null
+        ? configured
+        : buildTaskGenerations.workerControlEnabled(flag, configured);
   }
 
   /**

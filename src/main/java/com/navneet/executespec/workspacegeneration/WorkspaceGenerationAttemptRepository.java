@@ -56,6 +56,33 @@ public interface WorkspaceGenerationAttemptRepository
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.effectiveProvider = :provider, "
+          + "a.effectiveModel = :model, a.workerIterations = :iterations, "
+          + "a.workerToolCalls = :toolCalls, a.modelCalls = :modelCalls, "
+          + "a.inputTokens = :inputTokens, a.outputTokens = :outputTokens, "
+          + "a.cacheReadTokens = :cacheReadTokens, a.cacheWriteTokens = :cacheWriteTokens, "
+          + "a.reasoningTokens = :reasoningTokens, a.costUsd = :costUsd, a.updatedAt = :now "
+          + "WHERE a.id = :id AND a.workspaceLeaseToken = :token AND a.state = :mutating "
+          + "AND a.effectiveProvider IS NULL")
+  int recordExecutionEvidence(
+      @Param("id") UUID id,
+      @Param("token") UUID token,
+      @Param("mutating") WorkspaceGenerationState mutating,
+      @Param("provider") String provider,
+      @Param("model") String model,
+      @Param("iterations") int iterations,
+      @Param("toolCalls") int toolCalls,
+      @Param("modelCalls") long modelCalls,
+      @Param("inputTokens") long inputTokens,
+      @Param("outputTokens") long outputTokens,
+      @Param("cacheReadTokens") long cacheReadTokens,
+      @Param("cacheWriteTokens") long cacheWriteTokens,
+      @Param("reasoningTokens") long reasoningTokens,
+      @Param("costUsd") java.math.BigDecimal costUsd,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :verifying, "
           + "a.candidateGeneration = :candidate, a.updatedAt = :now "
           + "WHERE a.id = :id AND a.workspaceLeaseToken = :token AND a.state = :mutating")

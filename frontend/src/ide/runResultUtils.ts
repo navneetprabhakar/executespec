@@ -311,6 +311,7 @@ export function publicationTrustFacts(
   const latestGenerationFailure = generationAttempts.find(
     (attempt) => attempt.failureCode || attempt.recoveryFailureCode,
   );
+  const latestGeneration = generationAttempts[0];
 
   const facts: PublicationTrustFact[] = [
     {
@@ -356,6 +357,65 @@ export function publicationTrustFacts(
               : generationAttempts.length > 0
                 ? 'ok'
                 : 'bad',
+    },
+    {
+      label: 'Latest generated candidate',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No candidate attempt exists'
+            : latestGeneration.candidateGeneration
+              ? `Candidate ${latestGeneration.candidateGeneration.slice(0, 12)} · ${latestGeneration.state} · contract ${latestGeneration.taskContractDigest?.slice(0, 12) || 'legacy'}${latestGeneration.effectiveProvider ? ` · ${latestGeneration.effectiveProvider}/${latestGeneration.effectiveModel || 'unknown'}` : ''}`
+              : `Attempt ${latestGeneration.attemptId.slice(0, 8)} · ${latestGeneration.state} · candidate digest not frozen yet`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : latestGeneration?.state === 'ACCEPTED'
+            ? 'ok'
+            : latestGeneration
+              ? 'warn'
+              : 'neutral',
+    },
+    {
+      label: 'Latest candidate verification',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No verification evidence'
+            : latestGeneration.verificationReceiptId
+              ? `${latestGeneration.verificationOutcome || 'UNKNOWN'} · build ${latestGeneration.verificationBuildPassed ? 'passed' : 'failed'} · tests ${latestGeneration.verificationTestsPassed ?? 0} passed / ${latestGeneration.verificationTestsFailed ?? 0} failed · receipt ${latestGeneration.verificationReceiptId.slice(0, 8)}`
+              : `No immutable verification receipt · current state ${latestGeneration.state}`,
+      kind:
+        latestGeneration?.verificationOutcome === 'PASSED'
+          ? 'ok'
+          : latestGeneration?.verificationOutcome
+            ? 'bad'
+            : 'warn',
+    },
+    {
+      label: 'Latest candidate rollback',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No generation attempt'
+            : latestGeneration.state === 'ROLLED_BACK'
+              ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${latestGeneration.beforeGeneration.slice(0, 12)}`
+              : latestGeneration.state === 'RECOVERY_FAILED'
+                ? `Rollback recovery failed · ${latestGeneration.recoveryFailureCode || 'operator action required'}`
+                : latestGeneration.state === 'ACCEPTED'
+                  ? 'Not rolled back; deterministic verification and frontier CAS accepted this generation'
+                  : `Rollback not terminal · current state ${latestGeneration.state}`,
+      kind:
+        latestGeneration?.state === 'ACCEPTED'
+          ? 'ok'
+          : latestGeneration?.state === 'ROLLED_BACK'
+            ? 'warn'
+            : latestGeneration?.state === 'RECOVERY_FAILED'
+              ? 'bad'
+              : 'neutral',
     },
     {
       label: 'Approved correction route',

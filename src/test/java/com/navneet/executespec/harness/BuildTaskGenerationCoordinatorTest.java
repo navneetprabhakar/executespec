@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -21,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.GcsTaskCheckpointService;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
@@ -33,6 +37,8 @@ import com.navneet.executespec.integration.RunLlmOperationLifecycleService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.GreenfieldBaselinePlan;
+import com.navneet.executespec.workspacegeneration.GreenfieldBaselineService;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
@@ -53,25 +59,49 @@ class BuildTaskGenerationCoordinatorTest {
   private RunLlmOperationLifecycleService operations;
   private GcsTaskCheckpointService checkpoints;
   private SseBroadcaster broadcaster;
+  private GreenfieldBaselineService greenfieldBaselines;
+  private FeatureFlagService featureFlags;
+  private com.navneet.executespec.cost.RunCostTracker costTracker;
+  private com.navneet.executespec.observability.Metrics metrics;
   private BuildTaskGenerationCoordinator coordinator;
   private PlannedTask task;
   private Plan plan;
   private ExecutionRequest request;
   private WorkspaceGenerationLifecycle.Prepared prepared;
+  private com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder
+      executionEvidence;
   private RunLlmOperationLifecycleService.PhaseLease operation;
   private TaskAcceptanceContract contract;
 
   @BeforeEach
   void setUp() {
     generations = mock(WorkspaceGenerationLifecycle.class);
+    executionEvidence =
+        mock(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder
+                .class);
     contracts = mock(TaskAcceptanceContractResolver.class);
     verifier = mock(TaskAcceptanceVerifier.class);
     operations = mock(RunLlmOperationLifecycleService.class);
     checkpoints = mock(GcsTaskCheckpointService.class);
     broadcaster = mock(SseBroadcaster.class);
+    greenfieldBaselines = mock(GreenfieldBaselineService.class);
+    featureFlags = mock(FeatureFlagService.class);
+    costTracker = mock(com.navneet.executespec.cost.RunCostTracker.class);
+    metrics = mock(com.navneet.executespec.observability.Metrics.class);
     coordinator =
         new BuildTaskGenerationCoordinator(
-            generations, contracts, verifier, operations, checkpoints, broadcaster);
+            generations,
+            executionEvidence,
+            contracts,
+            verifier,
+            operations,
+            checkpoints,
+            broadcaster,
+            greenfieldBaselines,
+            featureFlags,
+            costTracker,
+            metrics);
 
     task = PlannedTask.builder().id("T1").title("Build API").description("Implement API").build();
     plan = Plan.builder().planTitle("Build").tasks(List.of(task)).build();
@@ -100,8 +130,31 @@ class BuildTaskGenerationCoordinatorTest {
     when(contracts.resolve(task, 0)).thenReturn(contract);
     when(contracts.authorityDigest(plan, "Build the API", "single repository"))
         .thenReturn("a".repeat(64));
+    when(contracts.canonicalContract(any())).thenReturn("{}");
+    when(contracts.canonicalInitialFailureEvidence(any())).thenReturn("[]");
     when(generations.prepareBuild(
-            eq("run-1"), eq("T1"), eq(0), eq(workspace), anyString(), eq(contract.digest())))
+            eq("run-1"),
+            eq("T1"),
+            eq(0),
+            eq(workspace),
+            anyString(),
+            eq(contract.digest()),
+            isNull(),
+            isNull(),
+            isNull(),
+            isNull()))
+        .thenReturn(prepared);
+    when(generations.prepareBuild(
+            eq("run-1"),
+            eq("T1"),
+            eq(0),
+            eq(workspace),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString(),
+            anyString()))
         .thenReturn(prepared);
 
     LlmExecutionOperationCoordinator.Lease delegate = operationLease();
@@ -160,7 +213,17 @@ class BuildTaskGenerationCoordinatorTest {
     InOrder order = inOrder(generations, verifier, checkpoints, status, operations);
     order
         .verify(generations)
-        .prepareBuild(anyString(), anyString(), anyInt(), any(), anyString(), anyString());
+        .prepareBuild(
+            anyString(),
+            anyString(),
+            anyInt(),
+            any(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            isNull(),
+            isNull());
     order.verify(generations).markMutating(prepared);
     order.verify(generations).bindLlmAttempt(eq(prepared), eq("llm-op-1"), eq(1), any(UUID.class));
     order.verify(generations).assertDispatch(prepared);
@@ -178,6 +241,10 @@ class BuildTaskGenerationCoordinatorTest {
     order.verify(operations).complete(operation);
     verify(generations, org.mockito.Mockito.times(2)).assertDispatch(prepared);
     verify(generations, never()).rollback(any(), anyString(), anyString());
+    verify(metrics, never()).recordWorkspaceGenerationState(anyString(), anyString(), anyString());
+    verify(metrics, never()).recordWorkspaceGenerationVerification(anyString(), any());
+    verify(broadcaster, never())
+        .emit(eq("run-1"), argThat(event -> "WORKSPACE_GENERATION".equals(event.type())));
   }
 
   @Test
@@ -239,6 +306,131 @@ class BuildTaskGenerationCoordinatorTest {
             .build();
 
     assertThat(BuildTaskGenerationCoordinator.acceptanceFailed(skipped)).isTrue();
+  }
+
+  @Test
+  void enabledFailureFirstModeMaterializesBaselineInsideLeaseBeforeDispatch() {
+    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    GreenfieldBaselinePlan baseline =
+        new GreenfieldBaselinePlan(
+            GreenfieldBaselinePlan.Kind.PYTHON,
+            "PYTHON_LIBRARY",
+            true,
+            true,
+            java.util.Map.of("requirements.txt", "pytest\n"),
+            List.of("src/app.py"),
+            List.of("REQUIRED_PATH_MISSING:src/app.py", "FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
+    when(greenfieldBaselines.plan(workspace, task)).thenReturn(baseline);
+    contract =
+        new TaskAcceptanceContract(
+            2,
+            "T1",
+            0,
+            "SERVER_RESOLVED_FAILURE_FIRST_V2",
+            "REQUIRED_NON_NOOP",
+            "REQUIRED",
+            List.of("src/app.py"),
+            "PYTHON_LIBRARY",
+            "PYTHON",
+            new TaskAcceptanceContract.ResolvedCommand(
+                "python3 -m compileall -q .", 120, "inferred:python", "PYTHON"),
+            new TaskAcceptanceContract.ResolvedCommand(
+                "python3 -m pytest -q", 600, "pytest", "PYTEST"),
+            List.of("src/app.py"),
+            List.of(),
+            List.of(),
+            true,
+            List.of("."),
+            List.of(),
+            List.of(),
+            "c".repeat(64));
+    when(contracts.resolveFailureFirst(task, 0, workspace, baseline)).thenReturn(contract);
+    when(greenfieldBaselines.materialize(workspace, baseline))
+        .thenAnswer(
+            ignored -> {
+              RunWorkspaceAuthorityService.assertCorrectionToolDispatch("run-1");
+              return List.of("requirements.txt");
+            });
+    WorkspaceGenerationLifecycle.Verification passing = verification("PASSED", true, true, 2, 0);
+    when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
+    when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/app.py"));
+    when(verifier.verify(any(), eq(contract), any())).thenReturn(passing);
+    CorrectionWorkspaceTransaction.Checkpoint candidate =
+        checkpoint("3".repeat(40), "4".repeat(40));
+    when(generations.snapshotCandidate(prepared)).thenReturn(candidate);
+    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+        .thenReturn(
+            new GcsTaskCheckpointService.CheckpointReceipt(
+                "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64), Instant.now()));
+
+    coordinator.execute(
+        0,
+        task,
+        plan,
+        request,
+        () -> {
+          assertThat(coordinator.acceptanceSystemDirective())
+              .contains("Contract digest: " + contract.digest())
+              .contains("REQUIRED_PATH_MISSING:src/app.py")
+              .contains("python3 -m pytest -q");
+          return successfulOutcome();
+        },
+        mock(BuildTaskGenerationCoordinator.TaskStatusSink.class));
+
+    InOrder order = inOrder(generations, operations, greenfieldBaselines);
+    order.verify(generations).markMutating(prepared);
+    order.verify(operations).claimBuildTask(any(), anyString(), anyString(), anyInt(), anyString());
+    order.verify(generations).bindLlmAttempt(eq(prepared), anyString(), anyInt(), any(UUID.class));
+    order.verify(greenfieldBaselines).materialize(workspace, baseline);
+    verify(executionEvidence)
+        .record(eq(prepared), eq("anthropic"), eq("claude-sonnet"), eq(0), eq(0), any());
+    verify(metrics, atLeastOnce())
+        .recordWorkspaceGenerationState(anyString(), eq("anthropic"), eq("claude-sonnet"));
+    verify(metrics).recordWorkspaceGenerationVerification(eq("PASSED"), any());
+    verify(broadcaster, atLeastOnce())
+        .emit(eq("run-1"), argThat(event -> "WORKSPACE_GENERATION".equals(event.type())));
+  }
+
+  @Test
+  void unsupportedGreenfieldFailsBeforeAttemptClaimOrDispatch() {
+    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    GreenfieldBaselinePlan unsupported =
+        new GreenfieldBaselinePlan(
+            GreenfieldBaselinePlan.Kind.UNSUPPORTED,
+            "UNRESOLVED",
+            true,
+            false,
+            java.util.Map.of(),
+            List.of(),
+            List.of("FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
+    when(greenfieldBaselines.plan(workspace, task)).thenReturn(unsupported);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                coordinator.execute(
+                    0,
+                    task,
+                    plan,
+                    request,
+                    this::successfulOutcome,
+                    mock(BuildTaskGenerationCoordinator.TaskStatusSink.class)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("GREENFIELD_RUNTIME_UNSUPPORTED");
+
+    verify(generations, never())
+        .prepareBuild(
+            anyString(),
+            anyString(),
+            anyInt(),
+            any(),
+            anyString(),
+            anyString(),
+            isNull(),
+            isNull(),
+            isNull(),
+            isNull());
+    verify(operations, never())
+        .claimBuildTask(any(), anyString(), anyString(), anyInt(), anyString());
   }
 
   private WorkspaceGenerationLifecycle.Verification verification(
