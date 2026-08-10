@@ -1,5 +1,6 @@
 package com.navneet.executespec.engine;
 
+import java.time.Duration;
 import java.util.Optional;
 
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
@@ -12,8 +13,17 @@ final class WorkerAutoVerifyProgress {
   private DeterministicFailureDelta.Snapshot previous;
   private int unchangedStreak;
 
+  WorkerAutoVerifyProgress() {
+    this(null);
+  }
+
+  WorkerAutoVerifyProgress(DeterministicFailureDelta.Snapshot initialFailure) {
+    this.previous = initialFailure;
+  }
+
   Result observe(WorkspaceTestRunner runner, ExecutionContext context, int editsInBurst) {
     if (runner == null) return null;
+    long started = System.nanoTime();
     Optional<WorkspaceTestRunner.DetailedResult> result =
         runner.runTestsDetailed(context.runId(), context.workspaceRoot());
     if (result.isEmpty() || result.get().summary().getTotalTests() == 0) return null;
@@ -33,9 +43,10 @@ final class WorkerAutoVerifyProgress {
 
     String message =
         summary.getFailed() == 0 && summary.getErrors() == 0
-            ? WorkerCompletionPolicy.passingAutoVerifyObservation(
-                detail.command(), editsInBurst, summary.getPassed(), summary.getTotalTests())
-            : "AUTO-VERIFY — the platform ran `"
+            ? "NARROWEST AVAILABLE CHECK — "
+                + WorkerCompletionPolicy.passingAutoVerifyObservation(
+                    detail.command(), editsInBurst, summary.getPassed(), summary.getTotalTests())
+            : "AUTO-VERIFY [NARROWEST_AVAILABLE] — the platform ran `"
                 + detail.command()
                 + "` after your last "
                 + editsInBurst
@@ -49,11 +60,22 @@ final class WorkerAutoVerifyProgress {
                 + WorkerAgent.verificationFailureEvidence(detail)
                 + "\nFix these failures (or, if one is genuinely pre-existing and unrelated to"
                 + " your change, say so explicitly) before moving on.";
-    return new Result(delta, current.signature(), unchangedStreak, message);
+    return new Result(
+        delta,
+        current.signature(),
+        unchangedStreak,
+        message,
+        "NARROWEST_AVAILABLE",
+        Duration.ofNanos(System.nanoTime() - started));
   }
 
   record Result(
-      DeterministicFailureDelta.Kind delta, String signature, int unchangedStreak, String message) {
+      DeterministicFailureDelta.Kind delta,
+      String signature,
+      int unchangedStreak,
+      String message,
+      String commandClass,
+      Duration elapsed) {
     boolean resetsProgress() {
       return delta == DeterministicFailureDelta.Kind.IMPROVED
           || delta == DeterministicFailureDelta.Kind.CHANGED

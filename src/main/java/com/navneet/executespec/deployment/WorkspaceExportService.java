@@ -18,6 +18,7 @@ import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
 import com.navneet.executespec.deployment.preview.PreviewProjectType;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.DurableCorrectionLifecycle;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.state.RunMode;
 import com.navneet.executespec.state.StateStore;
@@ -50,6 +51,7 @@ public class WorkspaceExportService {
   private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery;
   private final DurableCorrectionLifecycle durableCorrections;
   private final CorrectionWorkspaceTransaction workspaceGenerations;
+  private final RunWorkspaceAuthorityService workspaceAuthorities;
 
   /**
    * Excluded patterns — internal agent machinery, build artifacts, and VCS metadata that don't
@@ -173,97 +175,110 @@ public class WorkspaceExportService {
    * @throws IOException on filesystem errors
    */
   public Path exportWorkspace(String runId) throws IOException {
-    Path workspacePath = acceptedExportRoot(runId);
-    if (!Files.isDirectory(workspacePath)) {
-      // Workspace not on local disk — check GCS archive
-      return stateStore
-          .findRun(runId)
-          .filter(run -> run.getGcsWorkspaceKey() != null)
-          .map(
-              run -> {
-                try {
-                  log.info(
-                      "[WorkspaceExportService] Serving run {} from GCS archive: {}",
-                      runId,
-                      run.getGcsWorkspaceKey());
-                  Path archive = gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
+    return exportWorkspaceWithEvidence(runId).path();
+  }
+
+  /** Exports the exact admitted BUILD frontier and returns the generation bound to those bytes. */
+  public ExportedWorkspace exportWorkspaceWithEvidence(String runId) throws IOException {
+    ExportAdmission admission = admitExport(runId);
+    try {
+      Path workspacePath = admission.root();
+      if (!Files.isDirectory(workspacePath)) {
+        // Workspace not on local disk — check GCS archive
+        return stateStore
+            .findRun(runId)
+            .filter(run -> run.getGcsWorkspaceKey() != null)
+            .map(
+                run -> {
                   try {
-                    publicationGuard.assertZipSafe(archive);
-                    return archive;
-                  } catch (IOException unsafe) {
+                    log.info(
+                        "[WorkspaceExportService] Serving run {} from GCS archive: {}",
+                        runId,
+                        run.getGcsWorkspaceKey());
+                    Path archive = gcsStore.downloadToTemp(run.getGcsWorkspaceKey(), runId);
                     try {
-                      Files.deleteIfExists(archive);
-                    } catch (IOException cleanupFailure) {
-                      unsafe.addSuppressed(cleanupFailure);
+                      publicationGuard.assertZipSafe(archive);
+                      return new ExportedWorkspace(archive, admission.generation());
+                    } catch (IOException unsafe) {
+                      try {
+                        Files.deleteIfExists(archive);
+                      } catch (IOException cleanupFailure) {
+                        unsafe.addSuppressed(cleanupFailure);
+                      }
+                      throw new RuntimeException(unsafe.getMessage(), unsafe);
                     }
-                    throw new RuntimeException(unsafe.getMessage(), unsafe);
+                  } catch (IOException e) {
+                    throw new RuntimeException(
+                        "Failed to download workspace from GCS: " + e.getMessage(), e);
                   }
-                } catch (IOException e) {
-                  throw new RuntimeException(
-                      "Failed to download workspace from GCS: " + e.getMessage(), e);
+                })
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "Workspace not found for run "
+                            + runId
+                            + ". It may still be initialising or has been cleaned up."));
+      }
+
+      String zipName = "workspace-" + runId.substring(0, Math.min(8, runId.length()));
+      Path zipPath = Files.createTempFile(zipName, ".zip");
+
+      ExportBudget budget = new ExportBudget(MAX_EXPORT_TOTAL_BYTES, MAX_EXPORT_FILE_COUNT);
+      try (ZipOutputStream zos =
+          new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zipPath)))) {
+
+        Files.walkFileTree(
+            workspacePath,
+            new SimpleFileVisitor<>() {
+              @Override
+              public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                String relative = workspacePath.relativize(dir).toString();
+                if (shouldExclude(relative)) return FileVisitResult.SKIP_SUBTREE;
+                return FileVisitResult.CONTINUE;
+              }
+
+              @Override
+              public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                  throws IOException {
+                admission.assertOwned();
+                String relative = workspacePath.relativize(file).toString();
+                if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+                if (Files.isSymbolicLink(file)) {
+                  log.info("[WorkspaceExportService] Skipping symlink from ZIP: {}", relative);
+                  return FileVisitResult.CONTINUE;
                 }
-              })
-          .orElseThrow(
-              () ->
-                  new IllegalStateException(
-                      "Workspace not found for run "
-                          + runId
-                          + ". It may still be initialising or has been cleaned up."));
-    }
+                if (isSecretFile(file.getFileName().toString())) {
+                  log.info("[WorkspaceExportService] Skipping secret file from ZIP: {}", relative);
+                  return FileVisitResult.CONTINUE;
+                }
+                publicationGuard.assertFileSafe(workspacePath, file);
 
-    String zipName = "workspace-" + runId.substring(0, Math.min(8, runId.length()));
-    Path zipPath = Files.createTempFile(zipName, ".zip");
-
-    ExportBudget budget = new ExportBudget(MAX_EXPORT_TOTAL_BYTES, MAX_EXPORT_FILE_COUNT);
-    try (ZipOutputStream zos =
-        new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zipPath)))) {
-
-      Files.walkFileTree(
-          workspacePath,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-              String relative = workspacePath.relativize(dir).toString();
-              if (shouldExclude(relative)) return FileVisitResult.SKIP_SUBTREE;
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                throws IOException {
-              String relative = workspacePath.relativize(file).toString();
-              if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
-              if (Files.isSymbolicLink(file)) {
-                log.info("[WorkspaceExportService] Skipping symlink from ZIP: {}", relative);
+                ZipEntry entry = new ZipEntry(relative);
+                entry.setTime(attrs.lastModifiedTime().toMillis());
+                zos.putNextEntry(entry);
+                budget.copyInto(file, zos); // RR-165: bounded copy
+                admission.assertOwned();
+                zos.closeEntry();
                 return FileVisitResult.CONTINUE;
               }
-              if (isSecretFile(file.getFileName().toString())) {
-                log.info("[WorkspaceExportService] Skipping secret file from ZIP: {}", relative);
-                return FileVisitResult.CONTINUE;
-              }
-              publicationGuard.assertFileSafe(workspacePath, file);
+            });
+      } catch (IOException | RuntimeException e) {
+        // RR-165: never leave a partial/over-limit temp artifact behind.
+        Files.deleteIfExists(zipPath);
+        throw e;
+      }
 
-              ZipEntry entry = new ZipEntry(relative);
-              entry.setTime(attrs.lastModifiedTime().toMillis());
-              zos.putNextEntry(entry);
-              budget.copyInto(file, zos); // RR-165: bounded copy
-              zos.closeEntry();
-              return FileVisitResult.CONTINUE;
-            }
-          });
-    } catch (IOException e) {
-      // RR-165: never leave a partial/over-limit temp artifact behind.
-      Files.deleteIfExists(zipPath);
-      throw e;
+      log.info(
+          "Exported workspace for run {} → {} ({})",
+          runId.substring(0, Math.min(8, runId.length())),
+          zipPath,
+          humanReadableSize(Files.size(zipPath)));
+      admission.assertOwned();
+
+      return new ExportedWorkspace(zipPath, admission.generation());
+    } finally {
+      admission.close();
     }
-
-    log.info(
-        "Exported workspace for run {} → {} ({})",
-        runId.substring(0, Math.min(8, runId.length())),
-        zipPath,
-        humanReadableSize(Files.size(zipPath)));
-
-    return zipPath;
   }
 
   /**
@@ -275,101 +290,109 @@ public class WorkspaceExportService {
    * responsible for cleanup (the controller registers it for deletion on exit).
    */
   public Path exportAsRepoZip(String runId) throws IOException {
-    Path resolved = acceptedExportRoot(runId);
-    if (!Files.isDirectory(resolved)) {
-      // Try restoring from GCS before giving up
-      resolved = restoreService.ensureWorkspaceAvailable(runId);
-    }
-    final Path workspacePath = resolved;
-
-    String zipName = "repo-" + runId.substring(0, Math.min(8, runId.length()));
-    Path zipPath = Files.createTempFile(zipName, ".zip");
-
-    ExportBudget budget = new ExportBudget(MAX_EXPORT_TOTAL_BYTES, MAX_EXPORT_FILE_COUNT);
-    try (ZipOutputStream zos =
-        new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zipPath)))) {
-      // Ensure .gitignore exists
-      Path gitignorePath = workspacePath.resolve(".gitignore");
-      if (!Files.exists(gitignorePath)) {
-        String gitignoreContent = generateGitignore(workspacePath);
-        zos.putNextEntry(new ZipEntry(".gitignore"));
-        zos.write(gitignoreContent.getBytes(StandardCharsets.UTF_8));
-        zos.closeEntry();
+    ExportAdmission admission = admitExport(runId);
+    try {
+      Path resolved = admission.root();
+      if (!Files.isDirectory(resolved)) {
+        // Try restoring from GCS before giving up
+        resolved = restoreService.ensureWorkspaceAvailable(runId);
       }
+      final Path workspacePath = resolved;
 
-      // Ensure README.md exists
-      Path readmePath = workspacePath.resolve("README.md");
-      if (!Files.exists(readmePath)) {
-        PipelineRun run = stateStore.findRun(runId).orElse(null);
-        String readmeContent = generateReadme(run, runId);
-        zos.putNextEntry(new ZipEntry("README.md"));
-        zos.write(readmeContent.getBytes(StandardCharsets.UTF_8));
-        zos.closeEntry();
-      }
+      String zipName = "repo-" + runId.substring(0, Math.min(8, runId.length()));
+      Path zipPath = Files.createTempFile(zipName, ".zip");
 
-      // Ensure Dockerfile + .dockerignore exist (generated from project type detection)
-      if (!Files.exists(workspacePath.resolve("Dockerfile"))) {
-        try {
-          PreviewProjectType type = dockerfileGen.detect(workspacePath);
-          String dockerfile = dockerfileGen.generate(type, workspacePath);
-          zos.putNextEntry(new ZipEntry("Dockerfile"));
-          zos.write(dockerfile.getBytes(StandardCharsets.UTF_8));
+      ExportBudget budget = new ExportBudget(MAX_EXPORT_TOTAL_BYTES, MAX_EXPORT_FILE_COUNT);
+      try (ZipOutputStream zos =
+          new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(zipPath)))) {
+        // Ensure .gitignore exists
+        Path gitignorePath = workspacePath.resolve(".gitignore");
+        if (!Files.exists(gitignorePath)) {
+          String gitignoreContent = generateGitignore(workspacePath);
+          zos.putNextEntry(new ZipEntry(".gitignore"));
+          zos.write(gitignoreContent.getBytes(StandardCharsets.UTF_8));
           zos.closeEntry();
-
-          zos.putNextEntry(new ZipEntry(".dockerignore"));
-          zos.write(dockerfileGen.dockerIgnore().getBytes(StandardCharsets.UTF_8));
-          zos.closeEntry();
-
-          log.info("Generated Dockerfile for repo export (type={})", type);
-        } catch (Exception e) {
-          log.debug("Skipping Dockerfile generation for run {}: {}", runId, e.getMessage());
         }
+
+        // Ensure README.md exists
+        Path readmePath = workspacePath.resolve("README.md");
+        if (!Files.exists(readmePath)) {
+          PipelineRun run = stateStore.findRun(runId).orElse(null);
+          String readmeContent = generateReadme(run, runId);
+          zos.putNextEntry(new ZipEntry("README.md"));
+          zos.write(readmeContent.getBytes(StandardCharsets.UTF_8));
+          zos.closeEntry();
+        }
+
+        // Ensure Dockerfile + .dockerignore exist (generated from project type detection)
+        if (!Files.exists(workspacePath.resolve("Dockerfile"))) {
+          try {
+            PreviewProjectType type = dockerfileGen.detect(workspacePath);
+            String dockerfile = dockerfileGen.generate(type, workspacePath);
+            zos.putNextEntry(new ZipEntry("Dockerfile"));
+            zos.write(dockerfile.getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            zos.putNextEntry(new ZipEntry(".dockerignore"));
+            zos.write(dockerfileGen.dockerIgnore().getBytes(StandardCharsets.UTF_8));
+            zos.closeEntry();
+
+            log.info("Generated Dockerfile for repo export (type={})", type);
+          } catch (Exception e) {
+            log.debug("Skipping Dockerfile generation for run {}: {}", runId, e.getMessage());
+          }
+        }
+
+        // Walk workspace, skip .git directory and node_modules
+        Files.walkFileTree(
+            workspacePath,
+            new SimpleFileVisitor<>() {
+              @Override
+              public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                String relative = workspacePath.relativize(dir).toString();
+                if (shouldExclude(relative)) return FileVisitResult.SKIP_SUBTREE;
+                return FileVisitResult.CONTINUE;
+              }
+
+              @Override
+              public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+                  throws IOException {
+                admission.assertOwned();
+                String relative = workspacePath.relativize(file).toString();
+                if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
+                if (Files.isSymbolicLink(file)) {
+                  log.info("[WorkspaceExportService] Skipping symlink from repo ZIP: {}", relative);
+                  return FileVisitResult.CONTINUE;
+                }
+                if (isSecretFile(file.getFileName().toString())) {
+                  log.info(
+                      "[WorkspaceExportService] Skipping secret file from repo ZIP: {}", relative);
+                  return FileVisitResult.CONTINUE;
+                }
+                publicationGuard.assertFileSafe(workspacePath, file);
+
+                zos.putNextEntry(new ZipEntry(relative));
+                budget.copyInto(file, zos); // RR-165: bounded copy
+                admission.assertOwned();
+                zos.closeEntry();
+                return FileVisitResult.CONTINUE;
+              }
+            });
+      } catch (IOException | RuntimeException e) {
+        // RR-165: never leave a partial/over-limit temp artifact behind.
+        Files.deleteIfExists(zipPath);
+        throw e;
       }
 
-      // Walk workspace, skip .git directory and node_modules
-      Files.walkFileTree(
-          workspacePath,
-          new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-              String relative = workspacePath.relativize(dir).toString();
-              if (shouldExclude(relative)) return FileVisitResult.SKIP_SUBTREE;
-              return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                throws IOException {
-              String relative = workspacePath.relativize(file).toString();
-              if (shouldExclude(relative)) return FileVisitResult.CONTINUE;
-              if (Files.isSymbolicLink(file)) {
-                log.info("[WorkspaceExportService] Skipping symlink from repo ZIP: {}", relative);
-                return FileVisitResult.CONTINUE;
-              }
-              if (isSecretFile(file.getFileName().toString())) {
-                log.info(
-                    "[WorkspaceExportService] Skipping secret file from repo ZIP: {}", relative);
-                return FileVisitResult.CONTINUE;
-              }
-              publicationGuard.assertFileSafe(workspacePath, file);
-
-              zos.putNextEntry(new ZipEntry(relative));
-              budget.copyInto(file, zos); // RR-165: bounded copy
-              zos.closeEntry();
-              return FileVisitResult.CONTINUE;
-            }
-          });
-    } catch (IOException e) {
-      // RR-165: never leave a partial/over-limit temp artifact behind.
-      Files.deleteIfExists(zipPath);
-      throw e;
+      log.info(
+          "Exported repo zip for run {} ({})",
+          runId.substring(0, Math.min(8, runId.length())),
+          humanReadableSize(Files.size(zipPath)));
+      admission.assertOwned();
+      return zipPath;
+    } finally {
+      admission.close();
     }
-
-    log.info(
-        "Exported repo zip for run {} ({})",
-        runId.substring(0, Math.min(8, runId.length())),
-        humanReadableSize(Files.size(zipPath)));
-    return zipPath;
   }
 
   /**
@@ -377,29 +400,60 @@ public class WorkspaceExportService {
    * prefix. Recovery is attempted first so a replacement node can reconstruct that prefix from its
    * immutable generation archive; unresolved, missing, or mismatched proof blocks export.
    */
-  private Path acceptedExportRoot(String runId) {
+  private ExportAdmission admitExport(String runId) {
     Path root = workspaceRoot(runId);
     PipelineRun run = stateStore.findRun(runId).orElse(null);
-    if (run == null || !RunMode.BUILD.equalsIgnoreCase(run.getRunMode())) return root;
+    if (run == null || !RunMode.BUILD.equalsIgnoreCase(run.getRunMode())) {
+      return new ExportAdmission(root, null, null);
+    }
     try {
+      // Recovery may itself need RECOVERY authority. Finish it before acquiring PUBLICATION, then
+      // repeat the exact frontier proof under PUBLICATION to close the check-to-ZIP race.
       durableCorrections.recoverRunOrThrow(runId);
       java.util.Optional<String> acceptedCorrection =
           durableCorrections.latestAcceptedGeneration(runId);
       if (acceptedCorrection.isPresent()) {
-        Path correctedRoot =
-            Files.isDirectory(root) ? root : restoreService.ensureWorkspaceAvailable(runId);
-        String current = workspaceGenerations.captureGeneration(correctedRoot);
-        if (!acceptedCorrection.get().equals(current)) {
-          throw new IllegalStateException("CORRECTION_GENERATION_FRONTIER_MISMATCH");
-        }
-        return correctedRoot;
+        if (!Files.isDirectory(root)) restoreService.ensureWorkspaceAvailable(runId);
+      } else {
+        workspaceGenerationRecovery.recoverRunOrThrow(runId);
       }
-      workspaceGenerationRecovery.recoverRunOrThrow(runId);
-      workspaceGenerationRecovery.assertAcceptedFrontier(runId, root);
-      return root;
+
+      RunWorkspaceAuthorityService.Lease lease =
+          workspaceAuthorities.acquire(runId, RunWorkspaceAuthorityService.Authority.PUBLICATION);
+      try {
+        lease.assertOwned();
+        if (acceptedCorrection.isPresent()) {
+          if (!Files.isDirectory(root)
+              || !acceptedCorrection.get().equals(workspaceGenerations.captureGeneration(root))) {
+            throw new IllegalStateException("CORRECTION_GENERATION_FRONTIER_MISMATCH");
+          }
+        } else {
+          workspaceGenerationRecovery.assertAcceptedFrontier(runId, root, "WORKSPACE_EXPORT");
+        }
+        lease.assertOwned();
+        return new ExportAdmission(root, lease, workspaceGenerations.captureGeneration(root));
+      } catch (RuntimeException failure) {
+        lease.close();
+        throw failure;
+      }
     } catch (RuntimeException unaccepted) {
       throw new UnacceptedWorkspaceException(
           "WORKSPACE_EXPORT_ACCEPTED_FRONTIER_UNPROVEN: " + unaccepted.getMessage(), unaccepted);
+    }
+  }
+
+  public record ExportedWorkspace(Path path, String acceptedGeneration) {}
+
+  private record ExportAdmission(
+      Path root, RunWorkspaceAuthorityService.Lease lease, String generation)
+      implements AutoCloseable {
+    void assertOwned() {
+      if (lease != null) lease.assertOwned();
+    }
+
+    @Override
+    public void close() {
+      if (lease != null) lease.close();
     }
   }
 

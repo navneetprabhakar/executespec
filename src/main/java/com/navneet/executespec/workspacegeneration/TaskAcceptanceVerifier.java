@@ -143,7 +143,11 @@ public class TaskAcceptanceVerifier {
         red ? "INITIAL_TESTS_FAILED" : "NO_INITIAL_FAILURE",
         bounded(detail.outputTail()),
         detail.command(),
-        List.of());
+        List.of(),
+        summary.getPassed(),
+        summary.getFailed(),
+        summary.getErrors(),
+        summary.getTotalTests());
   }
 
   public WorkspaceGenerationLifecycle.Verification verify(
@@ -165,6 +169,7 @@ public class TaskAcceptanceVerifier {
 
     Map<String, Object> commandContract = new LinkedHashMap<>();
     commandContract.put("schemaVersion", contract.schemaVersion());
+    commandContract.put("commandClass", "BROAD_VERIFICATION");
     commandContract.put("policy", contract.verificationPolicy());
     commandContract.put("buildSource", build.sourceDescription());
     commandContract.put("buildCommand", build.command());
@@ -260,6 +265,7 @@ public class TaskAcceptanceVerifier {
 
     Map<String, Object> evidence = new LinkedHashMap<>();
     evidence.put("schemaVersion", contract.schemaVersion());
+    evidence.put("commandClass", "BROAD_VERIFICATION");
     evidence.put("taskContractDigest", contract.digest());
     evidence.put("buildStatus", parsed.status().name());
     evidence.put("exactResolvedBuild", exactResolvedBuild);
@@ -399,9 +405,65 @@ public class TaskAcceptanceVerifier {
   }
 
   public record InitialFailure(
-      String outcome, String code, String detail, String command, List<String> failedTargets) {
+      String outcome,
+      String code,
+      String detail,
+      String command,
+      List<String> failedTargets,
+      int passed,
+      int failed,
+      int errors,
+      int total,
+      String commandClass) {
+    public InitialFailure(
+        String outcome,
+        String code,
+        String detail,
+        String command,
+        List<String> failedTargets,
+        int passed,
+        int failed,
+        int errors,
+        int total) {
+      this(
+          outcome,
+          code,
+          detail,
+          command,
+          failedTargets,
+          passed,
+          failed,
+          errors,
+          total,
+          "REPRODUCTION");
+    }
+
+    public InitialFailure(
+        String outcome, String code, String detail, String command, List<String> failedTargets) {
+      this(
+          outcome,
+          code,
+          detail,
+          command,
+          failedTargets,
+          0,
+          "FAILURE_OBSERVED".equals(outcome) ? 1 : 0,
+          0,
+          "FAILURE_OBSERVED".equals(outcome) ? 1 : 0,
+          "REPRODUCTION");
+    }
+
     public InitialFailure {
       failedTargets = failedTargets == null ? List.of() : List.copyOf(failedTargets);
+      if (passed < 0 || failed < 0 || errors < 0 || total < 0) {
+        throw new IllegalArgumentException("initial verification counts must be non-negative");
+      }
+      if (passed + failed + errors > total) {
+        throw new IllegalArgumentException("initial verification counts exceed total");
+      }
+      if (!"REPRODUCTION".equals(commandClass)) {
+        throw new IllegalArgumentException("initial verification command must be REPRODUCTION");
+      }
     }
 
     public boolean observed() {

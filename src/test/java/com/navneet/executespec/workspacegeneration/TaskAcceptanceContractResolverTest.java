@@ -147,6 +147,9 @@ class TaskAcceptanceContractResolverTest {
     assertThat(contract.finalChecks())
         .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
         .contains("ENDPOINT_CONTRACT");
+    assertThat(contract.finalChecks())
+        .filteredOn(check -> "ENDPOINT_CONTRACT".equals(check.kind()))
+        .allMatch(TaskAcceptanceContract.AcceptanceCheck::hidden);
   }
 
   @Test

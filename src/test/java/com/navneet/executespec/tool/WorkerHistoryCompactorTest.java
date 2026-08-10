@@ -448,6 +448,26 @@ class WorkerHistoryCompactorTest {
     verify(router, Mockito.times(4)).call(any(LlmRequest.class));
   }
 
+  @Test
+  @DisplayName("active deterministic failure is pinned after compaction and no-op stays identical")
+  void activeDeterministicFailureIsPinnedOutsideTheGeneratedSummary() {
+    List<Message> original = List.of(new SystemMessage("system"), new UserMessage("original task"));
+    List<Message> compacted =
+        new ArrayList<>(List.of(new SystemMessage("system"), new UserMessage("generated dossier")));
+    String active = "DETERMINISTIC FAILURE DELTA — UNCHANGED\n2 tests still fail";
+
+    List<Message> pinned = WorkerHistoryCompactor.pinActiveFailure(original, compacted, active);
+
+    assertThat(pinned).isNotSameAs(compacted);
+    assertThat(((UserMessage) pinned.get(1)).getText())
+        .contains("generated dossier")
+        .contains("ACTIVE DETERMINISTIC FAILURE")
+        .contains(active);
+    assertThat(((UserMessage) compacted.get(1)).getText()).isEqualTo("generated dossier");
+    assertThat(WorkerHistoryCompactor.pinActiveFailure(original, original, active))
+        .isSameAs(original);
+  }
+
   private static ChatResponse response(String text, String finishReason) {
     ChatResponse resp = Mockito.mock(ChatResponse.class);
     Generation gen = Mockito.mock(Generation.class);

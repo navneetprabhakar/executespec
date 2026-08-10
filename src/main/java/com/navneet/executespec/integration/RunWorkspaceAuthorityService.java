@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,6 +33,7 @@ public class RunWorkspaceAuthorityService {
 
   private final JdbcTemplate jdbc;
   private final AgentProperties agentProperties;
+  private final WorkspaceGenerationTelemetry telemetry;
   private final Map<UUID, Lease> localLeases = new ConcurrentHashMap<>();
 
   public Lease acquire(String runId, Authority authority) {
@@ -44,7 +46,10 @@ public class RunWorkspaceAuthorityService {
 
   public Optional<Lease> tryAcquire(String runId, Authority authority) {
     LocalFileAuthority fileAuthority = tryAcquireLocalFile(runId);
-    if (fileAuthority == null) return Optional.empty();
+    if (fileAuthority == null) {
+      telemetry.authority("BUSY", authority.name());
+      return Optional.empty();
+    }
     UUID token = UUID.randomUUID();
     int acquired;
     try {
@@ -71,10 +76,12 @@ public class RunWorkspaceAuthorityService {
     }
     if (acquired != 1) {
       fileAuthority.close();
+      telemetry.authority("BUSY", authority.name());
       return Optional.empty();
     }
     Lease lease = new Lease(runId, authority, token, this, fileAuthority);
     localLeases.put(token, lease);
+    telemetry.authority("ACQUIRED", authority.name());
     return Optional.of(lease);
   }
 
@@ -166,6 +173,7 @@ public class RunWorkspaceAuthorityService {
       if (renewed != 1) {
         localLeases.remove(lease.ownerToken());
         lease.lost = true;
+        telemetry.authority("LOST", lease.authority().name());
       }
     }
   }
@@ -196,6 +204,7 @@ public class RunWorkspaceAuthorityService {
           lease.ownerToken());
     } finally {
       lease.fileAuthority.close();
+      telemetry.authority("RELEASED", lease.authority().name());
     }
   }
 

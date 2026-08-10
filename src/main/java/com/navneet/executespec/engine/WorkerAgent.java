@@ -431,10 +431,10 @@ public class WorkerAgent implements CodeChangeLoop {
         Boolean.TRUE.equals(req.autoVerify())
             && workspaceTestRunner != null
             && !toolRegistry.isRemoteRun(req.context());
-    int editsSinceAutoVerify = 0;
+    int editsSinceAutoVerify = 0, autoVerifyRuns = 0;
     boolean lastIterHadWrite = false;
-    int autoVerifyRuns = 0;
-    WorkerAutoVerifyProgress autoVerifyProgress = new WorkerAutoVerifyProgress();
+    var autoVerifyProgress = new WorkerAutoVerifyProgress(req.initialFailureSnapshot());
+    String activeDeterministicFailure = null;
     WorkerCompletionPolicy completionPolicy = WorkerCompletionPolicy.create();
     // One-shot: at most one corrective nudge per task, whether triggered by the progress counter
     // crossing progressWarnAfter mid-loop or by a premature text-only stop. After it fires once,
@@ -639,7 +639,8 @@ public class WorkerAgent implements CodeChangeLoop {
                 lastInputTokens,
                 req.userPrompt(),
                 req.maxTokensPerCall(),
-                workerTools);
+                workerTools,
+                activeDeterministicFailure);
       }
 
       // progress-v2 — one-shot tool_choice=required after a repeated text-only stop. Consumed
@@ -1534,11 +1535,19 @@ public class WorkerAgent implements CodeChangeLoop {
           if (observation != null) {
             editsSinceAutoVerify = 0;
             metrics.recordDeterministicFailureDelta(observation.delta().name());
+            if (req.initialFailureSnapshot() != null) {
+              metrics.recordWorkspaceGenerationVerification(
+                  observation.delta().name(),
+                  "ITERATION",
+                  observation.commandClass(),
+                  observation.elapsed());
+            }
             String deltaObservation =
                 "DETERMINISTIC FAILURE DELTA — "
                     + observation.delta()
                     + "\n"
                     + observation.message();
+            activeDeterministicFailure = deltaObservation;
             completionPolicy.observeAutoVerify(deltaObservation);
             history.add(new UserMessage(deltaObservation));
             toolLog.add("AUTO_VERIFY_" + observation.delta() + " → " + observation.signature());

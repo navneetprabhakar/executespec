@@ -118,7 +118,7 @@ public class TaskAcceptanceContractResolver {
             "TESTS_PASSED", "candidate", "OPTIONAL".equals(testRequirement)));
     if (!endpoints.isEmpty()) {
       finalChecks.add(
-          new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", false));
+          new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", true));
     }
 
     Map<String, Object> unsigned = new java.util.LinkedHashMap<>();

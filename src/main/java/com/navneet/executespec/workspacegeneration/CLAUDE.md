@@ -1,5 +1,13 @@
 # Workspace generation protocol
 
+`WorkspaceGenerationQualificationEvidenceController` is a SUPER_ADMIN-only, `no-store` read path
+for separately authorized qualification. It exposes the preserved rejected-diff JSON plus immutable
+attempt/route/usage/receipt fields that customer-safe run detail intentionally redacts. It is not
+acceptance authority and must never be opened to ordinary run readers. Historical attempts that
+rolled back before `beginVerification` honestly return a null candidate generation; their negative
+proof is the digest-bound non-empty rejected diff plus exact prior-frontier restoration and durable
+deterministic task-smoke failure, not an invented generation digest.
+
 V374 makes one initial BUILD task the unit of mutation authority. V375 preserves original rejection
 and rejected-diff evidence independently from first recovery-failure evidence. V376 seeds the
 default-off shared BUILD-loop rollout flag; V377 freezes the schema-v2 task contract, planned
@@ -102,12 +110,15 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
 - `WorkspaceGenerationLifecycleBoundaryTest`: task-local ignored dependencies survive deterministic
   verification but are purged and re-attested before checkpoint/acceptance.
 - `WorkerCorrectionToolFenceTest`: ThreadLocal propagation and exact dispatch fence.
-- `TaskAcceptanceVerifierTest`: zero-diff rejection and actual-code-change test escalation.
+- `TaskAcceptanceVerifierTest`: zero-diff rejection, actual-code-change test escalation, exact
+  initial test counts, command drift, held-out endpoint rejection, and green-workspace refusal.
 - `TaskAcceptanceContractResolverTest`: typed canonical contract/digest, sorted touch paths,
   documentation-vs-code test policy, and admitted plan/goal/workspace authority binding.
 - `BuildTaskGenerationCoordinatorTest`: required orchestration order, exact checkpoint-before-accept,
   rollback/no-accept behavior for worker or deterministic-verification rejection, flag-off
-  telemetry isolation, schema-v2 execution evidence, and typed lifecycle emission.
+  telemetry isolation, schema-v2 execution evidence, typed lifecycle emission, initial-delta seed,
+  and hidden-verifier non-disclosure to the worker.
 - `GreenfieldBaselineServiceTest`: executable red baselines, no product implementation,
   no-overwrite behavior and exact multi-repository scoping.
-- `DeterministicFailureDeltaTest`: stable normalized comparison of consecutive verifier evidence.
+- `DeterministicFailureDeltaTest` + `WorkerAutoVerifyProgressTest`: stable normalized comparison of
+  consecutive verifier evidence and first-edit comparison against the V378 red state.

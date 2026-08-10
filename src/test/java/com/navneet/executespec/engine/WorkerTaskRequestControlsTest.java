@@ -54,6 +54,7 @@ class WorkerTaskRequestControlsTest {
             .verifyBeforeComplete(true)
             .progressV2(true)
             .autoVerify(true)
+            .initialFailureSnapshot(DeterministicFailureDelta.snapshot(1, 1, 0, 2, "one failed"))
             .agentRole("ReviewerAgent")
             .stepPrefix("reviewer.general")
             .build();
@@ -70,6 +71,7 @@ class WorkerTaskRequestControlsTest {
     assertThat(retry.verifyBeforeComplete()).isTrue();
     assertThat(retry.progressV2()).isTrue();
     assertThat(retry.autoVerify()).isTrue();
+    assertThat(retry.initialFailureSnapshot()).isEqualTo(primary.initialFailureSnapshot());
     assertThat(retry.agentRole()).isEqualTo("ReviewerAgent");
     assertThat(retry.stepPrefix()).isEqualTo("reviewer.general");
   }

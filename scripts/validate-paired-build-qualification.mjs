@@ -11,30 +11,26 @@ const root = path.resolve(scriptDir, "..");
 const defaultManifest = path.join(scriptDir, "build-qualification", "paired-build-v1.json");
 const SHA256 = /^[a-f0-9]{64}$/;
 const RELEASE_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SLUG = /^[a-z0-9][a-z0-9._/-]*$/;
 const REQUIRED_EQUAL_FIELDS = new Set([
-  "runMode",
-  "executionMode",
-  "route.provider",
-  "route.model",
-  "case.specSha256",
-  "case.acceptanceSha256",
-  "runOptions",
+  "runMode", "executionMode", "route.provider", "route.model",
+  "case.specSha256", "case.acceptanceSha256", "runOptions",
 ]);
-const REQUIRED_EVIDENCE = new Set([
-  "releaseSha",
-  "runId",
-  "terminalStatus",
-  "provider",
-  "model",
-  "costUsd",
-  "acceptedWorkspaceGeneration",
-  "latestWorkspaceGenerationAttemptState",
+const REQUIRED_COMMON = new Set([
+  "releaseSha", "runId", "provider", "model", "costUsd", "specSha256",
   "unresolvedWorkspaceGenerationAttemptCount",
-  "workspaceArchiveSha256",
-  "heldOutPassed",
-  "heldOutTotal",
-  "generatedCodeReview",
+]);
+const REQUIRED_ACCEPTED = new Set([
+  "terminalStatus", "priorAcceptedWorkspaceGeneration", "acceptedWorkspaceGeneration",
+  "latestWorkspaceGenerationAttemptState", "workspaceArchiveSha256",
+  "workspaceArchiveGeneration", "heldOutPassed", "heldOutTotal", "generatedCodeReview",
+]);
+const REQUIRED_ROLLED_BACK = new Set([
+  "priorAcceptedWorkspaceGeneration", "candidateEvidenceKind", "rejectedDiffSha256",
+  "rollbackRestoredGeneration", "latestWorkspaceGenerationAttemptState",
+  "deterministicFailureSource", "deterministicTestsExecuted", "deterministicTestsFailed",
+  "deterministicFailureEvidenceSha256", "generatedCodeReview",
 ]);
 
 function digest(file) {
@@ -58,33 +54,46 @@ function confinedFile(relative, label, errors) {
   return absolute;
 }
 
+function requireFields(actual, required, label, errors) {
+  const fields = new Set(actual || []);
+  for (const field of required) if (!fields.has(field)) errors.push(`${label} is missing ${field}`);
+}
+
 export function validatePlan(plan) {
   const errors = [];
-  if (plan.schemaVersion !== 1) errors.push("schemaVersion must be 1");
+  if (plan.schemaVersion !== 2) errors.push("schemaVersion must be 2");
   if (plan.status !== "PREPARED_NOT_EXECUTED") {
     errors.push("status must be PREPARED_NOT_EXECUTED until paid qualification evidence exists");
   }
   if (plan.runMode !== "BUILD") errors.push("runMode must be BUILD");
   if (plan.executionMode !== "PROTOTYPE") errors.push("executionMode must be PROTOTYPE");
-  if (!["DISTINCT_HOSTS", "SEQUENTIAL_SAME_HOST"].includes(plan.executionTopology)) {
-    errors.push("executionTopology must be DISTINCT_HOSTS or SEQUENTIAL_SAME_HOST");
+  if (plan.executionTopology !== "SEQUENTIAL_SAME_HOST") {
+    errors.push("executionTopology must be SEQUENTIAL_SAME_HOST for the dev deployment");
   }
 
   const arms = Array.isArray(plan.arms) ? plan.arms : [];
   if (arms.length !== 2 || arms.map((arm) => arm.id).join(",") !== "control,candidate") {
     errors.push("arms must be exactly [control, candidate] in that order");
   }
-  for (const arm of arms) {
-    if (!/^[A-Z][A-Z0-9_]*$/.test(arm.baseUrlEnv || "")) {
-      errors.push(`arm ${arm.id || "<unknown>"} baseUrlEnv must be an environment-variable name`);
-    }
-    if (!/^[A-Z][A-Z0-9_]*$/.test(arm.releaseShaEnv || "")) {
-      errors.push(`arm ${arm.id || "<unknown>"} releaseShaEnv must be an environment-variable name`);
+  const control = arms.find((arm) => arm.id === "control");
+  const candidate = arms.find((arm) => arm.id === "candidate");
+  if (control?.source !== "HISTORICAL_IMMUTABLE_EVIDENCE" || control?.expectedOutcome !== "ROLLED_BACK") {
+    errors.push("control must be historical immutable ROLLED_BACK evidence");
+  }
+  if (!RELEASE_SHA.test(control?.releaseSha || "")) {
+    errors.push("control.releaseSha must pin the historical deployed release");
+  }
+  if (candidate?.source !== "LIVE_CANDIDATE" || candidate?.expectedOutcome !== "ACCEPTED") {
+    errors.push("candidate must be the only live ACCEPTED arm");
+  }
+  for (const field of ["baseUrlEnv", "releaseShaEnv"]) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(candidate?.[field] || "")) {
+      errors.push(`candidate ${field} must be an environment-variable name`);
     }
   }
 
   const routes = Array.isArray(plan.routes) ? plan.routes : [];
-  if (routes.length < 2) errors.push("at least two exact provider/model routes are required");
+  if (routes.length !== 2) errors.push("exactly two approved provider/model routes are required");
   const routeKeys = new Set();
   for (const route of routes) {
     if (!SLUG.test(route.provider || "")) errors.push("route.provider must be a lowercase slug");
@@ -92,35 +101,29 @@ export function validatePlan(plan) {
     const key = `${route.provider}/${route.model}`;
     if (routeKeys.has(key)) errors.push(`duplicate route ${key}`);
     routeKeys.add(key);
-    if (!(Number.isFinite(route.safeMaxUsdPerRun) && route.safeMaxUsdPerRun > 0)) {
-      errors.push(`${key} safeMaxUsdPerRun must be finite and positive`);
+    if (route.safeMaxUsdPerRun !== 5) errors.push(`${key} safeMaxUsdPerRun must be exactly $5`);
+    if (!UUID.test(control?.runIdsByRoute?.[key] || "")) {
+      errors.push(`control historical run id missing for ${key}`);
     }
   }
-  const plannedSpend = 2 * routes.reduce(
-    (sum, route) => sum + (Number.isFinite(route.safeMaxUsdPerRun) ? route.safeMaxUsdPerRun : 0),
-    0,
-  ) * (Array.isArray(plan.cases) ? plan.cases.length : 0);
-  if (!(Number.isFinite(plan.safeMaxTotalUsd) && plan.safeMaxTotalUsd > 0)) {
-    errors.push("safeMaxTotalUsd must be finite and positive");
-  } else if (plannedSpend > plan.safeMaxTotalUsd) {
-    errors.push(`planned maximum spend $${plannedSpend} exceeds safeMaxTotalUsd $${plan.safeMaxTotalUsd}`);
+  const cases = Array.isArray(plan.cases) ? plan.cases : [];
+  const freshRunCount = routes.length * cases.length;
+  const plannedSpend = routes.reduce((sum, route) => sum + Number(route.safeMaxUsdPerRun || 0), 0)
+    * cases.length;
+  if (plan.freshRunCount !== 2 || freshRunCount !== 2) errors.push("qualification must create exactly two fresh runs");
+  if (plan.safeMaxTotalUsd !== 10 || plannedSpend !== 10) {
+    errors.push("fresh qualification spend must be capped at exactly $10 total");
   }
 
-  const cases = Array.isArray(plan.cases) ? plan.cases : [];
-  if (cases.length === 0) errors.push("at least one BUILD qualification case is required");
-  const caseIds = new Set();
+  if (cases.length !== 1) errors.push("exactly one paired BUILD case is required");
   for (const testCase of cases) {
-    if (!testCase.id || caseIds.has(testCase.id)) errors.push(`duplicate or missing case id ${testCase.id}`);
-    caseIds.add(testCase.id);
     if (!new Set(["GREENFIELD", "BROWNFIELD"]).has(testCase.kind)) {
       errors.push(`${testCase.id} kind must be GREENFIELD or BROWNFIELD`);
     }
     const spec = confinedFile(testCase.specPath, `${testCase.id}.specPath`, errors);
     const acceptance = confinedFile(testCase.acceptancePath, `${testCase.id}.acceptancePath`, errors);
     if (!SHA256.test(testCase.specSha256 || "")) errors.push(`${testCase.id}.specSha256 is invalid`);
-    if (!SHA256.test(testCase.acceptanceSha256 || "")) {
-      errors.push(`${testCase.id}.acceptanceSha256 is invalid`);
-    }
+    if (!SHA256.test(testCase.acceptanceSha256 || "")) errors.push(`${testCase.id}.acceptanceSha256 is invalid`);
     if (spec && SHA256.test(testCase.specSha256 || "") && digest(spec) !== testCase.specSha256) {
       errors.push(`${testCase.id} spec digest drifted`);
     }
@@ -129,71 +132,51 @@ export function validatePlan(plan) {
       errors.push(`${testCase.id} acceptance digest drifted`);
     }
   }
-
   const harness = confinedFile(plan.harness?.path, "harness.path", errors);
   if (!SHA256.test(plan.harness?.sha256 || "")) errors.push("harness.sha256 is invalid");
   if (harness && SHA256.test(plan.harness?.sha256 || "") && digest(harness) !== plan.harness.sha256) {
     errors.push("harness digest drifted");
   }
 
-  const equalFields = new Set(plan.pairedEqualFields || []);
-  for (const field of REQUIRED_EQUAL_FIELDS) {
-    if (!equalFields.has(field)) errors.push(`pairedEqualFields is missing ${field}`);
-  }
-  const evidence = new Set(plan.requiredEvidence || []);
-  for (const field of REQUIRED_EVIDENCE) {
-    if (!evidence.has(field)) errors.push(`requiredEvidence is missing ${field}`);
-  }
+  requireFields(plan.pairedEqualFields, REQUIRED_EQUAL_FIELDS, "pairedEqualFields", errors);
+  requireFields(plan.requiredCommonEvidence, REQUIRED_COMMON, "requiredCommonEvidence", errors);
+  requireFields(plan.requiredAcceptedEvidence, REQUIRED_ACCEPTED, "requiredAcceptedEvidence", errors);
+  requireFields(plan.requiredRolledBackEvidence, REQUIRED_ROLLED_BACK, "requiredRolledBackEvidence", errors);
   if (plan.requiredRunOptions?.skipApproval !== true) errors.push("skipApproval must be true");
   if (plan.requiredRunOptions?.requireConfirmationBeforeExpensiveContinuation !== true) {
     errors.push("expensive continuations must require confirmation");
   }
-  if (plan.qualificationRules?.terminalStatus !== "COMPLETE") {
-    errors.push("qualification terminalStatus must be COMPLETE");
-  }
-  if (plan.qualificationRules?.unresolvedWorkspaceGenerationAttemptCount !== 0) {
-    errors.push("qualification must require zero unresolved workspace-generation attempts");
-  }
+  const rules = plan.qualificationRules || {};
   for (const field of [
-    "workspaceArchiveMustMatchAcceptedGeneration",
-    "systemVerifiedScoreIsNonAuthoritative",
-    "manualGeneratedCodeReviewRequired",
-    "allHeldOutTestsMustPass",
-  ]) {
-    if (plan.qualificationRules?.[field] !== true) errors.push(`qualificationRules.${field} must be true`);
+    "freshRunsAreCandidateOnly", "workspaceArchiveMustMatchAcceptedGeneration",
+    "rollbackMustRestorePriorFrontier", "systemVerifiedScoreIsNonAuthoritative",
+    "manualGeneratedCodeReviewRequired", "allHeldOutTestsMustPassOnAcceptedArm",
+    "legacyRejectedDiffMaySubstituteForUnfrozenCandidateGeneration",
+  ]) if (rules[field] !== true) errors.push(`qualificationRules.${field} must be true`);
+  if (rules.freshRunCount !== 2 || rules.safeMaxUsdPerRun !== 5) {
+    errors.push("qualificationRules must pin two fresh runs at $5 each");
+  }
+  if (rules.unresolvedWorkspaceGenerationAttemptCount !== 0) {
+    errors.push("qualification must require zero unresolved workspace-generation attempts");
   }
   return errors;
 }
 
 export function validateAuthorizedEnvironment(plan, environment = process.env) {
   const errors = [];
-  const values = new Map();
-  for (const arm of plan.arms || []) {
-    const url = environment[arm.baseUrlEnv];
-    const sha = environment[arm.releaseShaEnv];
-    if (!url) errors.push(`${arm.baseUrlEnv} is required for authorized execution`);
-    else {
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "https:") errors.push(`${arm.baseUrlEnv} must use HTTPS`);
-        values.set(`${arm.id}.url`, parsed.toString().replace(/\/$/, ""));
-      } catch {
-        errors.push(`${arm.baseUrlEnv} is not a valid URL`);
-      }
+  const candidate = (plan.arms || []).find((arm) => arm.source === "LIVE_CANDIDATE");
+  const url = environment[candidate?.baseUrlEnv];
+  const sha = environment[candidate?.releaseShaEnv];
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "app.executespec.ai") {
+      errors.push(`${candidate.baseUrlEnv} must be https://app.executespec.ai`);
     }
-    if (!RELEASE_SHA.test(sha || "")) errors.push(`${arm.releaseShaEnv} must be a 40/64-char lowercase SHA`);
-    else values.set(`${arm.id}.sha`, sha);
+  } catch {
+    errors.push(`${candidate?.baseUrlEnv || "candidate URL"} is not a valid URL`);
   }
-  if (values.get("control.sha") && values.get("control.sha") === values.get("candidate.sha")) {
-    errors.push("control and candidate release SHAs must differ");
-  }
-  if (plan.executionTopology === "DISTINCT_HOSTS"
-      && values.get("control.url") && values.get("control.url") === values.get("candidate.url")) {
-    errors.push("control and candidate URLs must differ for DISTINCT_HOSTS execution");
-  }
-  if (plan.executionTopology === "SEQUENTIAL_SAME_HOST"
-      && values.get("control.url") && values.get("control.url") !== values.get("candidate.url")) {
-    errors.push("control and candidate URLs must match for SEQUENTIAL_SAME_HOST execution");
+  if (!RELEASE_SHA.test(sha || "")) {
+    errors.push(`${candidate?.releaseShaEnv || "candidate SHA"} must be a 40/64-char lowercase SHA`);
   }
   return errors;
 }
@@ -202,14 +185,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const manifestPath = path.resolve(process.argv[2] || defaultManifest);
   const plan = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const errors = validatePlan(plan);
-  if (process.argv.includes("--authorized-preflight")) {
-    errors.push(...validateAuthorizedEnvironment(plan));
-  }
+  if (process.argv.includes("--authorized-preflight")) errors.push(...validateAuthorizedEnvironment(plan));
   if (errors.length) {
     process.stderr.write(`${errors.join("\n")}\n`);
     process.exit(1);
   }
-  process.stdout.write(
-    `Validated paired BUILD qualification plan: ${plan.cases.length} case(s) x ${plan.routes.length} route(s) x 2 arms\n`,
-  );
+  process.stdout.write(`Validated BUILD qualification: 2 historical controls + 2 capped candidate runs\n`);
 }

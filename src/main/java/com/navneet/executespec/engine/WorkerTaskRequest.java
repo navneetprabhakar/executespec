@@ -155,6 +155,10 @@ import lombok.Builder;
  *     stall class is structurally avoided), deterministic (fires for every model, including ones
  *     too weak to self-verify), bounded per task, inert on remote runs and when no runner resolves.
  *     This is the edit→run→observe loop; supersedes V209/V217 on graduation.
+ * @param initialFailureSnapshot optional server-observed deterministic red state that seeds BUILD
+ *     auto-verification. It lets the first post-edit verifier classify improvement, regression or
+ *     repetition against the admitted failure instead of relabelling that result INITIAL_FAILURE.
+ *     PATCH and historical callers leave it null.
  * @param strictProvider operator/evaluation route pin. When true, this worker pass must not enter
  *     the router's YAML failover chain; an explicit handoff harness may start a second pass on an
  *     allow-listed fallback instead. Null/false preserves normal routing.
@@ -212,6 +216,7 @@ public record WorkerTaskRequest(
     Boolean verifyBeforeComplete,
     Boolean progressV2,
     Boolean autoVerify,
+    DeterministicFailureDelta.Snapshot initialFailureSnapshot,
     Boolean strictProvider,
     Integer mutationChurnForceAfter,
     Long absoluteDeadlineEpochMs,

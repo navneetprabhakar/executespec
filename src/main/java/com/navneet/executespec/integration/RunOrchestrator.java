@@ -2221,7 +2221,8 @@ public class RunOrchestrator implements RunControlPort {
       // The accepted task frontier is immutable at this point. Post-task formatter writes used to
       // mutate it outside any generation transaction, making the review/report evidence stale by
       // construction. Formatting must happen inside a task generation or a durable correction.
-      workspaceGenerationRecovery.assertAcceptedFrontier(runId, reviewRootCtx.workspaceRoot());
+      workspaceGenerationRecovery.assertAcceptedFrontier(
+          runId, reviewRootCtx.workspaceRoot(), "REVIEWER");
 
       persistenceWriter.updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
@@ -2288,7 +2289,8 @@ public class RunOrchestrator implements RunControlPort {
                         com.navneet.executespec.agent.TaskExpanderAgent
                             .advisoryPlanContractViolations(plan))
                     .build());
-        workspaceGenerationRecovery.assertAcceptedFrontier(runId, reviewRootCtx.workspaceRoot());
+        workspaceGenerationRecovery.assertAcceptedFrontier(
+            runId, reviewRootCtx.workspaceRoot(), "REVIEWER");
         persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
         RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);

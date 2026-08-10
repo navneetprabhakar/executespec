@@ -1438,7 +1438,9 @@ public class RunController {
       // through the same service and every ZIP member is scanned before bytes are returned. A
       // direct GCS redirect would bypass that final publication gate for historical archives.
       try {
-        Path zipPath = workspaceExportService.exportWorkspace(id);
+        WorkspaceExportService.ExportedWorkspace export =
+            workspaceExportService.exportWorkspaceWithEvidence(id);
+        Path zipPath = export.path();
         String runId8 = id.substring(0, Math.min(8, id.length()));
         String filename = "workspace-" + runId8 + ".zip";
 
@@ -1447,6 +1449,9 @@ public class RunController {
 
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .header(
+                "X-ExecuteSpec-Workspace-Generation",
+                export.acceptedGeneration() == null ? "" : export.acceptedGeneration())
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
             .contentLength(Files.size(zipPath))
             .body(resource);

@@ -153,7 +153,11 @@ class TaskAcceptanceVerifierTest {
 
     assertThat(result.outcome()).isEqualTo("FAILED");
     assertThat(result.buildPassed()).isFalse();
-    assertThat(result.evidenceJson()).contains("\"frozenBuildMatches\":false");
+    assertThat(result.evidenceJson())
+        .contains("\"frozenBuildMatches\":false")
+        .contains("\"commandClass\":\"BROAD_VERIFICATION\"");
+    assertThat(result.serverResolvedCommandContract())
+        .contains("\"commandClass\":\"BROAD_VERIFICATION\"");
   }
 
   @Test
@@ -268,6 +272,9 @@ class TaskAcceptanceVerifierTest {
     assertThat(result.observed()).isFalse();
     assertThat(result.outcome()).isEqualTo("ALREADY_PASSED");
     assertThat(result.code()).isEqualTo("NO_INITIAL_FAILURE");
+    assertThat(result.passed()).isEqualTo(2);
+    assertThat(result.total()).isEqualTo(2);
+    assertThat(result.commandClass()).isEqualTo("REPRODUCTION");
   }
 
   @Test
@@ -289,6 +296,9 @@ class TaskAcceptanceVerifierTest {
     assertThat(result.observed()).isTrue();
     assertThat(result.code()).isEqualTo("INITIAL_TESTS_FAILED");
     assertThat(result.detail()).contains("expected 2 but got 1");
+    assertThat(result.passed()).isEqualTo(1);
+    assertThat(result.failed()).isEqualTo(1);
+    assertThat(result.total()).isEqualTo(2);
   }
 
   private static TaskAcceptanceContract optionalTests() {

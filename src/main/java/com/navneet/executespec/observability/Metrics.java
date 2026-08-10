@@ -72,6 +72,7 @@ public class Metrics {
   private final AtomicLong llmUsageIntegrityMonitorHealthy = new AtomicLong();
   private final AtomicLong llmUsageIntegrityMonitorLastSuccessEpoch = new AtomicLong();
   private final AtomicLong staleQuotaRefunds = new AtomicLong();
+  private final AtomicLong unresolvedWorkspaceGenerationAttempts = new AtomicLong();
 
   public Metrics(MeterRegistry registry) {
     this.registry = registry;
@@ -87,6 +88,7 @@ public class Metrics {
         NS + "llm.usage.integrity_monitor.last_success_epoch_seconds",
         llmUsageIntegrityMonitorLastSuccessEpoch);
     registry.gauge(NS + "billing.quota_refund.stale", staleQuotaRefunds);
+    registry.gauge(NS + "workspace_generation.unresolved", unresolvedWorkspaceGenerationAttempts);
   }
 
   public void recordRunOutcome(String overall) {
@@ -185,8 +187,17 @@ public class Metrics {
   }
 
   public void recordWorkspaceGenerationVerification(String outcome, Duration elapsed) {
+    recordWorkspaceGenerationVerification(outcome, "FINAL", "BROAD_VERIFICATION", elapsed);
+  }
+
+  public void recordWorkspaceGenerationVerification(
+      String outcome, String scope, String commandClass, Duration elapsed) {
     Timer.builder(NS + "workspace_generation.verification")
-        .tag("outcome", nonNull(outcome))
+        .tags(
+            Tags.of(
+                Tag.of("outcome", nonNull(outcome)),
+                Tag.of("scope", nonNull(scope)),
+                Tag.of("command_class", nonNull(commandClass))))
         .register(registry)
         .record(elapsed);
   }
@@ -201,6 +212,53 @@ public class Metrics {
   public void recordDeterministicFailureDelta(String delta) {
     Counter.builder(NS + "worker.failure_delta")
         .tag("delta", nonNull(delta))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordWorkspaceGenerationExecution(
+      String provider, String model, String outcome, int iterations, double costUsd) {
+    Tags route =
+        Tags.of(
+            Tag.of("provider", nonNull(provider)),
+            Tag.of("model", nonNull(model)),
+            Tag.of("outcome", nonNull(outcome)));
+    Counter.builder(NS + "workspace_generation.attempt").tags(route).register(registry).increment();
+    DistributionSummary.builder(NS + "workspace_generation.iterations")
+        .tags(route)
+        .register(registry)
+        .record(Math.max(0, iterations));
+    DistributionSummary.builder(NS + "workspace_generation.cost_usd")
+        .tags(route)
+        .register(registry)
+        .record(Math.max(0.0, costUsd));
+  }
+
+  public void setUnresolvedWorkspaceGenerationAttempts(long count) {
+    unresolvedWorkspaceGenerationAttempts.set(Math.max(0, count));
+  }
+
+  public void recordWorkspaceGenerationAuthority(String event, String authority) {
+    Counter.builder(NS + "workspace_generation.authority")
+        .tags(Tags.of(Tag.of("event", nonNull(event)), Tag.of("authority", nonNull(authority))))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordWorkspaceGenerationRecovery(String action, String outcome) {
+    Counter.builder(NS + "workspace_generation.recovery")
+        .tags(Tags.of(Tag.of("action", nonNull(action)), Tag.of("outcome", nonNull(outcome))))
+        .register(registry)
+        .increment();
+  }
+
+  public void recordWorkspaceGenerationControl(String event, String outcome, String boundary) {
+    Counter.builder(NS + "workspace_generation.control")
+        .tags(
+            Tags.of(
+                Tag.of("event", nonNull(event)),
+                Tag.of("outcome", nonNull(outcome)),
+                Tag.of("boundary", nonNull(boundary))))
         .register(registry)
         .increment();
   }

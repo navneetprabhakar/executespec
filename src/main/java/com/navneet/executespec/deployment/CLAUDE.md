@@ -82,6 +82,10 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   deterministic BUILD-generation recovery and proves the exact accepted initial frontier.
   Unresolved/missing/mismatched proof fails closed; the download controller returns 409 and cannot
   redirect to a repository archive in that case.
+  Canonical BUILD ZIP creation additionally acquires PUBLICATION authority, repeats the accepted
+  frontier proof under that lease, retains ownership through every traversed file and deletes a
+  partial archive on lease loss. `RunController` returns the bound generation in
+  `X-ExecuteSpec-Workspace-Generation`; absence or mismatch cannot qualify an accepted artifact.
   Runtime/test caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`,
   `*.pyc`, `*.pyo`) are excluded from both workspace and repo ZIPs, including nested paths.
 - `WorkspaceExportAcceptedFrontierTest` pins accepted BUILD recovery/proof before ZIP reads,

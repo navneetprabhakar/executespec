@@ -151,7 +151,7 @@ class RunValidationKickoff {
       // final workspace and treated every pre-existing brownfield file as generated code.
       Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
       if (correctionWorkspaceGeneration == null) {
-        workspaceGenerationRecovery.assertAcceptedFrontier(runId, workspace);
+        workspaceGenerationRecovery.assertAcceptedFrontier(runId, workspace, "VALIDATION");
       }
       if (brownfieldHttpContractGuard.hasBaseline(runId)) {
         brownfieldHttpContractGuard.assertCompatible(runId);

@@ -270,6 +270,54 @@ public class WorkerHistoryCompactor {
   }
 
   /**
+   * Headroom-aware path with deterministic active-verifier pinning. The current failure is folded
+   * into the compacted task dossier after summarization, so a generated summary cannot omit the
+   * evidence driving the next repair turn. A no-op/failure return remains byte-identical.
+   */
+  public List<Message> compactIfNeeded(
+      List<Message> history,
+      String workerProvider,
+      String workerModel,
+      ExecutionContext ctx,
+      long lastInputTokens,
+      String workerGoal,
+      Integer requestedOutputTokens,
+      List<org.springframework.ai.tool.ToolCallback> tools,
+      String activeDeterministicFailure) {
+    List<Message> compacted =
+        compactIfNeeded(
+            history,
+            workerProvider,
+            workerModel,
+            ctx,
+            lastInputTokens,
+            workerGoal,
+            requestedOutputTokens,
+            tools);
+    return pinActiveFailure(history, compacted, activeDeterministicFailure);
+  }
+
+  static List<Message> pinActiveFailure(
+      List<Message> original, List<Message> compacted, String activeDeterministicFailure) {
+    if (compacted == original
+        || compacted == null
+        || compacted.size() < 2
+        || activeDeterministicFailure == null
+        || activeDeterministicFailure.isBlank()
+        || !(compacted.get(1) instanceof UserMessage dossier)) {
+      return compacted;
+    }
+    List<Message> pinned = new ArrayList<>(compacted);
+    pinned.set(
+        1,
+        new UserMessage(
+            dossier.getText()
+                + "\n\n--- ACTIVE DETERMINISTIC FAILURE (must be preserved verbatim) ---\n"
+                + truncate(activeDeterministicFailure, 8_000)));
+    return pinned;
+  }
+
+  /**
    * Emergency compaction for context-overflow recovery (task 9): bypasses BOTH the feature flag and
    * the token trigger — when the provider has already rejected the request for length, "the flag is
    * off" is not a reason to lose the run. Same fail-safe contract (any failure returns the original

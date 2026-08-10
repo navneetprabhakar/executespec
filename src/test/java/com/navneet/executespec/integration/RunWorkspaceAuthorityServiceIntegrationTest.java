@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import java.nio.file.Path;
 import java.util.UUID;
@@ -118,7 +119,10 @@ class RunWorkspaceAuthorityServiceIntegrationTest {
   private RunWorkspaceAuthorityService service(JdbcTemplate jdbc, Path workspace) {
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(workspace.toString());
-    return new RunWorkspaceAuthorityService(jdbc, properties);
+    return new RunWorkspaceAuthorityService(
+        jdbc,
+        properties,
+        mock(com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry.class));
   }
 
   private JdbcTemplate jdbc(String schema) {

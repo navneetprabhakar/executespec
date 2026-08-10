@@ -367,6 +367,34 @@ describe('publicationTrustFacts', () => {
     });
   });
 
+  it('uses the explicit prior accepted frontier for rolled-back candidate evidence', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-rollback',
+          taskId: 'T2',
+          taskIndex: 1,
+          attemptNumber: 2,
+          attemptKind: 'BUILD_TASK',
+          state: 'ROLLED_BACK',
+          priorAcceptedGeneration: 'f'.repeat(64),
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          rejectedDiffDigest: 'c'.repeat(64),
+          failureCode: 'TASK_VERIFICATION_REJECTED',
+          createdAt: '2026-08-10T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
+      value: expect.stringContaining('accepted frontier remains ffffffffffff'),
+      kind: 'warn',
+    });
+  });
+
   it('treats a verified green suite with explicit skips as passing evidence', () => {
     const facts = publicationTrustFacts({
       tasks: [],

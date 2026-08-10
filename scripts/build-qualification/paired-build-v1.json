@@ -1,19 +1,27 @@
 {
-  "schemaVersion": 1,
-  "suiteId": "build-workspace-generation-v1",
+  "schemaVersion": 2,
+  "suiteId": "build-workspace-generation-v2",
   "runMode": "BUILD",
   "executionMode": "PROTOTYPE",
   "executionTopology": "SEQUENTIAL_SAME_HOST",
-  "safeMaxTotalUsd": 20.0,
+  "freshRunCount": 2,
+  "safeMaxTotalUsd": 10.0,
   "status": "PREPARED_NOT_EXECUTED",
   "arms": [
     {
       "id": "control",
-      "baseUrlEnv": "BUILD_QUAL_CONTROL_URL",
-      "releaseShaEnv": "BUILD_QUAL_CONTROL_SHA"
+      "source": "HISTORICAL_IMMUTABLE_EVIDENCE",
+      "expectedOutcome": "ROLLED_BACK",
+      "releaseSha": "86fa732bbb89cb9629f84c64036e1b62c88d3c7c",
+      "runIdsByRoute": {
+        "anthropic/claude-sonnet-5": "df74e82f-f593-44e3-8e81-eed3b42b6c5e",
+        "openrouter/glm-5.2": "1572b2eb-bb24-4b3b-84eb-a5c34375827e"
+      }
     },
     {
       "id": "candidate",
+      "source": "LIVE_CANDIDATE",
+      "expectedOutcome": "ACCEPTED",
       "baseUrlEnv": "BUILD_QUAL_CANDIDATE_URL",
       "releaseShaEnv": "BUILD_QUAL_CANDIDATE_SHA"
     }
@@ -43,7 +51,7 @@
   ],
   "harness": {
     "path": "scripts/build-eval.sh",
-    "sha256": "d2f02d416620047ab3126d3c2427e5e5a737fb2bbf8b15cfa4a1235b8ce5b25e"
+    "sha256": "3c28092017ea080e27e3d6bfd2a1ef18a74c07f7850c212ea69408672e050f69"
   },
   "pairedEqualFields": [
     "runMode",
@@ -59,27 +67,48 @@
     "requireConfirmationBeforeExpensiveContinuation": true,
     "requireBenchmarkPriorForAutomaticContinuation": false
   },
-  "requiredEvidence": [
+  "requiredCommonEvidence": [
     "releaseSha",
     "runId",
-    "terminalStatus",
     "provider",
     "model",
     "costUsd",
+    "specSha256",
+    "unresolvedWorkspaceGenerationAttemptCount"
+  ],
+  "requiredAcceptedEvidence": [
+    "terminalStatus",
+    "priorAcceptedWorkspaceGeneration",
     "acceptedWorkspaceGeneration",
     "latestWorkspaceGenerationAttemptState",
-    "unresolvedWorkspaceGenerationAttemptCount",
     "workspaceArchiveSha256",
+    "workspaceArchiveGeneration",
     "heldOutPassed",
     "heldOutTotal",
     "generatedCodeReview"
   ],
+  "requiredRolledBackEvidence": [
+    "priorAcceptedWorkspaceGeneration",
+    "candidateEvidenceKind",
+    "rejectedDiffSha256",
+    "rollbackRestoredGeneration",
+    "latestWorkspaceGenerationAttemptState",
+    "deterministicFailureSource",
+    "deterministicTestsExecuted",
+    "deterministicTestsFailed",
+    "deterministicFailureEvidenceSha256",
+    "generatedCodeReview"
+  ],
   "qualificationRules": {
-    "terminalStatus": "COMPLETE",
+    "freshRunsAreCandidateOnly": true,
+    "freshRunCount": 2,
+    "safeMaxUsdPerRun": 5.0,
     "unresolvedWorkspaceGenerationAttemptCount": 0,
     "workspaceArchiveMustMatchAcceptedGeneration": true,
+    "rollbackMustRestorePriorFrontier": true,
+    "legacyRejectedDiffMaySubstituteForUnfrozenCandidateGeneration": true,
     "systemVerifiedScoreIsNonAuthoritative": true,
     "manualGeneratedCodeReviewRequired": true,
-    "allHeldOutTestsMustPass": true
+    "allHeldOutTestsMustPassOnAcceptedArm": true
   }
 }

@@ -55,17 +55,35 @@ public class WorkspaceGenerationRecoveryService {
   private final PipelineRunRepository runs;
   private final WorkspaceIgnoredArtifactGuard ignoredArtifacts;
   private final AgentProperties agentProperties;
+  private final WorkspaceGenerationTelemetry telemetry;
 
   /** Read-only fence used by reviewer, validation and publication admission. */
   public void assertNoUnresolvedAttempt(String runId) {
-    if (attempts.findFirstByRunIdAndStateInOrderByCreatedAtDesc(runId, UNRESOLVED).isPresent()) {
+    assertNoUnresolvedAttempt(runId, "UNSPECIFIED");
+  }
+
+  public void assertNoUnresolvedAttempt(String runId, String boundary) {
+    var unresolved = attempts.findFirstByRunIdAndStateInOrderByCreatedAtDesc(runId, UNRESOLVED);
+    if (unresolved.isPresent()) {
+      WorkspaceGenerationAttempt attempt = unresolved.get();
+      telemetry.control(
+          runId,
+          attempt.getTaskId(),
+          attempt.getId(),
+          "DOWNSTREAM_ADMISSION",
+          "DENIED_UNRESOLVED",
+          boundary);
       throw new IllegalStateException("WORKSPACE_GENERATION_UNRESOLVED");
     }
   }
 
   /** Proves the current bytes are exactly the durable accepted BUILD frontier. */
   public void assertAcceptedFrontier(String runId, String currentGeneration) {
-    assertNoUnresolvedAttempt(runId);
+    assertAcceptedFrontier(runId, currentGeneration, "UNSPECIFIED");
+  }
+
+  public void assertAcceptedFrontier(String runId, String currentGeneration, String boundary) {
+    assertNoUnresolvedAttempt(runId, boundary);
     var run =
         runs.findById(runId)
             .orElseThrow(() -> new IllegalStateException("WORKSPACE_GENERATION_RUN_MISSING"));
@@ -73,6 +91,13 @@ public class WorkspaceGenerationRecoveryService {
     if (run.getAcceptedWorkspaceGeneration() == null
         || !run.getAcceptedWorkspaceGeneration().equals(currentGeneration)
         || run.getAcceptedGenerationAttemptId() == null) {
+      telemetry.control(
+          runId,
+          null,
+          run.getAcceptedGenerationAttemptId(),
+          "DOWNSTREAM_ADMISSION",
+          "DENIED_FRONTIER_MISMATCH",
+          boundary);
       throw new IllegalStateException("WORKSPACE_GENERATION_FRONTIER_MISMATCH");
     }
     WorkspaceGenerationAttempt accepted =
@@ -85,6 +110,10 @@ public class WorkspaceGenerationRecoveryService {
 
   public void assertAcceptedFrontier(String runId, Path workspaceRoot) {
     assertAcceptedFrontier(runId, workspaces.captureGeneration(workspaceRoot));
+  }
+
+  public void assertAcceptedFrontier(String runId, Path workspaceRoot, String boundary) {
+    assertAcceptedFrontier(runId, workspaces.captureGeneration(workspaceRoot), boundary);
   }
 
   public void recoverRunOrThrow(String runId) {
@@ -193,8 +222,10 @@ public class WorkspaceGenerationRecoveryService {
   }
 
   void recoverAll() {
-    for (WorkspaceGenerationAttempt attempt :
-        attempts.findByStateInOrderByCreatedAtAsc(UNRESOLVED)) {
+    List<WorkspaceGenerationAttempt> unresolved =
+        attempts.findByStateInOrderByCreatedAtAsc(UNRESOLVED);
+    telemetry.unresolved(unresolved.size());
+    for (WorkspaceGenerationAttempt attempt : unresolved) {
       try {
         authorities
             .tryAcquire(attempt.getRunId(), Authority.RECOVERY)
@@ -211,6 +242,7 @@ public class WorkspaceGenerationRecoveryService {
         .map(WorkspaceGenerationAttempt::getRunId)
         .distinct()
         .forEach(this::reconcileAcceptedTask);
+    telemetry.unresolved(attempts.findByStateInOrderByCreatedAtAsc(UNRESOLVED).size());
   }
 
   void recover(WorkspaceGenerationAttempt stale, Lease recoveryLease) {
@@ -229,6 +261,14 @@ public class WorkspaceGenerationRecoveryService {
       requireCas(claimed, "WORKSPACE_GENERATION_RECOVERY_CLAIM_FAILED");
       recoveryClaimed = true;
       WorkspaceGenerationAttempt row = require(stale.getId());
+      telemetry.authority("TAKEOVER", Authority.RECOVERY.name());
+      telemetry.recovery(
+          row.getRunId(),
+          row.getTaskId(),
+          row.getId(),
+          "ROLLBACK",
+          "CLAIMED",
+          WorkspaceGenerationState.ROLLING_BACK.name());
       CorrectionWorkspaceTransaction.Checkpoint checkpoint = readCheckpoint(row, recoveryLease);
       recoveryLease.assertOwned();
       CorrectionWorkspaceTransaction.DiffEvidence rejected =
@@ -269,6 +309,13 @@ public class WorkspaceGenerationRecoveryService {
           row.getRunId(),
           row.getTaskId(),
           row.getId());
+      telemetry.recovery(
+          row.getRunId(),
+          row.getTaskId(),
+          row.getId(),
+          "ROLLBACK",
+          "SUCCEEDED",
+          WorkspaceGenerationState.ROLLED_BACK.name());
     } catch (RuntimeException failure) {
       if (recoveryClaimed) {
         try {
@@ -288,6 +335,15 @@ public class WorkspaceGenerationRecoveryService {
           failure.addSuppressed(persistenceFailure);
         }
       }
+      telemetry.recovery(
+          stale.getRunId(),
+          stale.getTaskId(),
+          stale.getId(),
+          "ROLLBACK",
+          "FAILED",
+          recoveryClaimed
+              ? WorkspaceGenerationState.RECOVERY_FAILED.name()
+              : stale.getState().name());
       throw failure;
     } finally {
       recoveryLease.close();

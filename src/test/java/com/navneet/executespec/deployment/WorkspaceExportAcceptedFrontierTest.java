@@ -2,7 +2,10 @@ package com.navneet.executespec.deployment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -11,12 +14,14 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipFile;
 
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.preview.DevDockerfileGenerator;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.DurableCorrectionLifecycle;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.security.ArtifactPublicationGuard;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -25,6 +30,7 @@ import com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoverySe
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.InOrder;
 
 class WorkspaceExportAcceptedFrontierTest {
 
@@ -36,12 +42,19 @@ class WorkspaceExportAcceptedFrontierTest {
   private final DurableCorrectionLifecycle corrections = mock(DurableCorrectionLifecycle.class);
   private final CorrectionWorkspaceTransaction workspaceGenerations =
       mock(CorrectionWorkspaceTransaction.class);
+  private final RunWorkspaceAuthorityService workspaceAuthorities =
+      mock(RunWorkspaceAuthorityService.class);
+  private final RunWorkspaceAuthorityService.Lease publicationLease =
+      mock(RunWorkspaceAuthorityService.Lease.class);
   private WorkspaceExportService exports;
 
   @BeforeEach
   void setUp() {
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(workspace.toString());
+    when(workspaceAuthorities.acquire(
+            anyString(), eq(RunWorkspaceAuthorityService.Authority.PUBLICATION)))
+        .thenReturn(publicationLease);
     exports =
         new WorkspaceExportService(
             properties,
@@ -52,7 +65,8 @@ class WorkspaceExportAcceptedFrontierTest {
             mock(ArtifactPublicationGuard.class),
             generations,
             corrections,
-            workspaceGenerations);
+            workspaceGenerations,
+            workspaceAuthorities);
   }
 
   @Test
@@ -71,7 +85,8 @@ class WorkspaceExportAcceptedFrontierTest {
         .hasMessageContaining("WORKSPACE_EXPORT_ACCEPTED_FRONTIER_UNPROVEN")
         .hasMessageContaining("WORKSPACE_GENERATION_UNRESOLVED");
 
-    verify(generations, never()).assertAcceptedFrontier(runId, root.toAbsolutePath().normalize());
+    verify(generations, never())
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
   }
 
   @Test
@@ -91,7 +106,44 @@ class WorkspaceExportAcceptedFrontierTest {
     }
 
     verify(generations).recoverRunOrThrow(runId);
-    verify(generations).assertAcceptedFrontier(runId, root.toAbsolutePath().normalize());
+    verify(generations)
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
+    InOrder authorityOrder = inOrder(workspaceAuthorities, publicationLease, generations);
+    authorityOrder
+        .verify(workspaceAuthorities)
+        .acquire(runId, RunWorkspaceAuthorityService.Authority.PUBLICATION);
+    authorityOrder.verify(publicationLease).assertOwned();
+    authorityOrder
+        .verify(generations)
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
+    verify(publicationLease).close();
+  }
+
+  @Test
+  void buildExportAbortsWhenPublicationAuthorityIsLostDuringArchiveRead() throws Exception {
+    String runId = "build-lease-lost";
+    Path root = Files.createDirectories(workspace.resolve(runId));
+    Files.writeString(root.resolve("accepted.txt"), "accepted\n");
+    when(stateStore.findRun(runId)).thenReturn(Optional.of(run(runId, "BUILD")));
+    when(corrections.latestAcceptedGeneration(runId)).thenReturn(Optional.empty());
+    AtomicInteger ownershipChecks = new AtomicInteger();
+    org.mockito.Mockito.doAnswer(
+            ignored -> {
+              if (ownershipChecks.incrementAndGet() >= 3) {
+                throw new IllegalStateException("RUN_WORKSPACE_AUTHORITY_LOST");
+              }
+              return null;
+            })
+        .when(publicationLease)
+        .assertOwned();
+
+    assertThatThrownBy(() -> exports.exportWorkspace(runId))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("RUN_WORKSPACE_AUTHORITY_LOST");
+
+    verify(generations)
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
+    verify(publicationLease).close();
   }
 
   @Test
@@ -110,7 +162,8 @@ class WorkspaceExportAcceptedFrontierTest {
 
     verify(corrections).recoverRunOrThrow(runId);
     verify(generations, never()).recoverRunOrThrow(runId);
-    verify(generations, never()).assertAcceptedFrontier(runId, root.toAbsolutePath().normalize());
+    verify(generations, never())
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
   }
 
   @Test
@@ -133,7 +186,8 @@ class WorkspaceExportAcceptedFrontierTest {
 
     verify(corrections).recoverRunOrThrow(runId);
     verify(generations, never()).recoverRunOrThrow(runId);
-    verify(generations, never()).assertAcceptedFrontier(runId, root.toAbsolutePath().normalize());
+    verify(generations, never())
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
   }
 
   @Test
@@ -147,7 +201,8 @@ class WorkspaceExportAcceptedFrontierTest {
     Files.deleteIfExists(archive);
 
     verify(generations, never()).recoverRunOrThrow(runId);
-    verify(generations, never()).assertAcceptedFrontier(runId, root.toAbsolutePath().normalize());
+    verify(generations, never())
+        .assertAcceptedFrontier(runId, root.toAbsolutePath().normalize(), "WORKSPACE_EXPORT");
   }
 
   private static PipelineRun run(String runId, String mode) {

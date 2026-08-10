@@ -25,6 +25,50 @@ import org.junit.jupiter.api.Test;
 class WorkspaceGenerationEvidenceProjectionTest {
 
   @Test
+  void malformedOrAbsentHistoricalJsonDegradesToEmptyTypedEvidence() {
+    UUID attemptId = UUID.randomUUID();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    WorkspaceGenerationVerificationReceiptRepository receipts =
+        mock(WorkspaceGenerationVerificationReceiptRepository.class);
+    WorkspaceGenerationAttempt attempt =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId("historical-run")
+            .taskId("legacy-task")
+            .taskIndex(0)
+            .attemptNumber(1)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(WorkspaceGenerationState.ROLLED_BACK)
+            .taskContractJson("{not-json")
+            .observedInitialFailureEvidenceJson("[]")
+            .createdAt(Instant.EPOCH)
+            .build();
+    WorkspaceGenerationVerificationReceipt receipt =
+        WorkspaceGenerationVerificationReceipt.builder()
+            .id(UUID.randomUUID())
+            .attemptId(attemptId)
+            .outcome("FAILED")
+            .evidenceJson("{malformed")
+            .build();
+    when(attempts.findTop20ByRunIdOrderByCreatedAtDesc("historical-run"))
+        .thenReturn(List.of(attempt));
+    when(receipts.findFirstByAttemptIdOrderByCreatedAtDesc(attemptId))
+        .thenReturn(Optional.of(receipt));
+
+    RunDetail.WorkspaceGenerationAttemptEvidence evidence =
+        new WorkspaceGenerationEvidenceProjection(attempts, receipts, new ObjectMapper())
+            .forRun("historical-run")
+            .getFirst();
+
+    assertThat(evidence.initialFailureEvidence()).isNull();
+    assertThat(evidence.runtimeSurface()).isNull();
+    assertThat(evidence.acceptanceChecks()).isEmpty();
+    assertThat(evidence.verificationOutcome()).isEqualTo("FAILED");
+    assertThat(evidence.acceptedGeneration()).isNull();
+  }
+
+  @Test
   void projectsFrozenContractRouteUsageAndVerificationReceipt() throws Exception {
     UUID attemptId = UUID.randomUUID();
     UUID receiptId = UUID.randomUUID();
@@ -112,6 +156,8 @@ class WorkspaceGenerationEvidenceProjectionTest {
             .getFirst();
 
     assertThat(evidence.taskContractDigest()).isEqualTo(contract.digest());
+    assertThat(evidence.priorAcceptedGeneration()).isEqualTo("a".repeat(64));
+    assertThat(evidence.acceptedGeneration()).isEqualTo("b".repeat(64));
     assertThat(evidence.initialFailureEvidence().outcome()).isEqualTo("FAILURE_OBSERVED");
     assertThat(evidence.initialFailureEvidence().code()).isEqualTo("INITIAL_TESTS_FAILED");
     assertThat(evidence.initialFailureEvidence().detail())
