@@ -7,6 +7,8 @@ acceptance authority and must never be opened to ordinary run readers. Historica
 rolled back before `beginVerification` honestly return a null candidate generation; their negative
 proof is the digest-bound non-empty rejected diff plus exact prior-frontier restoration and durable
 deterministic task-smoke failure, not an invented generation digest.
+Recovery-failure code/reason/timestamp are exposed on this operator-only response so a failed
+restore is diagnosable without widening customer run detail.
 
 V374 makes one initial BUILD task the unit of mutation authority. V375 preserves original rejection
 and rejected-diff evidence independently from first recovery-failure evidence. V376 seeds the
@@ -17,10 +19,16 @@ admits dispatch. `WorkspaceGenerationLifecycle`
 owns `PREPARED → MUTATING → VERIFYING → VERIFIED → CHECKPOINTING → ACCEPTED`; every rejection uses
 `ROLLING_BACK → ROLLED_BACK`, and crash recovery may use `RECOVERY_FAILED → ROLLING_BACK` retries.
 Never infer acceptance from a worker outcome or task status.
+The worker outcome is advisory even when it is `COMPLETED_WITH_WARNING` or `WORKER_FAILED`: after
+authorized mutation, the frozen server verifier always decides acceptance. A passing receipt
+normalizes the task outcome to success while retaining raw worker evidence; a failed receipt rolls
+the candidate back.
 
 `WorkspaceGenerationExecutionEvidenceRecorder` owns the transactional MUTATING-state CAS that
 freezes effective route, iteration/tool/model-call counts, token categories, and cost before
 verification. This keeps usage-evidence persistence separate from the lifecycle state machine.
+`WorkspaceGenerationRollbackService` owns the evidence-first database/filesystem/database rejection
+sequence so the lifecycle state machine stays below the new-class size ceiling.
 
 ## Invariants
 
@@ -36,6 +44,8 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   required build/tests. Acceptance reclassifies against the exact candidate diff: zero-diff
   generations fail, and any actual code-file change requires an executed non-empty green suite
   even when planner wording classified the task as documentation/configuration.
+- HTTP route checks canonicalize parameter names (`/todos/{id}` and `/todos/{todo_id}` are the same
+  reachable route shape) while preserving exact methods and literal path segments.
 - Under `build.shared-code-change-loop.enabled`, `GreenfieldBaselineService` trusts the typed
   `WorkspaceOrigin` carried from durable run admission rather than rediscovering origin from
   filesystem metadata. Python and path-explicit plain Node JavaScript use qualified external bootstrap markers
@@ -67,6 +77,10 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   the frontier from the newest timestamp.
 - Initial review is read-only. Formatting or repair belongs inside the task transaction or the
   existing durable correction lifecycle.
+- Rejection is evidence-first and two-phase: commit `ROLLING_BACK` plus the exact bounded candidate
+  diff before touching the filesystem, restore outside that database transaction, then commit
+  `ROLLED_BACK`. A restore/proof failure commits `RECOVERY_FAILED` without erasing the original
+  candidate evidence; the coordinator never retries rollback with a released lease.
 - Archives are internal generation archives, not customer download ZIPs: every repository retains
   its original HEAD bundle and exact tree/modes. Restore must re-attest the canonical multi-repo
   generation. Missing, malformed, partial, or stale local trees are reconstructed into an absent
@@ -114,7 +128,8 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   untracked, nested-repository, and ignored-artifact state exactly.
 - `WorkspaceIgnoredArtifactGuardTest`: stale-output cleanup and baseline preservation.
 - `WorkspaceGenerationLifecycleBoundaryTest`: task-local ignored dependencies survive deterministic
-  verification but are purged and re-attested before checkpoint/acceptance.
+  verification but are purged before checkpoint/acceptance; rejection evidence commits before
+  filesystem rollback and restore failure is durable.
 - `WorkerCorrectionToolFenceTest`: ThreadLocal propagation and exact dispatch fence.
 - `TaskAcceptanceVerifierTest`: zero-diff rejection, actual-code-change test escalation, exact
   initial test counts, command drift, immutable-bootstrap tamper rejection, held-out endpoint
@@ -122,7 +137,8 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
 - `TaskAcceptanceContractResolverTest`: typed canonical contract/digest, sorted touch paths,
   documentation-vs-code test policy, and admitted plan/goal/workspace authority binding.
 - `BuildTaskGenerationCoordinatorTest`: required orchestration order, exact checkpoint-before-accept,
-  rollback/no-accept behavior for worker or deterministic-verification rejection, flag-off
+  deterministic proof outranking worker termination state, rollback/no-accept behavior for failed
+  deterministic verification, flag-off
   telemetry isolation, schema-v2 execution evidence, typed lifecycle emission, initial-delta seed,
   and hidden-verifier non-disclosure to the worker.
 - `GreenfieldBaselineServiceTest` + `GreenfieldWorkspaceCompositionTest`: typed-origin behavior,

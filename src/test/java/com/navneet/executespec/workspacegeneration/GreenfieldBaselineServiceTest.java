@@ -110,6 +110,26 @@ class GreenfieldBaselineServiceTest {
   }
 
   @Test
+  void pythonBootstrapTreatsPathParameterNamesAsTheSameHttpRoute() {
+    PlannedTask task =
+        task("Build DELETE /todos/{id} in Python", List.of("main.py", "requirements.txt"));
+    Plan plan =
+        Plan.builder()
+            .planTitle("Todo API")
+            .projectType("python")
+            .runtimeSurface(Plan.RuntimeSurface.HTTP)
+            .tasks(List.of(task))
+            .build();
+
+    GreenfieldBaselinePlan baseline =
+        service.plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD);
+
+    assertThat(baseline.filesToCreate().get(".executespec/bootstrap/test_acceptance.py"))
+        .contains("re.sub(r\"\\{[^/{}]+\\}\", \"{}\", path.value)")
+        .contains("assert (\"DELETE\", \"/todos/{}\") in routes");
+  }
+
+  @Test
   void existingRepositoryIsNeverRebaselined() throws Exception {
     Files.writeString(workspace.resolve("customer.txt"), "keep");
 

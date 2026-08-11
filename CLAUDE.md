@@ -41,7 +41,13 @@ The operator-only
 `GET /api/admin/workspace-generation-attempts/{attemptId}/qualification-evidence` route is
 SUPER_ADMIN + no-store and exposes preserved rejected-diff evidence only for manual qualification;
 customer run detail remains redacted. Historical pre-verification rollbacks are labeled
-`LEGACY_REJECTED_DIFF_ONLY` rather than assigned invented candidate/receipt values.
+`LEGACY_REJECTED_DIFF_ONLY` rather than assigned invented candidate/receipt values. After mutation,
+worker termination is advisory: the shared kernel always runs the frozen server verifier, whose
+immutable receipt alone accepts or rejects the generation. HTTP checks preserve method/literal
+segments while canonicalizing path-parameter names. Rejection commits its bounded candidate diff
+before filesystem restore; only then does it restore and resolve `ROLLED_BACK`. Restore/proof
+failure preserves that diff, records `RECOVERY_FAILED`, and exposes the recovery reason only
+through the SUPER_ADMIN qualification route.
 
 **V374 forward/recovery fence clarification:** every candidate-bearing transition repeats the
 exact live LLM/workspace lease plus `pipeline_run.status=WORKING`; pause/cancel can roll back but

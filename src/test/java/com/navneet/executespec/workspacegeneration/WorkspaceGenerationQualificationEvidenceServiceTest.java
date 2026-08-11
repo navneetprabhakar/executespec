@@ -31,6 +31,8 @@ class WorkspaceGenerationQualificationEvidenceServiceTest {
             .rejectedDiffDigest("b".repeat(64))
             .rejectedDiffJson("{\"files\":[{\"path\":\"calculator.py\"}]}")
             .failureCode("TASK_OUTCOME_UNACCEPTED")
+            .recoveryFailureCode("ROLLBACK_PROOF_FAILED")
+            .recoveryFailureReason("residualPaths=[0:main.py]")
             .requestedProvider("ANTHROPIC")
             .requestedModel("claude-sonnet-5")
             .build();
@@ -44,6 +46,8 @@ class WorkspaceGenerationQualificationEvidenceServiceTest {
     assertThat(evidence.candidateGeneration()).isNull();
     assertThat(evidence.rejectedDiffDigest()).isEqualTo("b".repeat(64));
     assertThat(evidence.rejectedDiffJson()).contains("calculator.py");
+    assertThat(evidence.recoveryFailureCode()).isEqualTo("ROLLBACK_PROOF_FAILED");
+    assertThat(evidence.recoveryFailureReason()).contains("main.py");
     assertThat(evidence.latestVerification()).isNull();
   }
 }

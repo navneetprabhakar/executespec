@@ -413,7 +413,15 @@ public class TaskAcceptanceVerifier {
     if (separator <= 0 || separator == expectation.length() - 1) return false;
     String method = expectation.substring(0, separator).toLowerCase(java.util.Locale.ROOT);
     String path = expectation.substring(separator + 1);
-    return paths.get(path) instanceof Map<?, ?> operations && operations.containsKey(method);
+    String canonical = HttpEndpointContract.canonicalPath(path);
+    return paths.entrySet().stream()
+        .anyMatch(
+            entry ->
+                entry.getKey() instanceof String candidate
+                    && java.util.Objects.equals(
+                        canonical, HttpEndpointContract.canonicalPath(candidate))
+                    && entry.getValue() instanceof Map<?, ?> operations
+                    && operations.containsKey(method));
   }
 
   private static boolean bootstrapArtifactsMatch(

@@ -228,7 +228,7 @@ public class GreenfieldBaselineService {
                 endpoint -> {
                   int split = endpoint.indexOf(' ');
                   String method = endpoint.substring(0, split);
-                  String path = endpoint.substring(split + 1);
+                  String path = HttpEndpointContract.canonicalPath(endpoint.substring(split + 1));
                   return "    assert (\""
                       + method
                       + "\", \""
@@ -249,6 +249,7 @@ public class GreenfieldBaselineService {
             ? ""
             : "\n\ndef test_required_http_routes_are_wired():\n"
                 + "    import ast\n"
+                + "    import re\n"
                 + "    source = Path(\""
                 + entrypoint
                 + "\").read_text(encoding=\"utf-8\")\n"
@@ -265,7 +266,8 @@ public class GreenfieldBaselineService {
                 + "                continue\n"
                 + "            path = decorator.args[0]\n"
                 + "            if isinstance(path, ast.Constant) and isinstance(path.value, str):\n"
-                + "                routes.add((function.attr.upper(), path.value))\n"
+                + "                canonical = re.sub(r\"\\{[^/{}]+\\}\", \"{}\", path.value)\n"
+                + "                routes.add((function.attr.upper(), canonical))\n"
                 + endpointAssertions
                 + "\n";
     return "from pathlib import Path\n\n\ndef test_required_task_paths_exist():\n"

@@ -204,6 +204,23 @@ public interface WorkspaceGenerationAttemptRepository
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.state = :recoveryFailed, "
+          + "a.recoveryFailureCode = COALESCE(a.recoveryFailureCode, :code), "
+          + "a.recoveryFailureReason = COALESCE(a.recoveryFailureReason, :reason), "
+          + "a.recoveryFailureAt = COALESCE(a.recoveryFailureAt, :now), a.updatedAt = :now "
+          + "WHERE a.id = :id AND a.workspaceLeaseToken = :token "
+          + "AND a.state = :rollingBack")
+  int markRollbackFailed(
+      @Param("id") UUID id,
+      @Param("token") UUID workspaceToken,
+      @Param("code") String code,
+      @Param("reason") String reason,
+      @Param("rollingBack") WorkspaceGenerationState rollingBack,
+      @Param("recoveryFailed") WorkspaceGenerationState recoveryFailed,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :rolledBack, "
           + "a.resolvedAt = :now, a.updatedAt = :now "
           + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "

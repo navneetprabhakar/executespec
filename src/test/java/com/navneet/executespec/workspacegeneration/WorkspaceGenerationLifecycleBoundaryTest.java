@@ -26,8 +26,105 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 class WorkspaceGenerationLifecycleBoundaryTest {
+
+  @Test
+  void rollbackCommitsRejectedDiffBeforeFilesystemRestoreAndPersistsRestoreFailure() {
+    UUID attemptId = UUID.randomUUID();
+    UUID workspaceToken = UUID.randomUUID();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    CorrectionWorkspaceTransaction workspaces = mock(CorrectionWorkspaceTransaction.class);
+    WorkspaceIgnoredArtifactGuard ignored = mock(WorkspaceIgnoredArtifactGuard.class);
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
+    when(transactions.getTransaction(any(TransactionDefinition.class)))
+        .thenReturn(mock(TransactionStatus.class));
+    when(lease.ownerToken()).thenReturn(workspaceToken);
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint = checkpoint("run-rollback-proof");
+    WorkspaceGenerationLifecycle lifecycle =
+        lifecycle(
+            attempts, workspaces, ignored, mock(PipelineRunMutationRepository.class), transactions);
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(attemptId, checkpoint, lease);
+    WorkspaceGenerationAttempt attempt =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .state(WorkspaceGenerationState.MUTATING)
+            .beforeGeneration("a".repeat(64))
+            .ignoredArtifactBaselineJson("{}")
+            .build();
+    CorrectionWorkspaceTransaction.DiffEvidence rejected =
+        new CorrectionWorkspaceTransaction.DiffEvidence(
+            List.of("0:main.py"),
+            "b".repeat(64),
+            "diff --git a/main.py b/main.py",
+            32,
+            32,
+            false,
+            false);
+    when(attempts.findById(attemptId)).thenReturn(java.util.Optional.of(attempt));
+    when(workspaces.diffEvidence(eq(checkpoint), any(Runnable.class))).thenReturn(rejected);
+    when(attempts.beginRollback(
+            eq(attemptId),
+            eq(workspaceToken),
+            eq(WorkspaceGenerationState.MUTATING),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq("b".repeat(64)),
+            any(String.class),
+            eq("TASK_VERIFICATION_REJECTED"),
+            any(String.class),
+            any(Instant.class)))
+        .thenReturn(1);
+    org.mockito.Mockito.doThrow(new IllegalStateException("disk restore failed"))
+        .when(workspaces)
+        .rollback(eq(checkpoint), any(Runnable.class));
+    when(attempts.markRollbackFailed(
+            eq(attemptId),
+            eq(workspaceToken),
+            eq("ROLLBACK_PROOF_FAILED"),
+            eq("disk restore failed"),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq(WorkspaceGenerationState.RECOVERY_FAILED),
+            any(Instant.class)))
+        .thenReturn(1);
+
+    assertThatThrownBy(
+            () ->
+                lifecycle.rollback(
+                    prepared, "TASK_VERIFICATION_REJECTED", "candidate verification failed"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("disk restore failed");
+
+    InOrder order = inOrder(attempts, workspaces);
+    order
+        .verify(attempts)
+        .beginRollback(
+            eq(attemptId),
+            eq(workspaceToken),
+            eq(WorkspaceGenerationState.MUTATING),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq("b".repeat(64)),
+            any(String.class),
+            eq("TASK_VERIFICATION_REJECTED"),
+            any(String.class),
+            any(Instant.class));
+    order.verify(workspaces).rollback(eq(checkpoint), any(Runnable.class));
+    order
+        .verify(attempts)
+        .markRollbackFailed(
+            eq(attemptId),
+            eq(workspaceToken),
+            eq("ROLLBACK_PROOF_FAILED"),
+            eq("disk restore failed"),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq(WorkspaceGenerationState.RECOVERY_FAILED),
+            any(Instant.class));
+    verify(lease).close();
+  }
 
   @Test
   void taskLocalIgnoredDependenciesSurviveVerificationButArePurgedBeforeCheckpoint() {
@@ -189,6 +286,19 @@ class WorkspaceGenerationLifecycleBoundaryTest {
       CorrectionWorkspaceTransaction workspaces,
       WorkspaceIgnoredArtifactGuard ignored,
       PipelineRunMutationRepository runMutations) {
+    return lifecycle(
+        attempts, workspaces, ignored, runMutations, mock(PlatformTransactionManager.class));
+  }
+
+  private static WorkspaceGenerationLifecycle lifecycle(
+      WorkspaceGenerationAttemptRepository attempts,
+      CorrectionWorkspaceTransaction workspaces,
+      WorkspaceIgnoredArtifactGuard ignored,
+      PipelineRunMutationRepository runMutations,
+      PlatformTransactionManager transactionManager) {
+    WorkspaceGenerationRollbackService rollbackService =
+        new WorkspaceGenerationRollbackService(
+            attempts, workspaces, ignored, new ObjectMapper(), transactionManager);
     return new WorkspaceGenerationLifecycle(
         attempts,
         mock(WorkspaceGenerationVerificationReceiptRepository.class),
@@ -199,8 +309,9 @@ class WorkspaceGenerationLifecycleBoundaryTest {
         new ObjectMapper(),
         mock(GcsTaskCheckpointService.class),
         mock(WorkspaceGenerationRecoveryService.class),
+        rollbackService,
         ignored,
-        mock(PlatformTransactionManager.class));
+        transactionManager);
   }
 
   private static CorrectionWorkspaceTransaction.Checkpoint checkpoint(String directory) {
