@@ -31,8 +31,10 @@ that value to the accepted frontier. The frozen schema-v2 cohort permits exactly
 candidates (Sonnet 5 and GLM 5.2, $5 each); its two ROLLED_BACK arms are immutable historical
 controls, not additional paid runs. Paid execution fails closed unless the global shared-kernel
 flag is read as true immediately before each submission, and accepted evidence must independently
-contain the observed initial failure plus frozen acceptance checks. The harness never mutates the
-flag. `GET /api/admin/release-identity` returns the source SHA, artifact SHA-256 and deployment-attempt
+contain the observed initial failure plus frozen acceptance checks. The paired operator harness
+owns one audited `false → true → false` window, restores and reads back `false` on normal/EXIT/INT/
+TERM paths, and refuses to start when the initial state is not false.
+`GET /api/admin/release-identity` returns the source SHA, artifact SHA-256 and deployment-attempt
 ID captured by the serving JVM at startup; missing/malformed identity returns 503, and the
 paid harness refuses a caller-supplied candidate SHA that does not match it. Accepted qualification
 artifacts persist the attested SHA, canonical authority and live-read timestamp and are rejected
@@ -48,6 +50,18 @@ segments while canonicalizing path-parameter names. Rejection commits its bounde
 before filesystem restore; only then does it restore and resolve `ROLLED_BACK`. Restore/proof
 failure preserves that diff, records `RECOVERY_FAILED`, and exposes the recovery reason only
 through the SUPER_ADMIN qualification route.
+
+**2026-08-11 replacement qualification correction:** exact deployed source
+`305b3085a5861bcf72abe77acd448eaa66246cc2` passed source/JAR/attempt, health, serving-JVM and
+generation-CAS attestation. The two authorized runs both produced useful candidate bytes but failed
+before deterministic verification because the lifecycle reused a `MUTATING`-only authority query
+after moving to `VERIFYING`; rollback then failed because `git clean -ndX` can collapse ignored
+children into a parent directory that does not itself match `git check-ignore`. Authority is now
+state-specific at MUTATING/VERIFYING/VERIFIED/CHECKPOINTING, and ignored cleanup revalidates the
+same scoped dry-run classification Git used. Python acceptance runs the repository-owned pytest
+suite in addition to the independent live runtime contract, and a required-test task must change a
+non-bootstrap test file. Stable workspace-generation/recovery terminal codes replace an opaque
+`INTERNAL_ERROR` without exposing internal paths.
 
 **V374 forward/recovery fence clarification:** every candidate-bearing transition repeats the
 exact live LLM/workspace lease plus `pipeline_run.status=WORKING`; pause/cancel can roll back but

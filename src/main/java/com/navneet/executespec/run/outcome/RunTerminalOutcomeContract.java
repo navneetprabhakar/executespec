@@ -76,7 +76,12 @@ public final class RunTerminalOutcomeContract {
           "PATCH_ITER_LIMIT");
 
   private static final Set<String> PLATFORM_CODES =
-      Set.of("INTERNAL_ERROR", "PATCH_ENGINE_ERROR", "PATCH_UNKNOWN_OUTCOME");
+      Set.of(
+          "INTERNAL_ERROR",
+          "PATCH_ENGINE_ERROR",
+          "PATCH_UNKNOWN_OUTCOME",
+          "WORKSPACE_GENERATION_FAILED",
+          "WORKSPACE_GENERATION_RECOVERY_FAILED");
 
   /**
    * Bounded marker persisted by the auto-push path when a clean run's publication was blocked. Only
@@ -398,6 +403,11 @@ public final class RunTerminalOutcomeContract {
           "Execution stopped",
           "Execution stopped before the run could complete.",
           "Review the run evidence before deciding whether to retry.");
+    }
+    if ("WORKSPACE_GENERATION_FAILED".equals(code)
+        || "WORKSPACE_GENERATION_RECOVERY_FAILED".equals(code)) {
+      return RunTerminalOutcomeDefinitions.workspaceGenerationFailure(
+          "WORKSPACE_GENERATION_RECOVERY_FAILED".equals(code));
     }
     if ("PARTIAL".equals(status)) {
       return RunTerminalOutcomeDefinitions.warning(

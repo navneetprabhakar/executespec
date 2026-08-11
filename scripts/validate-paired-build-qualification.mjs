@@ -28,7 +28,8 @@ const REQUIRED_ACCEPTED = new Set([
   "initialFailureOutcome", "initialFailureCode", "acceptanceCheckCount",
   "sharedKernelFlagEnabledAtSubmission",
   "releaseIdentityAuthority",
-  "attestedRunningSha", "releaseIdentityReadAt",
+  "attestedRunningSha", "attestedArtifactSha256", "attestedDeploymentAttemptId",
+  "releaseIdentityReadAt",
 ]);
 const REQUIRED_ROLLED_BACK = new Set([
   "priorAcceptedWorkspaceGeneration", "candidateEvidenceKind", "rejectedDiffSha256",

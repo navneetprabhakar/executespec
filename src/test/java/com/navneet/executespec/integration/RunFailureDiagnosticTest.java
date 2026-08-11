@@ -32,6 +32,33 @@ class RunFailureDiagnosticTest {
   }
 
   @Test
+  void mapsWorkspaceBoundaryFailuresWithoutLeakingInternalDetails() {
+    IllegalStateException failure =
+        new IllegalStateException("WORKSPACE_GENERATION_DISPATCH_AUTHORITY_LOST:secret-path");
+
+    assertThat(RunFailureDiagnostic.from(failure, "INTERNAL_ERROR"))
+        .extracting(RunFailureDiagnostic::code, RunFailureDiagnostic::reason)
+        .containsExactly(
+            "WORKSPACE_GENERATION_FAILED",
+            "Generated changes did not cross the BUILD acceptance boundary; no unverified"
+                + " generation was accepted or published.");
+  }
+
+  @Test
+  void suppressedRollbackProofFailureOutranksGenericOuterFailure() {
+    IllegalStateException failure = new IllegalStateException("unclassified outer failure");
+    failure.addSuppressed(
+        new IllegalStateException("WORKSPACE_IGNORED_ARTIFACT_CLASSIFICATION_CHANGED"));
+
+    assertThat(RunFailureDiagnostic.from(failure, "INTERNAL_ERROR"))
+        .extracting(RunFailureDiagnostic::code, RunFailureDiagnostic::reason)
+        .containsExactly(
+            "WORKSPACE_GENERATION_RECOVERY_FAILED",
+            "Generated changes were rejected, but the workspace could not be proven restored;"
+                + " publication was blocked.");
+  }
+
+  @Test
   void classifiesSourceExtractionFailureWithoutLeakingWorkspaceDetails() {
     var failure =
         new IllegalStateException(

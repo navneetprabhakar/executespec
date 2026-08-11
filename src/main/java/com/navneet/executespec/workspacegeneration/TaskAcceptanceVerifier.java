@@ -159,6 +159,8 @@ public class TaskAcceptanceVerifier {
     boolean actualCodeChanged =
         changedFiles.stream().anyMatch(TaskAcceptanceContractResolver::isCodePath);
     boolean testRequired = "REQUIRED".equals(contract.testRequirement()) || actualCodeChanged;
+    boolean candidateTestsPresent =
+        changedFiles.stream().anyMatch(TaskAcceptanceVerifier::isTestPath);
     boolean schemaV2 = contract.schemaVersion() >= 2;
     boolean requiredPathsPresent =
         requiredPathsPresent(context.workspaceRoot(), contract.requiredPaths());
@@ -216,42 +218,27 @@ public class TaskAcceptanceVerifier {
             && !contract.endpointExpectations().isEmpty();
     Optional<PythonHttpRuntimeAcceptanceService.Result> runtimeResult = Optional.empty();
     Optional<DetailedResult> testResult = Optional.empty();
+    if (buildPassed && test.isPresent() && bootstrapArtifactsMatch) {
+      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+          context.runId());
+      testResult = testRunner.runTestsDetailed(context.runId(), context.workspaceRoot());
+    }
     if (buildPassed && pythonHttpRuntimeRequired && bootstrapArtifactsMatch) {
       com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
           context.runId());
       runtimeResult =
           Optional.of(pythonHttpRuntime.verify(context.runId(), context.workspaceRoot()));
-    } else if (buildPassed && test.isPresent()) {
-      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
-          context.runId());
-      testResult = testRunner.runTestsDetailed(context.runId(), context.workspaceRoot());
     }
-    TestExecutionSummary summary;
-    boolean testsExecuted;
-    boolean testsPassed;
-    if (runtimeResult.isPresent()) {
-      summary = summary(runtimeResult.get());
-      testsExecuted = runtimeResult.get().executed();
-      testsPassed = runtimeResult.get().passed();
-    } else {
-      summary = testResult.map(DetailedResult::summary).orElse(null);
-      testsExecuted = testResult.isPresent();
-      testsPassed =
-          summary != null
-              && testResult.isPresent()
-              && testResult.get().exitCode() == 0
-              && summary.getTotalTests() > 0
-              && summary.getFailed() == 0
-              && summary.getErrors() == 0;
-    }
+    TestExecutionSummary summary = testResult.map(DetailedResult::summary).orElse(null);
+    boolean workspaceTestsExecuted = testResult.isPresent();
+    boolean workspaceTestsPassed =
+        summary != null
+            && testResult.get().exitCode() == 0
+            && summary.getTotalTests() > 0
+            && summary.getFailed() == 0
+            && summary.getErrors() == 0;
     boolean serverOwnedRuntimeCommand =
         pythonHttpRuntimeRequired
-            && contract.testCommand() != null
-            && "executespec-bootstrap-pytest".equals(contract.testCommand().source())
-            && contract
-                .testCommand()
-                .command()
-                .contains(".executespec/bootstrap/test_acceptance.py")
             && contract
                 .immutableBootstrapArtifactDigests()
                 .containsKey(".executespec/bootstrap/test_acceptance.py")
@@ -267,6 +254,10 @@ public class TaskAcceptanceVerifier {
     boolean runtimeContractPassed =
         runtimeContractExecuted
             && runtimeResult.map(PythonHttpRuntimeAcceptanceService.Result::passed).orElse(false);
+    boolean testsExecuted =
+        workspaceTestsExecuted && (!pythonHttpRuntimeRequired || runtimeContractExecuted);
+    boolean testsPassed =
+        workspaceTestsPassed && (!pythonHttpRuntimeRequired || runtimeContractPassed);
     AcceptanceProofPolicy.Decision proof =
         AcceptanceProofPolicy.evaluate(
             contract.requiredProofStrength(),
@@ -285,6 +276,7 @@ public class TaskAcceptanceVerifier {
             buildPassed,
             testsExecuted,
             testsPassed,
+            candidateTestsPresent,
             runtimeContractPassed,
             bootstrapArtifactsMatch);
 
@@ -327,6 +319,7 @@ public class TaskAcceptanceVerifier {
     evidence.put("bootstrapArtifactsMatch", bootstrapArtifactsMatch);
     evidence.put("actualChangedFiles", changedFiles);
     evidence.put("actualCodeChanged", actualCodeChanged);
+    evidence.put("candidateTestsPresent", candidateTestsPresent);
     evidence.put("buildExitCode", parsed.exitCode());
     evidence.put("buildOutput", bounded(buildOutput));
     evidence.put("testsExecuted", testsExecuted);
@@ -378,24 +371,29 @@ public class TaskAcceptanceVerifier {
         Instant.now());
   }
 
+  private static boolean isTestPath(String changedFile) {
+    if (changedFile == null || changedFile.isBlank()) return false;
+    String path = changedFile.replaceFirst("^[0-9]+:", "").replace('\\', '/').toLowerCase();
+    if (path.startsWith(".executespec/bootstrap/")) return false;
+    String name = path.substring(path.lastIndexOf('/') + 1);
+    return name.startsWith("test_")
+        || name.endsWith("_test.py")
+        || name.endsWith(".test.js")
+        || name.endsWith(".test.mjs")
+        || name.endsWith(".test.ts")
+        || name.endsWith(".test.tsx")
+        || name.endsWith(".spec.js")
+        || name.endsWith(".spec.ts")
+        || name.endsWith("test.java")
+        || name.endsWith("_test.go");
+  }
+
   private String json(Object value) {
     try {
       return objectMapper.writeValueAsString(value);
     } catch (JsonProcessingException impossible) {
       throw new IllegalStateException("TASK_ACCEPTANCE_EVIDENCE_SERIALIZATION_FAILED", impossible);
     }
-  }
-
-  private static TestExecutionSummary summary(PythonHttpRuntimeAcceptanceService.Result result) {
-    return TestExecutionSummary.builder()
-        .totalTests(result.testsTotal())
-        .passed(result.testsPassed())
-        .failed(result.testsFailed())
-        .errors(result.testsErrors())
-        .skipped(0)
-        .executionVerified(result.executed())
-        .unverifiedReason(result.executed() ? null : result.detail())
-        .build();
   }
 
   private static boolean matches(

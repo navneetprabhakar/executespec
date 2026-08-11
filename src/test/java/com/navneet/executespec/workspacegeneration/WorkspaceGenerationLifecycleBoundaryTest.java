@@ -157,7 +157,9 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             .candidateGeneration(candidate)
             .ignoredArtifactBaselineJson("{}")
             .build();
-    when(attempts.countCurrentDispatchAuthority(attemptId, workspaceToken)).thenReturn(1);
+    when(attempts.countCurrentAuthority(
+            attemptId, workspaceToken, WorkspaceGenerationState.VERIFIED.name()))
+        .thenReturn(1);
     when(attempts.findById(attemptId)).thenReturn(java.util.Optional.of(attempt));
     when(workspaces.currentGeneration(eq(checkpoint), any(Runnable.class))).thenReturn(candidate);
     when(attempts.transition(
@@ -198,7 +200,9 @@ class WorkspaceGenerationLifecycleBoundaryTest {
     WorkspaceGenerationLifecycle lifecycle = lifecycle(attempts, workspaces, ignored);
     WorkspaceGenerationLifecycle.Prepared prepared =
         new WorkspaceGenerationLifecycle.Prepared(attemptId, checkpoint, lease);
-    when(attempts.countCurrentDispatchAuthority(attemptId, workspaceToken)).thenReturn(1);
+    when(attempts.countCurrentAuthority(
+            attemptId, workspaceToken, WorkspaceGenerationState.MUTATING.name()))
+        .thenReturn(1);
     when(workspaces.currentGeneration(eq(checkpoint), any(Runnable.class))).thenReturn(candidate);
     when(attempts.beginVerification(
             eq(attemptId),
@@ -244,7 +248,9 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             .checkpointDigest("c".repeat(64))
             .checkpointCompletedAt(Instant.now())
             .build();
-    when(attempts.countCurrentDispatchAuthority(attemptId, workspaceToken)).thenReturn(1);
+    when(attempts.countCurrentAuthority(
+            attemptId, workspaceToken, WorkspaceGenerationState.CHECKPOINTING.name()))
+        .thenReturn(1);
     when(attempts.findById(attemptId)).thenReturn(java.util.Optional.of(attempt));
     when(workspaces.currentGeneration(eq(checkpoint), any(Runnable.class))).thenReturn(candidate);
     when(attempts.accept(

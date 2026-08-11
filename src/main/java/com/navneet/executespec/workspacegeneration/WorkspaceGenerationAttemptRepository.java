@@ -286,7 +286,7 @@ public interface WorkspaceGenerationAttemptRepository
             JOIN llm_execution_operation o ON o.id = a.llm_operation_id
            WHERE a.id = :id
              AND a.workspace_lease_token = :workspaceToken
-             AND a.state = 'MUTATING'
+             AND a.state = :state
              AND p.status = 'WORKING'
              AND w.owner_token = a.workspace_lease_token
              AND w.authority_type = 'BUILD_GENERATION'
@@ -299,6 +299,8 @@ public interface WorkspaceGenerationAttemptRepository
              AND o.lease_expires_at >= NOW()
           """,
       nativeQuery = true)
-  int countCurrentDispatchAuthority(
-      @Param("id") UUID id, @Param("workspaceToken") UUID workspaceToken);
+  int countCurrentAuthority(
+      @Param("id") UUID id,
+      @Param("workspaceToken") UUID workspaceToken,
+      @Param("state") String state);
 }

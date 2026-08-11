@@ -86,7 +86,7 @@ public class WorkspaceIgnoredArtifactGuard {
                 .filter(other -> !other.equals(root) && other.startsWith(candidate))
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         fence.run();
-        if (!isIgnored(root, relative)) {
+        if (!isIgnoredCleanupTarget(root, relative)) {
           throw new IllegalStateException("WORKSPACE_IGNORED_ARTIFACT_CLASSIFICATION_CHANGED");
         }
         deleteTreeExcept(candidate, protectedRepositories);
@@ -109,8 +109,14 @@ public class WorkspaceIgnoredArtifactGuard {
         .toList();
   }
 
-  private static boolean isIgnored(Path repository, String relative) {
-    return gitExit(repository, "git", "check-ignore", "-q", "--", relative) == 0;
+  private static boolean isIgnoredCleanupTarget(Path repository, String relative) {
+    // `git clean -ndX` may collapse ignored files into a removable parent directory even when the
+    // directory name itself does not match an ignore rule (for example
+    // `.executespec/bootstrap/__pycache__/` whose children match `*.pyc`). Requiring
+    // `git check-ignore <directory>` therefore rejects Git's own exact cleanup classification.
+    // Re-run the same dry-run operation scoped to the persisted safe path instead: non-empty
+    // output proves that Git still classifies bytes below this target as ignored-only.
+    return !git(repository, "git", "clean", "-ndX", "--", relative).isBlank();
   }
 
   private Map<String, List<String>> readBaseline(String json) {
@@ -142,17 +148,6 @@ public class WorkspaceIgnoredArtifactGuard {
       throw failure;
     } catch (Exception failure) {
       throw new IllegalStateException("WORKSPACE_IGNORED_GIT_FAILED", failure);
-    }
-  }
-
-  private static int gitExit(Path repository, String... command) {
-    ProcessBuilder process =
-        new ProcessBuilder(command).directory(repository.toFile()).redirectErrorStream(true);
-    try {
-      BoundedProcess.Outcome outcome = BoundedProcess.run(process, GIT_TIMEOUT);
-      return outcome.finished() ? outcome.exitCode() : -1;
-    } catch (Exception failure) {
-      return -1;
     }
   }
 

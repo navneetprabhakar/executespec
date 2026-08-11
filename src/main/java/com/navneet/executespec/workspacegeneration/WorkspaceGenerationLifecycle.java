@@ -171,9 +171,19 @@ public class WorkspaceGenerationLifecycle {
 
   /** Fresh database fence used before every task provider/tool dispatch. */
   @Transactional(readOnly = true)
-  public void assertDispatch(Prepared prepared) {
+  public void assertMutationDispatch(Prepared prepared) {
+    assertAuthority(prepared, WorkspaceGenerationState.MUTATING);
+  }
+
+  /** Exact non-mutating verifier authority after the candidate state leaves MUTATING. */
+  public void assertVerificationDispatch(Prepared prepared) {
+    assertAuthority(prepared, WorkspaceGenerationState.VERIFYING);
+  }
+
+  private void assertAuthority(Prepared prepared, WorkspaceGenerationState expectedState) {
     assertOwned(prepared);
-    if (attempts.countCurrentDispatchAuthority(prepared.attemptId(), prepared.lease().ownerToken())
+    if (attempts.countCurrentAuthority(
+            prepared.attemptId(), prepared.lease().ownerToken(), expectedState.name())
         != 1) {
       throw new IllegalStateException("WORKSPACE_GENERATION_DISPATCH_AUTHORITY_LOST");
     }
@@ -186,7 +196,7 @@ public class WorkspaceGenerationLifecycle {
   public String beginVerification(Prepared prepared) {
     // A provider return is not acceptance authority. Repeat the exact run/workspace/operation
     // join after the worker exits so an expired or terminal LLM lease cannot advance its bytes.
-    assertDispatch(prepared);
+    assertMutationDispatch(prepared);
     String candidate =
         workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);
     requireHash(candidate, "WORKSPACE_GENERATION_CANDIDATE_INVALID");
@@ -220,7 +230,7 @@ public class WorkspaceGenerationLifecycle {
   /** Persists immutable evidence and marks VERIFIED only for an exact passing receipt. */
   @Transactional
   public UUID recordVerification(Prepared prepared, Verification result) {
-    assertDispatch(prepared);
+    assertVerificationDispatch(prepared);
     WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
     if (attempt.getState() != WorkspaceGenerationState.VERIFYING) {
       throw new IllegalStateException("WORKSPACE_GENERATION_NOT_VERIFYING");
@@ -273,7 +283,7 @@ public class WorkspaceGenerationLifecycle {
 
   @Transactional
   public void beginCheckpoint(Prepared prepared) {
-    assertDispatch(prepared);
+    assertAuthority(prepared, WorkspaceGenerationState.VERIFIED);
     WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
     ignoredArtifacts.cleanAttemptArtifacts(
         prepared.checkpoint(),
@@ -296,7 +306,7 @@ public class WorkspaceGenerationLifecycle {
 
   /** Returns the exact candidate repository trees consumed by the durable archive transport. */
   public CorrectionWorkspaceTransaction.Checkpoint snapshotCandidate(Prepared prepared) {
-    assertDispatch(prepared);
+    assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
     WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
     if (attempt.getState() != WorkspaceGenerationState.CHECKPOINTING) {
       throw new IllegalStateException("WORKSPACE_GENERATION_NOT_CHECKPOINTING");
@@ -313,7 +323,7 @@ public class WorkspaceGenerationLifecycle {
   @Transactional
   public void completeCheckpoint(
       Prepared prepared, String kind, String key, String generation, String artifactDigest) {
-    assertDispatch(prepared);
+    assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
     if (!List.of("GCS", "LOCAL_SAME_HOST").contains(kind)) {
       throw new IllegalArgumentException("WORKSPACE_GENERATION_CHECKPOINT_KIND_INVALID");
     }
@@ -336,7 +346,7 @@ public class WorkspaceGenerationLifecycle {
   @Transactional
   public void accept(Prepared prepared) {
     try {
-      assertDispatch(prepared);
+      assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
       WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
       String current =
           workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);

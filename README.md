@@ -490,16 +490,19 @@ fresh run. The candidate arm permits exactly two fresh runs, one per route, capp
 $10 total. `scripts/run-paired-build-qualification.sh --dry-run` performs no login, submission,
 provider call, flag mutation, or deployment. `--execute` additionally requires
 `BUILD_QUAL_AUTHORIZATION_ID`, credentials, the exact candidate SHA, reviewed controls, and a
-read-only pre-submit proof that `build.shared-code-change-loop.enabled=true`; that proof is repeated
-immediately before each paid submission. It also compares the candidate SHA with the SUPER_ADMIN
+proof that `build.shared-code-change-loop.enabled=false` before opening the qualification window.
+The executor then enables the flag once, repeats a positive read immediately before each paid
+submission, and installs EXIT/INT/TERM cleanup that restores and reads back `false`; the cleanup
+receipt is persisted without credentials. It also compares the candidate SHA with the SUPER_ADMIN
 no-store `GET /api/admin/release-identity` response, whose authority is the serving JVM's
 startup-captured source SHA, artifact SHA-256 and deployment-attempt tuple; missing, malformed or
 mismatched identity aborts before run creation.
-Accepted artifacts persist that attested SHA, canonical authority and live-read timestamp;
+Accepted artifacts persist that complete attested tuple, canonical authority and live-read timestamp;
 candidate results are rejected unless the attested SHA equals the frozen candidate release and the accepted attempt
 also contains an observed failure-first result and frozen acceptance checks. The harness never
-enables the global flag itself. `scripts/validate-paired-build-results.mjs` refuses an incomplete
-pair or system score in place of the held-out and manual evidence.
+leaves the global flag enabled after a normal exit or catchable interruption.
+`scripts/validate-paired-build-results.mjs` refuses an incomplete pair or system score in place of
+the held-out and manual evidence.
 
 Before any paid live qualification, run the provider-free mechanism corpus:
 

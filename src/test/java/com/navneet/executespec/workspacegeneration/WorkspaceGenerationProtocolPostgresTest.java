@@ -210,7 +210,7 @@ FROM workspace_generation_attempt WHERE id=?
         llmOperationId,
         llmToken.toString(),
         attemptId);
-    assertThat(dispatchAuthorityCount(jdbc, attemptId)).isEqualTo(1);
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isEqualTo(1);
     assertThatThrownBy(
             () -> jdbc.update("DELETE FROM llm_execution_operation WHERE id=?", llmOperationId))
         .rootCause()
@@ -221,7 +221,7 @@ FROM workspace_generation_attempt WHERE id=?
         "UPDATE run_workspace_authority SET owner_token=?::uuid WHERE run_id=?",
         wrongToken.toString(),
         runId);
-    assertThat(dispatchAuthorityCount(jdbc, attemptId)).isZero();
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isZero();
     jdbc.update(
         "UPDATE run_workspace_authority SET owner_token=?::uuid WHERE run_id=?",
         workspaceToken.toString(),
@@ -230,7 +230,7 @@ FROM workspace_generation_attempt WHERE id=?
         "UPDATE run_workspace_authority SET lease_expires_at=now() - interval '1 second'"
             + " WHERE run_id=?",
         runId);
-    assertThat(dispatchAuthorityCount(jdbc, attemptId)).isZero();
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isZero();
     jdbc.update(
         "UPDATE run_workspace_authority SET lease_expires_at=now() + interval '10 minutes'"
             + " WHERE run_id=?",
@@ -249,7 +249,7 @@ FROM workspace_generation_attempt WHERE id=?
       Thread.currentThread().interrupt();
       throw new AssertionError(interrupted);
     }
-    assertThat(dispatchAuthorityCount(jdbc, attemptId)).isZero();
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isZero();
     assertThatThrownBy(
             () ->
                 jdbc.update(
@@ -263,9 +263,9 @@ FROM workspace_generation_attempt WHERE id=?
         "UPDATE llm_execution_operation SET heartbeat_at=now(),"
             + "lease_expires_at=now() + interval '10 minutes',updated_at=now() WHERE id=?",
         llmOperationId);
-    assertThat(dispatchAuthorityCount(jdbc, attemptId)).isEqualTo(1);
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isEqualTo(1);
     jdbc.update("UPDATE pipeline_run SET status='PAUSED' WHERE run_id=?", runId);
-    assertThat(dispatchAuthorityCount(jdbc, attemptId)).isZero();
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isZero();
     assertThatThrownBy(
             () ->
                 jdbc.update(
@@ -281,6 +281,8 @@ FROM workspace_generation_attempt WHERE id=?
             + " WHERE id=?",
         candidate,
         attemptId);
+    assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isZero();
+    assertThat(authorityCount(jdbc, attemptId, "VERIFYING")).isEqualTo(1);
     jdbc.update(
         receiptInsert(),
         UUID.randomUUID(),
@@ -308,8 +310,10 @@ FROM workspace_generation_attempt WHERE id=?
         "f".repeat(64),
         "3".repeat(64));
     jdbc.update("UPDATE workspace_generation_attempt SET state='VERIFIED' WHERE id=?", attemptId);
+    assertThat(authorityCount(jdbc, attemptId, "VERIFIED")).isEqualTo(1);
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='CHECKPOINTING' WHERE id=?", attemptId);
+    assertThat(authorityCount(jdbc, attemptId, "CHECKPOINTING")).isEqualTo(1);
 
     assertThatThrownBy(
             () ->
@@ -447,7 +451,7 @@ FROM workspace_generation_attempt WHERE id=?
         cancelledLlmToken.toString(),
         cancelledAttemptId);
     jdbc.update("UPDATE pipeline_run SET status='CANCELLED' WHERE run_id=?", runId);
-    assertThat(dispatchAuthorityCount(jdbc, cancelledAttemptId)).isZero();
+    assertThat(authorityCount(jdbc, cancelledAttemptId, "MUTATING")).isZero();
     assertThatThrownBy(
             () ->
                 jdbc.update(
@@ -579,7 +583,7 @@ VALUES (?,?,?,?,'BUILD_ONLY','SERVER_RESOLVED_CONTRACT',?,'FAILED',FALSE,FALSE,
 """;
   }
 
-  private static int dispatchAuthorityCount(JdbcTemplate jdbc, UUID attemptId) {
+  private static int authorityCount(JdbcTemplate jdbc, UUID attemptId, String expectedState) {
     return jdbc.queryForObject(
         """
         SELECT COUNT(*)
@@ -588,7 +592,7 @@ VALUES (?,?,?,?,'BUILD_ONLY','SERVER_RESOLVED_CONTRACT',?,'FAILED',FALSE,FALSE,
           JOIN run_workspace_authority w ON w.run_id = a.run_id
           JOIN llm_execution_operation o ON o.id = a.llm_operation_id
          WHERE a.id = ?
-           AND a.state = 'MUTATING'
+           AND a.state = ?
            AND p.status = 'WORKING'
            AND w.owner_token = a.workspace_lease_token
            AND w.authority_type = 'BUILD_GENERATION'
@@ -601,6 +605,7 @@ VALUES (?,?,?,?,'BUILD_ONLY','SERVER_RESOLVED_CONTRACT',?,'FAILED',FALSE,FALSE,
            AND o.lease_expires_at >= NOW()
         """,
         Integer.class,
-        attemptId);
+        attemptId,
+        expectedState);
   }
 }
