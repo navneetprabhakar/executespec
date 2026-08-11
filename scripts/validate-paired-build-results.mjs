@@ -80,11 +80,17 @@ function validateAccepted(key, record, review, errors) {
   if (record.sharedKernelFlagEnabledAtSubmission !== true) {
     errors.push(`${key} was not submitted with the shared BUILD kernel flag enabled`);
   }
-  if (record.releaseIdentityAuthority !== "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA") {
-    errors.push(`${key} lacks deployment-host RUNNING_SHA authority`);
+  if (record.releaseIdentityAuthority !== "PROCESS_STARTUP_ENVIRONMENT") {
+    errors.push(`${key} lacks serving-process startup authority`);
   }
   if (record.attestedRunningSha !== record.releaseSha || !/^[a-f0-9]{40}$/.test(record.attestedRunningSha || "")) {
     errors.push(`${key} attested running SHA does not match its candidate release`);
+  }
+  if (!SHA256.test(record.attestedArtifactSha256 || "")) {
+    errors.push(`${key} lacks an attested artifact SHA-256`);
+  }
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(record.attestedDeploymentAttemptId || "")) {
+    errors.push(`${key} lacks an attested deployment attempt`);
   }
   if (typeof record.releaseIdentityReadAt !== "string"
       || !/^\d{4}-\d{2}-\d{2}T.*Z$/.test(record.releaseIdentityReadAt)) {

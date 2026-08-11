@@ -41,15 +41,19 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
 - Persist PREPARED, its exact before checkpoint, frozen task/authority digests, ignored-artifact
   baseline, and workspace lease before provider or tool mutation.
 - Bind MUTATING to the exact RUNNING `llm_execution_operation` attempt/lease. Every LLM and tool
-  dispatch repeats the database join fence. Provider return is not authority: VERIFYING, receipt
-  persistence, CHECKPOINTING, checkpoint acknowledgement, and ACCEPTED repeat the exact LLM lease,
-  workspace lease, and `pipeline_run.status=WORKING` fence. Pause/cancel may still roll back but
-  cannot advance the frontier.
+  dispatch repeats the database join fence. Provider return is not authority: the same join is
+  repeated with the exact expected state at MUTATING, VERIFYING, VERIFIED, and CHECKPOINTING before
+  receipt persistence, checkpoint acknowledgement, or ACCEPTED. A MUTATING-only tool fence is not
+  reused as post-mutation proof authority. Pause/cancel may still roll back but cannot advance the
+  frontier.
 - Verification commands are resolved by the server. Planner/model commands are not acceptance
   authority. The immutable receipt must bind candidate generation + task contract and prove the
   required build/tests. Acceptance reclassifies against the exact candidate diff: zero-diff
   generations fail, and any actual code-file change requires an executed non-empty green suite
-  even when planner wording classified the task as documentation/configuration.
+  even when planner wording classified the task as documentation/configuration. Required-test
+  tasks must also change a repository-owned non-bootstrap test file: immutable hidden tests cannot
+  substitute for tests shipped with the candidate. Qualified Python HTTP tasks run the complete
+  discovered pytest suite and the separate cleanroom live-runtime contract; both must pass.
 - HTTP route checks canonicalize parameter names (`/todos/{id}` and `/todos/{todo_id}` are the same
   reachable route shape) while preserving exact methods and literal path segments.
 - Under `build.shared-code-change-loop.enabled`, the small `GreenfieldBaselineService` facade
@@ -99,7 +103,9 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   recovery. Task-local dependency installation may survive through deterministic verification, but
   ignored bytes are outside both the content-addressed generation and its cross-node archive and
   must never become cross-task state. Dependencies are reconstructed from accepted manifests and
-  governed environment inputs at each task boundary.
+  governed environment inputs at each task boundary. `git clean -ndX` may collapse ignored files
+  into a parent whose name does not itself match an ignore rule, so cleanup revalidates the same
+  scoped dry-run result rather than incorrectly requiring `git check-ignore` on that parent.
 - Local-hands BUILD is fail-closed until the remote proxy protocol carries the same generations,
   lease and immutable receipt. Do not reintroduce a server-side bypass.
 
@@ -132,18 +138,22 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   workspace-owner/expiry/LLM-expiry/pause/cancel fences, competing-active-attempt rejection,
   single-winner recovery CAS, contiguous frontier monotonicity, pre-bind recovery, receipt binding
   and retention.
+- `WorkspaceGenerationAuthorityQueryContractTest`: the production JPA join takes the caller's exact
+  lifecycle state and cannot regress to a hard-coded MUTATING-only query.
 - `MigratedSchemaBootSmokeTest`: all migrations + Hibernate validation.
 - `WorkspaceGenerationArchiveServiceTest`: exact multi-repo cross-node reconstruction.
 - `WorkspaceGenerationRecoveryServiceTest`: replacement-node restore uses the current configured
   workspace root and repository-relative identities, never the persisted old-host path; stale
   local trees require RECOVERY authority; every unresolved kill-point restores tracked, staged,
   untracked, nested-repository, and ignored-artifact state exactly.
-- `WorkspaceIgnoredArtifactGuardTest`: stale-output cleanup and baseline preservation.
+- `WorkspaceIgnoredArtifactGuardTest`: stale-output cleanup, baseline preservation, and Git's
+  collapsed-parent classification for ignored Python bytecode.
 - `WorkspaceGenerationLifecycleBoundaryTest`: task-local ignored dependencies survive deterministic
   verification but are purged before checkpoint/acceptance; rejection evidence commits before
   filesystem rollback and restore failure is durable.
 - `WorkerCorrectionToolFenceTest`: ThreadLocal propagation and exact dispatch fence.
-- `TaskAcceptanceVerifierTest`: zero-diff rejection, actual-code-change test escalation, exact
+- `TaskAcceptanceVerifierTest`: zero-diff rejection, repository-owned test evidence,
+  actual-code-change test escalation, exact
   initial test counts, command drift, immutable-bootstrap tamper rejection, held-out endpoint
   rejection, and green-workspace refusal.
 - `TaskAcceptanceContractResolverTest`: typed canonical contract/digest, sorted touch paths,

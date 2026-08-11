@@ -36,8 +36,10 @@ function completeEvidence() {
         workspaceArchiveGeneration: "c".repeat(64), heldOutPassed: 5, heldOutTotal: 5,
         initialFailureOutcome: "FAILURE_OBSERVED", initialFailureCode: "REQUIRED_PATH_MISSING",
         acceptanceCheckCount: 4, sharedKernelFlagEnabledAtSubmission: true,
-        releaseIdentityAuthority: "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA",
+        releaseIdentityAuthority: "PROCESS_STARTUP_ENVIRONMENT",
         attestedRunningSha: common.releaseSha,
+        attestedArtifactSha256: "9".repeat(64),
+        attestedDeploymentAttemptId: "31497831910-1",
         releaseIdentityReadAt: "2026-08-11T00:00:00.123456789Z",
       };
       records.push(record);
@@ -90,13 +92,17 @@ test("candidate evidence fails when the run did not prove shared-kernel admissio
   candidate.acceptanceCheckCount = 0;
   candidate.releaseIdentityAuthority = "CALLER_SUPPLIED";
   candidate.attestedRunningSha = "f".repeat(40);
+  candidate.attestedArtifactSha256 = "bad";
+  candidate.attestedDeploymentAttemptId = "bad attempt";
   candidate.releaseIdentityReadAt = "";
   const errors = validateResultRecords(plan, records, reviews);
   assert.ok(errors.some((error) => error.includes("shared BUILD kernel flag")));
   assert.ok(errors.some((error) => error.includes("failure-first evidence")));
   assert.ok(errors.some((error) => error.includes("acceptance checks")));
-  assert.ok(errors.some((error) => error.includes("RUNNING_SHA authority")));
+  assert.ok(errors.some((error) => error.includes("serving-process startup authority")));
   assert.ok(errors.some((error) => error.includes("attested running SHA")));
+  assert.ok(errors.some((error) => error.includes("artifact SHA-256")));
+  assert.ok(errors.some((error) => error.includes("deployment attempt")));
   assert.ok(errors.some((error) => error.includes("read timestamp")));
 });
 

@@ -57,6 +57,8 @@ USER_COST_CAP="${USER_COST_CAP:-}"
 BUILD_SHARED_KERNEL_ENABLED="${BUILD_SHARED_KERNEL_ENABLED:-false}"
 RELEASE_IDENTITY_AUTHORITY="${RELEASE_IDENTITY_AUTHORITY:-}"
 ATTESTED_RUNNING_SHA="${ATTESTED_RUNNING_SHA:-}"
+ATTESTED_ARTIFACT_SHA256="${ATTESTED_ARTIFACT_SHA256:-}"
+ATTESTED_DEPLOYMENT_ATTEMPT_ID="${ATTESTED_DEPLOYMENT_ATTEMPT_ID:-}"
 RELEASE_IDENTITY_READ_AT="${RELEASE_IDENTITY_READ_AT:-}"
 ONLY_CASE=""
 
@@ -77,10 +79,14 @@ assert_candidate_attestation_env() {
   [[ "$QUALIFICATION_ARM" != "candidate" ]] && return 0
   [[ "$BUILD_SHARED_KERNEL_ENABLED" == "true" ]] \
     || { log "refuse candidate: shared-kernel preflight is not positive"; return 1; }
-  [[ "$RELEASE_IDENTITY_AUTHORITY" == "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA" ]] \
-    || { log "refuse candidate: deployment-host release authority is missing"; return 1; }
+  [[ "$RELEASE_IDENTITY_AUTHORITY" == "PROCESS_STARTUP_ENVIRONMENT" ]] \
+    || { log "refuse candidate: process-startup release authority is missing"; return 1; }
   [[ "$ATTESTED_RUNNING_SHA" == "$RELEASE_SHA" && "$ATTESTED_RUNNING_SHA" =~ ^[a-f0-9]{40}$ ]] \
     || { log "refuse candidate: attested running SHA does not match the candidate release"; return 1; }
+  [[ "$ATTESTED_ARTIFACT_SHA256" =~ ^[a-f0-9]{64}$ ]] \
+    || { log "refuse candidate: attested artifact SHA-256 is missing"; return 1; }
+  [[ "$ATTESTED_DEPLOYMENT_ATTEMPT_ID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] \
+    || { log "refuse candidate: attested deployment attempt is missing"; return 1; }
   [[ "$RELEASE_IDENTITY_READ_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*Z$ ]] \
     || { log "refuse candidate: release identity read timestamp is missing or invalid"; return 1; }
 }
@@ -249,6 +255,8 @@ run_case() {
     --argjson sharedKernelFlagEnabledAtSubmission "$BUILD_SHARED_KERNEL_ENABLED" \
     --arg releaseIdentityAuthority "$RELEASE_IDENTITY_AUTHORITY" \
     --arg attestedRunningSha "$ATTESTED_RUNNING_SHA" \
+    --arg attestedArtifactSha256 "$ATTESTED_ARTIFACT_SHA256" \
+    --arg attestedDeploymentAttemptId "$ATTESTED_DEPLOYMENT_ATTEMPT_ID" \
     --arg releaseIdentityReadAt "$RELEASE_IDENTITY_READ_AT" \
     --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
     --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
@@ -264,6 +272,8 @@ run_case() {
       sharedKernelFlagEnabledAtSubmission:$sharedKernelFlagEnabledAtSubmission,
       releaseIdentityAuthority:$releaseIdentityAuthority,
       attestedRunningSha:$attestedRunningSha,
+      attestedArtifactSha256:$attestedArtifactSha256,
+      attestedDeploymentAttemptId:$attestedDeploymentAttemptId,
       releaseIdentityReadAt:$releaseIdentityReadAt,
       unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
       heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \

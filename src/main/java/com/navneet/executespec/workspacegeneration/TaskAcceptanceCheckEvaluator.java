@@ -17,6 +17,7 @@ final class TaskAcceptanceCheckEvaluator {
       boolean buildPassed,
       boolean testsExecuted,
       boolean testsPassed,
+      boolean candidateTestsPresent,
       boolean runtimeEndpointContractPassed,
       boolean bootstrapArtifactsMatch) {
     List<Result> results = new ArrayList<>();
@@ -43,6 +44,11 @@ final class TaskAcceptanceCheckEvaluator {
                     "server-owned bootstrap artifacts retain their frozen bytes");
             case "MEANINGFUL_DIFF" ->
                 result(check, mutationPresent, "candidate has a non-empty product diff");
+            case "CANDIDATE_TEST_EVIDENCE" ->
+                result(
+                    check,
+                    candidateTestsPresent,
+                    "candidate changes include repository-owned test evidence");
             case "BUILD_PASSED" -> result(check, buildPassed, "exact frozen build passed");
             case "TESTS_PASSED" ->
                 testResult(check, contract.testRequirement(), testsExecuted, testsPassed);

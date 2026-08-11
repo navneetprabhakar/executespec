@@ -240,7 +240,7 @@ class BuildTaskGenerationCoordinatorTest {
             isNull());
     order.verify(generations).markMutating(prepared);
     order.verify(generations).bindLlmAttempt(eq(prepared), eq("llm-op-1"), eq(1), any(UUID.class));
-    order.verify(generations).assertDispatch(prepared);
+    order.verify(generations).assertMutationDispatch(prepared);
     order.verify(generations).beginVerification(prepared);
     order.verify(verifier).verify(any(), eq(contract), eq(List.of("0:src/App.java")));
     order.verify(generations).recordVerification(prepared, passing);
@@ -253,7 +253,8 @@ class BuildTaskGenerationCoordinatorTest {
     order.verify(generations).accept(prepared);
     order.verify(status).persist("COMPLETE", null);
     order.verify(operations).complete(operation);
-    verify(generations, org.mockito.Mockito.times(2)).assertDispatch(prepared);
+    verify(generations).assertMutationDispatch(prepared);
+    verify(generations).assertVerificationDispatch(prepared);
     verify(generations, never()).rollback(any(), anyString(), anyString());
     verify(telemetry, never()).verification(anyString(), anyString(), anyString(), any());
     verify(broadcaster, never())

@@ -191,7 +191,7 @@ public class BuildTaskGenerationCoordinator {
       TaskOutcome outcome =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
               prepared.lease(),
-              () -> generations.assertDispatch(prepared),
+              () -> generations.assertMutationDispatch(prepared),
               () -> {
                 if (baseline != null) {
                   greenfieldBaselines.materialize(request.runContext().workspaceRoot(), baseline);
@@ -265,7 +265,7 @@ public class BuildTaskGenerationCoordinator {
       WorkspaceGenerationLifecycle.Verification verification =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
               prepared.lease(),
-              () -> generations.assertDispatch(prepared),
+              () -> generations.assertVerificationDispatch(prepared),
               () -> verifier.verify(request.runContext().child(task.id()), contract, changedFiles));
       generations.recordVerification(prepared, verification);
       if (sharedLoopContract(contract)) {

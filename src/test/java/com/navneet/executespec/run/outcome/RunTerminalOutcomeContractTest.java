@@ -151,6 +151,26 @@ class RunTerminalOutcomeContractTest {
   }
 
   @Test
+  void workspaceRecoveryFailureIsSpecificLeakSafeAndPublicationBlocked() {
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            "WORKSPACE_GENERATION_RECOVERY_FAILED",
+            "WORKSPACE_IGNORED_ARTIFACT_CLASSIFICATION_CHANGED:/secret/path",
+            0.25,
+            5.0,
+            null);
+
+    assertThat(outcome.code()).isEqualTo("WORKSPACE_GENERATION_RECOVERY_FAILED");
+    assertThat(outcome.category()).isEqualTo(RunTerminalOutcome.Category.PLATFORM_FAILURE);
+    assertThat(outcome.customerMessage())
+        .contains("could not prove that the workspace was restored")
+        .contains("Publication was blocked")
+        .doesNotContain("IGNORED_ARTIFACT", "/secret/path");
+    assertThat(outcome.supportCode()).isNotBlank();
+  }
+
+  @Test
   void unknownStatusReasonCannotBecomeAPublicCodeOrLeakASecret() {
     RunTerminalOutcome outcome =
         project("FAILED", "provider stack api_key=secret", null, 0.25, 1.0, null);
