@@ -413,6 +413,7 @@ public class TaskExpanderAgent {
         .description(description)
         .complexity(skeleton.complexity())
         .touchesFiles(touchesFiles.values())
+        .requiredArtifacts(skeleton.requiredArtifacts())
         .dependsOn(skeleton.dependsOn())
         .hardConstraints(hardConstraints.values())
         .meetsRequirements(meetsRequirements.values())

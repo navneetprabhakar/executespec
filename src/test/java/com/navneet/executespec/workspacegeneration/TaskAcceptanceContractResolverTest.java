@@ -81,8 +81,10 @@ class TaskAcceptanceContractResolverTest {
             .title("Build Python API")
             .description("Create a Python service with tests")
             .touchesFiles(List.of("tests/test_app.py", "src/app.py"))
+            .requiredArtifacts(List.of("tests/test_app.py", "src/app.py"))
             .build();
-    GreenfieldBaselinePlan baseline = new GreenfieldBaselineService().plan(workspace, task);
+    GreenfieldBaselinePlan baseline =
+        new GreenfieldBaselineService().plan(workspace, task, WorkspaceOrigin.GREENFIELD);
 
     TaskAcceptanceContract contract = resolver.resolveFailureFirst(task, 0, workspace, baseline);
     TaskAcceptanceContract reordered =
@@ -98,7 +100,8 @@ class TaskAcceptanceContractResolverTest {
     assertThat(contract.baselineKind()).isEqualTo("PYTHON");
     assertThat(contract.buildCommand().command()).isEqualTo("python3 -m compileall -q .");
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:python");
-    assertThat(contract.testCommand().command()).isEqualTo("python3 -m pytest -q");
+    assertThat(contract.testCommand().command())
+        .isEqualTo("python3 -m pytest -q .executespec/bootstrap/test_acceptance.py");
     assertThat(contract.requiredPaths()).containsExactly("src/app.py", "tests/test_app.py");
     assertThat(contract.prefixChecks())
         .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
@@ -108,6 +111,7 @@ class TaskAcceptanceContractResolverTest {
         .containsExactly(
             "REPOSITORY_SCOPE",
             "REQUIRED_PATHS_PRESENT",
+            "BOOTSTRAP_ARTIFACT_INTEGRITY",
             "MEANINGFUL_DIFF",
             "BUILD_PASSED",
             "TESTS_PASSED");
@@ -122,6 +126,7 @@ class TaskAcceptanceContractResolverTest {
             .title("Create health API")
             .description("Implement GET /health and POST /items")
             .touchesFiles(List.of("src/app.py", "openapi.yaml"))
+            .requiredArtifacts(List.of("src/app.py", "openapi.yaml"))
             .meetsRequirements(List.of("R1"))
             .build();
     Plan plan =
@@ -137,7 +142,8 @@ class TaskAcceptanceContractResolverTest {
                         RequirementSpec.RequirementKind.FUNCTIONAL)))
             .tasks(List.of(task))
             .build();
-    GreenfieldBaselinePlan baseline = new GreenfieldBaselineService().plan(workspace, task, plan);
+    GreenfieldBaselinePlan baseline =
+        new GreenfieldBaselineService().plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD);
 
     TaskAcceptanceContract contract =
         resolver.resolveFailureFirst(task, plan, 0, workspace, baseline);
@@ -159,11 +165,13 @@ class TaskAcceptanceContractResolverTest {
     PlannedTask task =
         PlannedTask.builder()
             .id("T1")
-            .title("Python API and React frontend")
+            .title("Python API and Node client")
             .description("Change both sides of one interface")
-            .touchesFiles(List.of("repos/api/src/app.py", "repos/web/src/App.tsx"))
+            .touchesFiles(List.of("repos/api/src/app.py", "repos/web/src/client.mjs"))
+            .requiredArtifacts(List.of("repos/api/src/app.py", "repos/web/src/client.mjs"))
             .build();
-    GreenfieldBaselinePlan baseline = new GreenfieldBaselineService().plan(workspace, task);
+    GreenfieldBaselinePlan baseline =
+        new GreenfieldBaselineService().plan(workspace, task, WorkspaceOrigin.MULTI_REPOSITORY);
 
     TaskAcceptanceContract contract = resolver.resolveFailureFirst(task, 0, workspace, baseline);
 
@@ -171,11 +179,14 @@ class TaskAcceptanceContractResolverTest {
     assertThat(contract.allowedRepositoryScopes()).containsExactly("repos/api", "repos/web");
     assertThat(contract.buildCommand().command())
         .isEqualTo(
-            "(cd repos/api && python3 -m compileall -q .) && (cd repos/web && npm run build"
-                + " --if-present)");
+            "(cd repos/api && python3 -m compileall -q .) && (cd repos/web && node --check"
+                + " src/client.mjs)");
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:changed-multi-root");
     assertThat(contract.testCommand().command())
-        .isEqualTo("(cd repos/api && python3 -m pytest -q) && (cd repos/web && npm test --silent)");
+        .isEqualTo(
+            "(cd repos/api && python3 -m pytest -q .executespec/bootstrap/test_acceptance.py)"
+                + " && (cd repos/web && node --test"
+                + " .executespec/bootstrap/test_acceptance.mjs)");
     assertThat(contract.testCommand().framework()).isEqualTo("MULTI");
   }
 
@@ -188,12 +199,14 @@ class TaskAcceptanceContractResolverTest {
       PlannedTask task =
           PlannedTask.builder()
               .id("T1")
-              .title("Python API and React frontend")
+              .title("Python API and Node client")
               .description("Change both sides")
-              .touchesFiles(List.of("repos/api/src/app.py", "repos/web/src/App.tsx"))
+              .touchesFiles(List.of("repos/api/src/app.py", "repos/web/src/client.mjs"))
+              .requiredArtifacts(List.of("repos/api/src/app.py", "repos/web/src/client.mjs"))
               .build();
       GreenfieldBaselineService baselines = new GreenfieldBaselineService();
-      GreenfieldBaselinePlan baseline = baselines.plan(workspace, task);
+      GreenfieldBaselinePlan baseline =
+          baselines.plan(workspace, task, WorkspaceOrigin.MULTI_REPOSITORY);
       TaskAcceptanceContract contract = resolver.resolveFailureFirst(task, 0, workspace, baseline);
 
       baselines.materialize(workspace, baseline);

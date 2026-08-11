@@ -44,6 +44,11 @@ public record PlannedTask(
      */
     List<String> meetsRequirements,
     /**
+     * Exact customer- or platform-authoritative output paths. Unlike {@link #touchesFiles}, these
+     * paths participate in deterministic acceptance.
+     */
+    List<String> requiredArtifacts,
+    /**
      * v2.6.2-track slice 3 — LEAF (terminal task, executor runs as-is) vs EPIC (expand into
      * subtasks via {@code TaskExpanderAgent} recursion, depth ≤ 2). Default LEAF for
      * backward-compatibility with slice 1+2 plans (which predate the field). EPIC is only emitted
@@ -63,6 +68,7 @@ public record PlannedTask(
     if (dependsOn == null) dependsOn = List.of();
     if (hardConstraints == null) hardConstraints = List.of();
     if (meetsRequirements == null) meetsRequirements = List.of();
+    if (requiredArtifacts == null) requiredArtifacts = List.of();
     if (taskType == null) taskType = TaskType.LEAF;
   }
 

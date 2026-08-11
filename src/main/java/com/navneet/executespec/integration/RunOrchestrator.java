@@ -390,6 +390,10 @@ public class RunOrchestrator implements RunControlPort {
   /** Resolves the durable provider/model route a submitted run advertises. */
   private final RunRouteContractResolver routeContractResolver;
 
+  /** Persists and resolves the typed greenfield/brownfield workspace boundary. */
+  private final com.navneet.executespec.workspacegeneration.RunWorkspaceOriginService
+      workspaceOrigins;
+
   /**
    * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with status {@code
    * PLANNING}; the async pipeline thread continues in the background.
@@ -1059,6 +1063,13 @@ public class RunOrchestrator implements RunControlPort {
             .sourceType(source != null ? source : "MANUAL")
             .repoUrl(repoUrl)
             .repoMode(repoMode)
+            .workspaceOrigin(
+                workspaceOrigins.submittedName(
+                    projectId,
+                    submitSourceRunIntent.get(),
+                    Boolean.TRUE.equals(submitLocalExecutionIntent.get()),
+                    repoMode,
+                    selectedRepoIds))
             .branchOverride(branchOverrideFinal)
             .checkoutBranch(checkoutBranchFinal)
             .publicationRepoFullName(policy.publicationRepoFullName())
@@ -1615,6 +1626,7 @@ public class RunOrchestrator implements RunControlPort {
         try {
           List<ProjectRepo> repos =
               projectRepoService.resolveForRunStrict(projectId, selectedRepoIds);
+          workspaceOrigins.refineProjectAdmission(runId, sourceRunId, repos.size());
           if (repos.isEmpty()) {
             log.info("V2 run={} project has no linked brownfield repositories", runId);
           } else {
@@ -2123,6 +2135,7 @@ public class RunOrchestrator implements RunControlPort {
                     .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
                     .originalGoal(userRequest)
                     .designBlock(designBlock)
+                    .workspaceOrigin(workspaceOrigins.load(runId, selectedRepoIds))
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
                     // WORKSPACE" header + the per-repo subdir list — without it the worker
@@ -3803,7 +3816,8 @@ public class RunOrchestrator implements RunControlPort {
               runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null),
               designBlock,
               projectId,
-              contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds));
+              contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds),
+              workspaceOrigins.load(runId, selectedRepoIds));
       ExecutionResult rerunResult =
           automaticCorrectionLifecycle.executeWithToolFence(
               correctionCheckpoint,

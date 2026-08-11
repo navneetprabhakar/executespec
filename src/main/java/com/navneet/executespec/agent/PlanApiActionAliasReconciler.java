@@ -133,6 +133,7 @@ final class PlanApiActionAliasReconciler {
         .description(description)
         .complexity(source.complexity())
         .touchesFiles(source.touchesFiles())
+        .requiredArtifacts(source.requiredArtifacts())
         .hardConstraints(constraints)
         .dependsOn(source.dependsOn())
         .taskType(source.taskType())

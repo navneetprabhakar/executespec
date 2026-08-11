@@ -1,14 +1,56 @@
 package com.navneet.executespec.agent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import java.nio.file.Path;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.contractsurface.ExactHttpConstraintParser;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.Test;
 
 class OutlinePlannerSingleShotSurfaceTest {
+
+  @Test
+  void synthesizedPlanCarriesExplicitArtifactsAsAcceptanceAuthority() {
+    RunTitleSummarizer titles = mock(RunTitleSummarizer.class);
+    when(titles.summarize(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any()))
+        .thenReturn("Build FastAPI todo API");
+    OutlinePlannerAgent planner =
+        new OutlinePlannerAgent(
+            mock(LlmRouter.class),
+            new ObjectMapper(),
+            mock(com.navneet.executespec.observability.Metrics.class),
+            mock(com.navneet.executespec.router.ModelResolver.class),
+            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+            mock(PromptAssembler.class),
+            titles);
+    String spec =
+        "Build a FastAPI service in `main.py`, runnable with `uvicorn main:app`, and include "
+            + "`requirements.txt`. GET `/health` returns ok.";
+
+    Plan plan =
+        planner.synthesizeSingleShot(
+            PlannerRequest.builder()
+                .spec(spec)
+                .classification(Classification.SINGLE_SHOT)
+                .context(new ExecutionContext("run-1", "__plan__", Path.of("/tmp/run-1")))
+                .build());
+
+    assertThat(plan.tasks()).singleElement();
+    assertThat(plan.tasks().getFirst().requiredArtifacts())
+        .containsExactly("main.py", "requirements.txt");
+    assertThat(plan.tasks().getFirst().touchesFiles()).isEmpty();
+    assertThat(plan.projectType()).isEqualTo("python");
+  }
 
   @Test
   void shortWebAppRequestMeansBrowserUiRatherThanApi() {

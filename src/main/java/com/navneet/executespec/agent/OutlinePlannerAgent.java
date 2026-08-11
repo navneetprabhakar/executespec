@@ -205,7 +205,7 @@ public class OutlinePlannerAgent {
     String title =
         (summarized != null && !summarized.isBlank()) ? summarized : cleanTitle(req.spec(), 70);
     Plan.RuntimeSurface runtimeSurface = SingleShotSurfaceClassifier.infer(req.spec());
-    String projectType = SingleShotSurfaceClassifier.projectType(runtimeSurface);
+    String projectType = SingleShotSurfaceClassifier.projectType(req.spec(), runtimeSurface);
     String surfaceConstraint = SingleShotSurfaceClassifier.taskConstraint(runtimeSurface);
     String description =
         req.spec()
@@ -231,6 +231,8 @@ public class OutlinePlannerAgent {
             .complexity(PlannedTask.Complexity.LOW)
             .taskType(PlannedTask.TaskType.LEAF)
             .meetsRequirements(List.of("R1"))
+            .requiredArtifacts(
+                SingleShotArtifactContract.requiredPaths(projectType, runtimeSurface, req.spec()))
             .build();
     return Plan.builder()
         .planTitle(title)
@@ -332,7 +334,7 @@ public class OutlinePlannerAgent {
           }
         }
       }
-      return plan;
+      return SingleShotArtifactContract.bindRequiredPaths(plan, req.spec());
     } finally {
       metrics.recordPlannerLatency(
           req.classification().name(),

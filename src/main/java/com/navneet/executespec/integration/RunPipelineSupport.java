@@ -160,6 +160,7 @@ public final class RunPipelineSupport {
                 : epic.description())
         .complexity(epic.complexity() == null ? PlannedTask.Complexity.HIGH : epic.complexity())
         .touchesFiles(epic.touchesFiles())
+        .requiredArtifacts(epic.requiredArtifacts())
         .dependsOn(epic.dependsOn())
         .hardConstraints(epic.hardConstraints())
         .meetsRequirements(epic.meetsRequirements())

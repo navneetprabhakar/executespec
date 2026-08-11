@@ -328,6 +328,7 @@ final class TaskExpansionSemanticContract {
         .description(description)
         .complexity(task.complexity())
         .touchesFiles(List.copyOf(touchesFiles))
+        .requiredArtifacts(task.requiredArtifacts())
         .dependsOn(task.dependsOn())
         .hardConstraints(List.copyOf(constraints))
         .meetsRequirements(task.meetsRequirements())

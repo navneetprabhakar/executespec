@@ -145,7 +145,9 @@ public final class BuildRootDiscovery {
         || exists(dir, "package.json")
         || exists(dir, "pyproject.toml")
         || exists(dir, "setup.py")
-        || exists(dir, "requirements.txt");
+        || exists(dir, "requirements.txt")
+        || exists(dir, ".executespec/bootstrap/python.marker")
+        || exists(dir, ".executespec/bootstrap/node-js.marker");
   }
 
   private static boolean safeRelative(Path relative) {

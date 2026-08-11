@@ -91,6 +91,9 @@ public class TaskAcceptanceContractResolver {
       GreenfieldBaselinePlan baseline) {
     if (workspaceRoot == null) throw new IllegalArgumentException("workspaceRoot required");
     if (baseline == null) throw new IllegalArgumentException("baseline required");
+    if (!baseline.supported()) {
+      throw new IllegalStateException("GREENFIELD_RUNTIME_UNSUPPORTED:" + baseline.kind().name());
+    }
     String testRequirement = testsRequired(task) ? "REQUIRED" : "OPTIONAL";
     List<String> touchPaths =
         task.touchesFiles() == null ? List.of() : task.touchesFiles().stream().sorted().toList();
@@ -104,12 +107,15 @@ public class TaskAcceptanceContractResolver {
       prefix.add(
           new TaskAcceptanceContract.AcceptanceCheck("TEST_COMMAND_AVAILABLE", "workspace", false));
     }
-    List<String> endpoints = endpointExpectations(task, plan);
+    List<String> endpoints = HttpEndpointContract.from(task, plan);
     List<TaskAcceptanceContract.AcceptanceCheck> finalChecks = new ArrayList<>();
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck("REPOSITORY_SCOPE", "candidate", false));
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck("REQUIRED_PATHS_PRESENT", "candidate", false));
+    finalChecks.add(
+        new TaskAcceptanceContract.AcceptanceCheck(
+            "BOOTSTRAP_ARTIFACT_INTEGRITY", ".executespec/bootstrap", true));
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false));
     finalChecks.add(new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false));
@@ -141,6 +147,12 @@ public class TaskAcceptanceContractResolver {
     unsigned.put("allowedRepositoryScopes", repositoryScopes);
     unsigned.put("prefixChecks", prefix);
     unsigned.put("finalChecks", finalChecks);
+    Map<String, String> bootstrapDigests =
+        baseline.filesToCreate().entrySet().stream()
+            .collect(
+                java.util.stream.Collectors.toUnmodifiableMap(
+                    Map.Entry::getKey, entry -> sha256(entry.getValue())));
+    unsigned.put("immutableBootstrapArtifactDigests", bootstrapDigests);
     String digest = sha256(canonical(unsigned));
     return new TaskAcceptanceContract(
         2,
@@ -161,31 +173,8 @@ public class TaskAcceptanceContractResolver {
         repositoryScopes,
         prefix,
         finalChecks,
+        bootstrapDigests,
         digest);
-  }
-
-  private static List<String> endpointExpectations(PlannedTask task, Plan plan) {
-    if (plan == null || plan.runtimeSurface() != Plan.RuntimeSurface.HTTP) return List.of();
-    StringBuilder source = new StringBuilder();
-    source.append(task.title()).append('\n').append(task.description()).append('\n');
-    task.hardConstraints().forEach(value -> source.append(value).append('\n'));
-    if (plan.requirements() != null) {
-      java.util.Set<String> owned = java.util.Set.copyOf(task.meetsRequirements());
-      plan.requirements().stream()
-          .filter(requirement -> owned.isEmpty() || owned.contains(requirement.id()))
-          .map(com.navneet.executespec.agent.RequirementSpec::text)
-          .filter(java.util.Objects::nonNull)
-          .forEach(value -> source.append(value).append('\n'));
-    }
-    java.util.regex.Matcher matcher =
-        java.util.regex.Pattern.compile(
-                "(?i)\\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\s+(/[A-Za-z0-9._~!$&'()*+,;=:@%{}/-]*)")
-            .matcher(source);
-    java.util.Set<String> endpoints = new java.util.TreeSet<>();
-    while (matcher.find()) {
-      endpoints.add(matcher.group(1).toUpperCase(Locale.ROOT) + " " + matcher.group(2));
-    }
-    return List.copyOf(endpoints);
   }
 
   /** Binds attempts to the exact plan, original goal, and workspace selection admitted to BUILD. */
@@ -245,10 +234,14 @@ public class TaskAcceptanceContractResolver {
       }
       return switch (baseline.kind()) {
         case PYTHON -> command("python3 -m compileall -q .", 120, "inferred:python", "PYTHON");
-        case NODE_TYPESCRIPT -> command("npm run build --if-present", 240, "inferred:npm", "NODE");
-        case JAVA_MAVEN -> command("mvn -q -DskipTests compile", 300, "inferred:maven", "MAVEN");
-        case FRONTEND_REACT -> command("npm run build --if-present", 240, "inferred:npm", "VITE");
-        case UNSUPPORTED -> command("true", 5, "fallback:no-op", "UNKNOWN");
+        case NODE_JAVASCRIPT ->
+            command(
+                "node --check " + nodeJavascriptEntry(baseline),
+                120,
+                "executespec-bootstrap-node-check",
+                "NODE");
+        case NODE_TYPESCRIPT, JAVA_MAVEN, FRONTEND_REACT, UNSUPPORTED ->
+            throw new IllegalStateException("unqualified greenfield adapter: " + baseline.kind());
         case MULTI_REPOSITORY -> throw new IllegalStateException("multi repository handled above");
         case EXISTING -> throw new IllegalStateException("greenfield EXISTING baseline is invalid");
       };
@@ -265,11 +258,23 @@ public class TaskAcceptanceContractResolver {
         return multiRepositoryTest(baseline);
       }
       return switch (baseline.kind()) {
-        case PYTHON -> Optional.of(command("python3 -m pytest -q", 600, "pytest", "PYTEST"));
-        case NODE_TYPESCRIPT -> Optional.of(command("npm test --silent", 600, "npm", "NODE_TEST"));
-        case JAVA_MAVEN -> Optional.of(command("mvn -q test", 600, "maven", "SUREFIRE"));
-        case FRONTEND_REACT -> Optional.of(command("npm test --silent", 600, "npm", "VITEST"));
-        case EXISTING, MULTI_REPOSITORY, UNSUPPORTED -> Optional.empty();
+        case PYTHON ->
+            Optional.of(
+                command(
+                    "python3 -m pytest -q .executespec/bootstrap/test_acceptance.py",
+                    600,
+                    "executespec-bootstrap-pytest",
+                    "PYTEST"));
+        case NODE_JAVASCRIPT ->
+            Optional.of(
+                command(
+                    "node --test .executespec/bootstrap/test_acceptance.mjs",
+                    600,
+                    "executespec-bootstrap-node-test",
+                    "NODE_TEST"));
+        case NODE_TYPESCRIPT, JAVA_MAVEN, FRONTEND_REACT, UNSUPPORTED ->
+            throw new IllegalStateException("unqualified greenfield adapter: " + baseline.kind());
+        case EXISTING, MULTI_REPOSITORY -> Optional.empty();
       };
     }
     Optional<TestCommand> resolved = testCommands.resolve(workspaceRoot);
@@ -284,10 +289,19 @@ public class TaskAcceptanceContractResolver {
     return new TaskAcceptanceContract.ResolvedCommand(command, timeoutSeconds, source, framework);
   }
 
+  private static String nodeJavascriptEntry(GreenfieldBaselinePlan baseline) {
+    return baseline.requiredTaskPaths().stream()
+        .filter(path -> path.matches("[A-Za-z0-9._@+-]+(?:/[A-Za-z0-9._@+-]+)*\\.(?:js|mjs)"))
+        .findFirst()
+        .orElse(".executespec/bootstrap/invalid-node-entry.js");
+  }
+
   private static TaskAcceptanceContract.ResolvedCommand multiRepositoryBuild(
       GreenfieldBaselinePlan baseline) {
     List<TaskAcceptanceContract.ResolvedCommand> commands =
-        baseline.repositoryTargets().stream().map(target -> buildForKind(target.kind())).toList();
+        baseline.repositoryTargets().stream()
+            .map(TaskAcceptanceContractResolver::buildForTarget)
+            .toList();
     String joined =
         java.util.stream.IntStream.range(0, commands.size())
             .mapToObj(
@@ -339,26 +353,46 @@ public class TaskAcceptanceContractResolver {
     return Optional.of(command(joined, Math.min(timeout, 1200), source, framework));
   }
 
-  private static TaskAcceptanceContract.ResolvedCommand buildForKind(
-      GreenfieldBaselinePlan.Kind kind) {
-    return switch (kind) {
+  private static TaskAcceptanceContract.ResolvedCommand buildForTarget(
+      GreenfieldBaselinePlan.RepositoryTarget target) {
+    return switch (target.kind()) {
       case PYTHON -> command("python3 -m compileall -q .", 120, "inferred:python", "PYTHON");
-      case NODE_TYPESCRIPT, FRONTEND_REACT ->
-          command("npm run build --if-present", 240, "inferred:npm", "NODE");
-      case JAVA_MAVEN -> command("mvn -q -DskipTests compile", 300, "inferred:maven", "MAVEN");
-      case EXISTING, MULTI_REPOSITORY, UNSUPPORTED ->
-          command("true", 5, "fallback:no-op", "UNKNOWN");
+      case NODE_JAVASCRIPT ->
+          command(
+              "node --check "
+                  + target.requiredPaths().stream()
+                      .filter(
+                          path ->
+                              path.matches("[A-Za-z0-9._@+-]+(?:/[A-Za-z0-9._@+-]+)*\\.(?:js|mjs)"))
+                      .findFirst()
+                      .orElse(".executespec/bootstrap/invalid-node-entry.js"),
+              120,
+              "executespec-bootstrap-node-check",
+              "NODE");
+      case NODE_TYPESCRIPT, JAVA_MAVEN, FRONTEND_REACT, EXISTING, MULTI_REPOSITORY, UNSUPPORTED ->
+          throw new IllegalStateException("unqualified repository target: " + target.kind());
     };
   }
 
   private static Optional<TaskAcceptanceContract.ResolvedCommand> testForKind(
       GreenfieldBaselinePlan.Kind kind) {
     return switch (kind) {
-      case PYTHON -> Optional.of(command("python3 -m pytest -q", 600, "pytest", "PYTEST"));
-      case NODE_TYPESCRIPT -> Optional.of(command("npm test --silent", 600, "npm", "NODE_TEST"));
-      case JAVA_MAVEN -> Optional.of(command("mvn -q test", 600, "maven", "SUREFIRE"));
-      case FRONTEND_REACT -> Optional.of(command("npm test --silent", 600, "npm", "VITEST"));
-      case EXISTING, MULTI_REPOSITORY, UNSUPPORTED -> Optional.empty();
+      case PYTHON ->
+          Optional.of(
+              command(
+                  "python3 -m pytest -q .executespec/bootstrap/test_acceptance.py",
+                  600,
+                  "executespec-bootstrap-pytest",
+                  "PYTEST"));
+      case NODE_JAVASCRIPT ->
+          Optional.of(
+              command(
+                  "node --test .executespec/bootstrap/test_acceptance.mjs",
+                  600,
+                  "executespec-bootstrap-node-test",
+                  "NODE_TEST"));
+      case NODE_TYPESCRIPT, JAVA_MAVEN, FRONTEND_REACT, EXISTING, MULTI_REPOSITORY, UNSUPPORTED ->
+          Optional.empty();
     };
   }
 

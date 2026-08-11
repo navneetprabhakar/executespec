@@ -44,6 +44,7 @@ import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolve
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
+import com.navneet.executespec.workspacegeneration.WorkspaceOrigin;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -125,6 +126,7 @@ class BuildTaskGenerationCoordinatorTest {
             .model("claude-sonnet")
             .runContext(base)
             .originalGoal("Build the API")
+            .workspaceOrigin(WorkspaceOrigin.GREENFIELD)
             .workspaceSummary("single repository")
             .build();
 
@@ -331,7 +333,8 @@ class BuildTaskGenerationCoordinatorTest {
             java.util.Map.of("requirements.txt", "pytest\n"),
             List.of("src/app.py"),
             List.of("REQUIRED_PATH_MISSING:src/app.py", "FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
-    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
+    when(greenfieldBaselines.plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD))
+        .thenReturn(baseline);
     contract =
         new TaskAcceptanceContract(
             2,
@@ -443,7 +446,8 @@ class BuildTaskGenerationCoordinatorTest {
             java.util.Map.of(),
             List.of(),
             List.of("FINAL_ACCEPTANCE_NOT_YET_PROVEN"));
-    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(unsupported);
+    when(greenfieldBaselines.plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD))
+        .thenReturn(unsupported);
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->
@@ -506,7 +510,8 @@ class BuildTaskGenerationCoordinatorTest {
             List.of(),
             List.of(),
             contract.digest());
-    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
+    when(greenfieldBaselines.plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD))
+        .thenReturn(baseline);
     when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(v2);
     when(operations.claimBuildTask(any(), eq("run-1"), eq("T1"), eq(0), eq(v2.digest())))
         .thenReturn(operation);
@@ -574,7 +579,8 @@ class BuildTaskGenerationCoordinatorTest {
             List.of(
                 new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", true)),
             "d".repeat(64));
-    when(greenfieldBaselines.plan(workspace, task, plan)).thenReturn(baseline);
+    when(greenfieldBaselines.plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD))
+        .thenReturn(baseline);
     when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(v2);
     when(operations.claimBuildTask(any(), eq("run-1"), eq("T1"), eq(0), eq(v2.digest())))
         .thenReturn(operation);

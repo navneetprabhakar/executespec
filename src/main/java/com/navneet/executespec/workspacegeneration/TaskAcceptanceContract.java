@@ -1,6 +1,7 @@
 package com.navneet.executespec.workspacegeneration;
 
 import java.util.List;
+import java.util.Map;
 
 /** Frozen server-owned policy describing what one planner task must prove before acceptance. */
 public record TaskAcceptanceContract(
@@ -22,6 +23,7 @@ public record TaskAcceptanceContract(
     List<String> allowedRepositoryScopes,
     List<AcceptanceCheck> prefixChecks,
     List<AcceptanceCheck> finalChecks,
+    Map<String, String> immutableBootstrapArtifactDigests,
     String digest) {
 
   public TaskAcceptanceContract {
@@ -35,6 +37,54 @@ public record TaskAcceptanceContract(
         allowedRepositoryScopes == null ? List.of() : List.copyOf(allowedRepositoryScopes);
     prefixChecks = prefixChecks == null ? List.of() : List.copyOf(prefixChecks);
     finalChecks = finalChecks == null ? List.of() : List.copyOf(finalChecks);
+    immutableBootstrapArtifactDigests =
+        immutableBootstrapArtifactDigests == null
+            ? Map.of()
+            : Map.copyOf(immutableBootstrapArtifactDigests);
+  }
+
+  /** Compatibility constructor for schema-v2 fixtures created before bootstrap digest binding. */
+  public TaskAcceptanceContract(
+      int schemaVersion,
+      String taskId,
+      int taskIndex,
+      String verificationPolicy,
+      String buildRequirement,
+      String testRequirement,
+      List<String> declaredTouchPaths,
+      String runtimeSurface,
+      String baselineKind,
+      ResolvedCommand buildCommand,
+      ResolvedCommand testCommand,
+      List<String> requiredPaths,
+      List<String> requiredTestSelectors,
+      List<String> endpointExpectations,
+      boolean meaningfulDiffRequired,
+      List<String> allowedRepositoryScopes,
+      List<AcceptanceCheck> prefixChecks,
+      List<AcceptanceCheck> finalChecks,
+      String digest) {
+    this(
+        schemaVersion,
+        taskId,
+        taskIndex,
+        verificationPolicy,
+        buildRequirement,
+        testRequirement,
+        declaredTouchPaths,
+        runtimeSurface,
+        baselineKind,
+        buildCommand,
+        testCommand,
+        requiredPaths,
+        requiredTestSelectors,
+        endpointExpectations,
+        meaningfulDiffRequired,
+        allowedRepositoryScopes,
+        prefixChecks,
+        finalChecks,
+        Map.of(),
+        digest);
   }
 
   /** Compatibility constructor for schema-v1 persisted/test fixtures. */
@@ -66,6 +116,7 @@ public record TaskAcceptanceContract(
         List.of("."),
         List.of(),
         List.of(),
+        Map.of(),
         digest);
   }
 

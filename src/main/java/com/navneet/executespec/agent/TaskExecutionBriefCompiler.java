@@ -159,6 +159,7 @@ public final class TaskExecutionBriefCompiler {
         .description(description)
         .complexity(task.complexity())
         .touchesFiles(task.touchesFiles())
+        .requiredArtifacts(task.requiredArtifacts())
         .dependsOn(task.dependsOn())
         .hardConstraints(task.hardConstraints())
         .meetsRequirements(task.meetsRequirements())

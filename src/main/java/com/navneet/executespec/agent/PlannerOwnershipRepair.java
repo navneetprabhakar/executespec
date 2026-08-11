@@ -162,6 +162,7 @@ final class PlannerOwnershipRepair {
         .description(t.description())
         .complexity(t.complexity())
         .touchesFiles(t.touchesFiles())
+        .requiredArtifacts(t.requiredArtifacts())
         .dependsOn(t.dependsOn())
         .hardConstraints(t.hardConstraints())
         .meetsRequirements(meetsRequirements)

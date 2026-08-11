@@ -1,11 +1,15 @@
 # BUILD/PATCH shared-kernel execution plan
 
-Status: M0-M6 implemented and deployed at `e4c9afcefcc584b3cd1b02ae94b009f3d70e142e`;
-M7 has provider-free mechanism evidence but real paired code-generation quality remains open. The
-first authorized candidate pair stopped in planner recovery before any task or shared-kernel
+Status: M0-M6 remain implemented. The 2026-08-11 approach correction adds durable typed workspace
+origin, model-independent required-artifact authority, immutable external bootstrap tests and
+failure-first composition gates. Python/FastAPI and plain Node JavaScript adapters now pass real
+provider-free build/test/held-out behavior checks. TypeScript, Java/Maven and React are deliberately
+fail-closed under the rollout flag until equally external, non-no-op adapters are qualified. M7
+still has provider-free mechanism evidence but real paired code-generation quality remains open.
+The first authorized candidate pair stopped in planner recovery before any task or shared-kernel
 attempt, so it is diagnostic evidence only. Deployment `31421957285` and the live canonical
-`/opt/app/RUNNING_SHA` attestation prove the exact qualification release; the shared-kernel flag
-remains off and a replacement pair is not authorized.
+`/opt/app/RUNNING_SHA` attestation prove only the older qualification release; the shared-kernel
+flag remains off and no current branch deployment or paid replacement pair has run.
 
 ## Non-negotiable invariants
 
@@ -61,9 +65,12 @@ remains off and a replacement pair is not authorized.
   its production implementation; PATCH `CodeGenEngineImpl` and BUILD `SequentialExecutor` depend
   on that port while keeping separate orchestration and policy.
 - With `build.shared-code-change-loop.enabled`, BUILD freezes a schema-v2 acceptance contract and
-  deterministic greenfield baseline before mutation. Python, Node/TypeScript, Java/Maven, React,
-  and path-explicit multi-repository tasks receive an executable red acceptance surface without
-  product implementation.
+  deterministic greenfield bootstrap before mutation. Workspace origin comes from durable
+  submission/repository admission facts, never incidental `.gitignore`/`.gitattributes` files.
+  Python and plain Node JavaScript receive external executable red surfaces without product
+  implementation; supported Python/Node multi-repository combinations use the same rule.
+  TypeScript, Java/Maven, React, ambiguous artifact sets and unsupported mixed repositories stop
+  before provider dispatch.
 - Deterministic failure deltas are typed as INITIAL_FAILURE, IMPROVED, REGRESSED, CHANGED,
   UNCHANGED, or PASSED. V378's exact red count/signature seeds the first post-edit comparison;
   subsequent active failure evidence is pinned outside generated compaction summaries. Only

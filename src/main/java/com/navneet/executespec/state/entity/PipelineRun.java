@@ -215,6 +215,13 @@ public class PipelineRun {
   private String repoMode; // "NEW" | "EXISTING" | null
 
   /**
+   * Immutable admission fact used by BUILD bootstrap. Null is tolerated only for historical rows
+   * created before V379.
+   */
+  @Column(name = "workspace_origin", length = 32)
+  private String workspaceOrigin;
+
+  /**
    * Exact existing SCM branch selected at admission time. A non-null value means this run must
    * clone and publish back to that branch (for example, a CI-fix run targeting an open PR) rather
    * than generating a new {@code executespec/<runId>} branch. Persisted so plan-gate, pause, and

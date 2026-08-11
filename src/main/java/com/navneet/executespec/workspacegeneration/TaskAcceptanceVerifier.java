@@ -23,6 +23,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -56,6 +57,14 @@ public class TaskAcceptanceVerifier {
           "The server-resolved build/test commands no longer match the frozen contract",
           null,
           List.of());
+    }
+    if (!bootstrapArtifactsMatch(context.workspaceRoot(), contract)) {
+      return new InitialFailure(
+          "UNAVAILABLE",
+          "INITIAL_BOOTSTRAP_ARTIFACT_DRIFT",
+          "Server-owned bootstrap artifacts no longer match the frozen contract",
+          null,
+          List.copyOf(contract.immutableBootstrapArtifactDigests().keySet()));
     }
     if ("fallback:no-op".equals(build.sourceDescription())) {
       return new InitialFailure(
@@ -225,6 +234,7 @@ public class TaskAcceptanceVerifier {
             && summary.getTotalTests() > 0
             && summary.getFailed() == 0
             && summary.getErrors() == 0;
+    boolean bootstrapArtifactsMatch = bootstrapArtifactsMatch(context.workspaceRoot(), contract);
     boolean endpointExpectationsPassed =
         endpointExpectationsPassed(
             context.workspaceRoot(),
@@ -240,7 +250,8 @@ public class TaskAcceptanceVerifier {
             buildPassed,
             testsExecuted,
             testsPassed,
-            endpointExpectationsPassed);
+            endpointExpectationsPassed,
+            bootstrapArtifactsMatch);
 
     if (schemaV2 && checkEvaluation.status() == TaskAcceptanceCheckEvaluator.Status.FAILED) {
       outcome = "FAILED";
@@ -272,6 +283,7 @@ public class TaskAcceptanceVerifier {
     evidence.put("frozenBuildMatches", frozenBuildMatches);
     evidence.put("frozenTestMatches", frozenTestMatches);
     evidence.put("requiredPathsPresent", requiredPathsPresent);
+    evidence.put("bootstrapArtifactsMatch", bootstrapArtifactsMatch);
     evidence.put("actualChangedFiles", changedFiles);
     evidence.put("actualCodeChanged", actualCodeChanged);
     evidence.put("buildExitCode", parsed.exitCode());
@@ -402,6 +414,25 @@ public class TaskAcceptanceVerifier {
     String method = expectation.substring(0, separator).toLowerCase(java.util.Locale.ROOT);
     String path = expectation.substring(separator + 1);
     return paths.get(path) instanceof Map<?, ?> operations && operations.containsKey(method);
+  }
+
+  private static boolean bootstrapArtifactsMatch(
+      Path workspaceRoot, TaskAcceptanceContract contract) {
+    Path root = workspaceRoot.toAbsolutePath().normalize();
+    for (Map.Entry<String, String> artifact :
+        contract.immutableBootstrapArtifactDigests().entrySet()) {
+      try {
+        Path path = root.resolve(artifact.getKey()).normalize();
+        if (!path.startsWith(root)
+            || !Files.isRegularFile(path)
+            || !artifact.getValue().equals(DigestUtils.sha256Hex(Files.readAllBytes(path)))) {
+          return false;
+        }
+      } catch (Exception failure) {
+        return false;
+      }
+    }
+    return true;
   }
 
   public record InitialFailure(

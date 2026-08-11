@@ -93,6 +93,28 @@ public class TestCommandResolver {
 
   private Optional<TestCommand> resolveSingle(Path workspaceRoot) {
 
+    if (exists(workspaceRoot, ".executespec/bootstrap/test_acceptance.mjs")) {
+      return Optional.of(
+          new TestCommand(
+              "node --test .executespec/bootstrap/test_acceptance.mjs",
+              600,
+              Framework.NODE_TEST,
+              "executespec-bootstrap-node-test"));
+    }
+
+    if (exists(workspaceRoot, ".executespec/bootstrap/test_acceptance.py")) {
+      String python =
+          exists(workspaceRoot, ".venv/bin/python")
+              ? ".venv/bin/python"
+              : exists(workspaceRoot, "venv/bin/python") ? "venv/bin/python" : "python3";
+      return Optional.of(
+          new TestCommand(
+              python + " -m pytest -q .executespec/bootstrap/test_acceptance.py",
+              600,
+              Framework.PYTEST,
+              "executespec-bootstrap-pytest"));
+    }
+
     if (exists(workspaceRoot, "pom.xml")) {
       // -q keeps output small; surefire still prints the "Tests run:" summary we parse.
       String wrapper = executable(workspaceRoot, "mvnw") ? "./mvnw" : "mvn";

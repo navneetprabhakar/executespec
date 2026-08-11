@@ -4,6 +4,7 @@ import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.router.ModelProviderScore;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceOrigin;
 
 /** Builds the deliberately narrow worker request used by a post-review correction attempt. */
 final class AutomaticCorrectionExecutionRequestFactory {
@@ -22,7 +23,8 @@ final class AutomaticCorrectionExecutionRequestFactory {
       String originalGoal,
       String designBlock,
       String projectId,
-      String workspaceSummary) {
+      String workspaceSummary,
+      WorkspaceOrigin workspaceOrigin) {
     return ExecutionRequest.builder()
         .plan(plan)
         .provider(candidate.provider())
@@ -37,6 +39,7 @@ final class AutomaticCorrectionExecutionRequestFactory {
         .initialModelStepDownsUsed(modelStepDowns)
         .originalGoal(originalGoal)
         .designBlock(designBlock)
+        .workspaceOrigin(workspaceOrigin)
         .projectId(projectId)
         .workspaceSummary(workspaceSummary)
         .build();

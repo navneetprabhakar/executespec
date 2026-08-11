@@ -161,6 +161,7 @@ class SequentialExecutorCancelCascadeTest {
             .maxIterationsPerTask(null)
             .enableSmokeTests(false)
             .designBlock(null)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     exec.execute(req, null);
@@ -210,6 +211,7 @@ class SequentialExecutorCancelCascadeTest {
             .maxIterationsPerTask(null)
             .enableSmokeTests(false)
             .designBlock(null)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     ExecutionResult result = exec.execute(req, null);
@@ -281,6 +283,7 @@ class SequentialExecutorCancelCascadeTest {
             .model("deepseek-v4-pro-native")
             .runContext(ctx)
             .enableSmokeTests(false)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     ExecutionResult result = exec.execute(req, null);
@@ -325,6 +328,7 @@ class SequentialExecutorCancelCascadeTest {
             .maxIterationsPerTask(null)
             .enableSmokeTests(false)
             .designBlock(null)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     // Set interrupt BEFORE calling execute. The top-of-loop check should fire on i=0 and break
@@ -369,6 +373,7 @@ class SequentialExecutorCancelCascadeTest {
             .maxIterationsPerTask(null)
             .enableSmokeTests(false)
             .designBlock(null)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     exec.execute(req, null);
@@ -411,6 +416,7 @@ class SequentialExecutorCancelCascadeTest {
             .maxIterationsPerTask(null)
             .enableSmokeTests(false)
             .designBlock(null)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     exec.execute(req, null);

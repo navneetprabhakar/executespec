@@ -51,6 +51,7 @@ public record GreenfieldBaselinePlan(
   public enum Kind {
     EXISTING,
     PYTHON,
+    NODE_JAVASCRIPT,
     NODE_TYPESCRIPT,
     JAVA_MAVEN,
     FRONTEND_REACT,
