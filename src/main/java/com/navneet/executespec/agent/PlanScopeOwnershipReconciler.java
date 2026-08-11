@@ -511,6 +511,7 @@ final class PlanScopeOwnershipReconciler {
         .description(description)
         .complexity(source.complexity())
         .touchesFiles(files)
+        .requiredArtifacts(source.requiredArtifacts())
         .dependsOn(source.dependsOn())
         .hardConstraints(constraints)
         .meetsRequirements(source.meetsRequirements())

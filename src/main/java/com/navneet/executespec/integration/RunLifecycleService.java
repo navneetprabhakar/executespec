@@ -854,6 +854,15 @@ public class RunLifecycleService {
                               : continuation.lowComplexityWorkerStartTierOverride())
                       .originalGoal(row.getUserRequest())
                       .designBlock(null) // not persisted on the row — runs without it on resume
+                      .workspaceOrigin(
+                          com.navneet.executespec.workspacegeneration.WorkspaceOriginResolver
+                              .persistedOrHistorical(
+                                  row.getWorkspaceOrigin(),
+                                  row.getProjectId(),
+                                  row.getSourceRunId(),
+                                  row.isLocalExecutionRequested(),
+                                  row.getRepoMode(),
+                                  selectedRepoIds))
                       .projectId(projectId)
                       .workspaceSummary(
                           contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds))
@@ -1293,7 +1302,7 @@ public class RunLifecycleService {
                 if (override != null) {
                   assertContinuationProposalUnchanged(runId, taskId, override);
                 }
-                PipelineRun row = runRepo.findById(runId).orElse(null);
+                PipelineRun row = runRepo.findById(runId).orElse(run);
                 String provider =
                     row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
                 String model =
@@ -1380,6 +1389,15 @@ public class RunLifecycleService {
                                     .initialModelStepDownsUsed(approvedUsage.modelStepDowns())
                                     .originalGoal(row == null ? null : row.getUserRequest())
                                     .designBlock(null)
+                                    .workspaceOrigin(
+                                        com.navneet.executespec.workspacegeneration
+                                            .WorkspaceOriginResolver.persistedOrHistorical(
+                                            row.getWorkspaceOrigin(),
+                                            row.getProjectId(),
+                                            row.getSourceRunId(),
+                                            row.isLocalExecutionRequested(),
+                                            row.getRepoMode(),
+                                            selectedRepoIds))
                                     .projectId(row == null ? null : row.getProjectId())
                                     .workspaceSummary(
                                         contextComposer.buildMultiRepoSummary(

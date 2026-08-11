@@ -74,9 +74,11 @@ class FlywayMigrationInventoryTest {
     // default-off BUILD shared-code-change-loop rollout control, bringing the exact inventory to
     // 362. V377 adds immutable BUILD attempt contract, route, token, call, and cost evidence,
     // bringing the exact inventory to 363. V378 freezes the actually observed pre-provider BUILD
-    // failure evidence, bringing the exact inventory to 364.
-    assertThat(migrations).hasSize(364);
-    assertThat(migrations.getLast().version()).isEqualTo("378");
+    // failure evidence, bringing the exact inventory to 364. V379 adds the nullable, staged
+    // workspace-origin discriminator for new BUILD writes without rewriting historical rows,
+    // bringing the exact inventory to 365.
+    assertThat(migrations).hasSize(365);
+    assertThat(migrations.getLast().version()).isEqualTo("379");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

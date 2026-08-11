@@ -36,11 +36,15 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   required build/tests. Acceptance reclassifies against the exact candidate diff: zero-diff
   generations fail, and any actual code-file change requires an executed non-empty green suite
   even when planner wording classified the task as documentation/configuration.
-- Under `build.shared-code-change-loop.enabled`, `GreenfieldBaselineService` creates only the
-  minimum executable red test/config surface for Python, Node/TypeScript, Java/Maven, React, or
-  path-explicit multi-repository tasks. It never creates product implementation or overwrites an
-  existing customer path. `TaskAcceptanceContractResolver` freezes those exact commands, required
-  paths, runtime, scopes and checks before mutation.
+- Under `build.shared-code-change-loop.enabled`, `GreenfieldBaselineService` trusts the typed
+  `WorkspaceOrigin` carried from durable run admission rather than rediscovering origin from
+  filesystem metadata. Python and path-explicit plain Node JavaScript use qualified external bootstrap markers
+  and hidden tests under `.executespec/bootstrap`; every bootstrap byte is digest-bound and checked
+  again after worker mutation. TypeScript, Java/Maven, React and unsupported mixed repositories
+  fail before provider dispatch until their external, non-no-op adapters are qualified. No
+  qualified adapter creates or freezes a customer manifest, product implementation, or customer
+  test path. `TaskAcceptanceContractResolver` freezes exact commands, required paths, runtime,
+  scopes and checks before mutation.
 - `TaskAcceptanceVerifier.probeInitial` must execute before provider dispatch. It refuses command
   drift or unavailable required test infrastructure, records missing required paths or missing
   HTTP interface declarations as red evidence, and refuses to relabel a green workspace as a
@@ -82,7 +86,9 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   `V375__preserve_workspace_generation_recovery_evidence.sql`,
   `V376__seed_build_shared_code_change_loop_flag.sql`,
   `V377__workspace_generation_execution_evidence.sql`, and
-  `V378__observed_initial_build_failure.sql`.
+  `V378__observed_initial_build_failure.sql`, and
+  `V379__persist_workspace_origin.sql` (nullable staged origin for new writes; no historical
+  rewrite or premature NOT NULL tightening).
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
@@ -111,14 +117,18 @@ verification. This keeps usage-evidence persistence separate from the lifecycle 
   verification but are purged and re-attested before checkpoint/acceptance.
 - `WorkerCorrectionToolFenceTest`: ThreadLocal propagation and exact dispatch fence.
 - `TaskAcceptanceVerifierTest`: zero-diff rejection, actual-code-change test escalation, exact
-  initial test counts, command drift, held-out endpoint rejection, and green-workspace refusal.
+  initial test counts, command drift, immutable-bootstrap tamper rejection, held-out endpoint
+  rejection, and green-workspace refusal.
 - `TaskAcceptanceContractResolverTest`: typed canonical contract/digest, sorted touch paths,
   documentation-vs-code test policy, and admitted plan/goal/workspace authority binding.
 - `BuildTaskGenerationCoordinatorTest`: required orchestration order, exact checkpoint-before-accept,
   rollback/no-accept behavior for worker or deterministic-verification rejection, flag-off
   telemetry isolation, schema-v2 execution evidence, typed lifecycle emission, initial-delta seed,
   and hidden-verifier non-disclosure to the worker.
-- `GreenfieldBaselineServiceTest`: executable red baselines, no product implementation,
-  no-overwrite behavior and exact multi-repository scoping.
+- `GreenfieldBaselineServiceTest` + `GreenfieldWorkspaceCompositionTest`: typed-origin behavior,
+  executable external Python/Node red baselines, no product implementation, exact multi-repository
+  scoping, real frozen commands, and held-out FastAPI/Node behavior.
+- `WorkspaceOriginResolverTest` + `RunWorkspaceOriginServiceTest`: submit/history derivation,
+  persisted-origin precedence, exact durable update cardinality, and iteration non-reclassification.
 - `DeterministicFailureDeltaTest` + `WorkerAutoVerifyProgressTest`: stable normalized comparison of
   consecutive verifier evidence and first-edit comparison against the V378 red state.

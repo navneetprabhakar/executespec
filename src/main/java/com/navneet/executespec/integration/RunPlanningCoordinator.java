@@ -1112,6 +1112,7 @@ class RunPlanningCoordinator {
               .description(c.description())
               .complexity(c.complexity() == null ? PlannedTask.Complexity.MEDIUM : c.complexity())
               .touchesFiles(c.touchesFiles())
+              .requiredArtifacts(c.requiredArtifacts())
               .dependsOn(rewrittenDeps)
               .hardConstraints(c.hardConstraints())
               .meetsRequirements(c.meetsRequirements())

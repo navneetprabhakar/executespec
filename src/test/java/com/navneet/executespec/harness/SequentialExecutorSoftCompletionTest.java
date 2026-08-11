@@ -328,6 +328,7 @@ class SequentialExecutorSoftCompletionTest {
             userConfirmedContinuation ? RunContinuationDecision.CHANGE_PROVIDER : null)
         .userConfirmedContinuationProvider(userConfirmedContinuation ? "openai" : null)
         .userConfirmedContinuationModel(userConfirmedContinuation ? "gpt-5.4" : null)
+        .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
         .build();
   }
 
@@ -598,6 +599,7 @@ class SequentialExecutorSoftCompletionTest {
             .runContext(new ExecutionContext("run-soft", "run-soft", Path.of("/tmp/ws-soft")))
             .enableSmokeTests(true)
             .routePinned(true)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     newExecutor().execute(pinned);

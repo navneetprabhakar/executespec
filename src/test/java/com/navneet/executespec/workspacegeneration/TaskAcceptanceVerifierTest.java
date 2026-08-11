@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,6 +27,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -158,6 +160,29 @@ class TaskAcceptanceVerifierTest {
         .contains("\"commandClass\":\"BROAD_VERIFICATION\"");
     assertThat(result.serverResolvedCommandContract())
         .contains("\"commandClass\":\"BROAD_VERIFICATION\"");
+  }
+
+  @Test
+  void schemaV2RejectsAWorkerModifiedBootstrapTest() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.createDirectories(workspace.resolve(".executespec/bootstrap"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    Files.writeString(workspace.resolve(".executespec/bootstrap/test_acceptance.py"), "tampered\n");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(1).passed(1).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(Optional.of(new DetailedResult(summary, "1 passed", command.command(), 0)));
+
+    var result =
+        verifier.verify(
+            v2Context, bootstrapBoundContract("original\n"), List.of("src/main/App.java"));
+
+    assertThat(result.outcome()).isEqualTo("FAILED");
+    assertThat(result.evidenceJson())
+        .contains("\"bootstrapArtifactsMatch\":false")
+        .contains("\"kind\":\"BOOTSTRAP_ARTIFACT_INTEGRITY\"");
   }
 
   @Test
@@ -366,5 +391,38 @@ class TaskAcceptanceVerifierTest {
             new TaskAcceptanceContract.AcceptanceCheck("TESTS_PASSED", "candidate", false),
             new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", true)),
         "c".repeat(64));
+  }
+
+  private static TaskAcceptanceContract bootstrapBoundContract(String originalContent) {
+    TaskAcceptanceContract base = failureFirstContract();
+    return new TaskAcceptanceContract(
+        base.schemaVersion(),
+        base.taskId(),
+        base.taskIndex(),
+        base.verificationPolicy(),
+        base.buildRequirement(),
+        base.testRequirement(),
+        base.declaredTouchPaths(),
+        base.runtimeSurface(),
+        base.baselineKind(),
+        base.buildCommand(),
+        base.testCommand(),
+        base.requiredPaths(),
+        base.requiredTestSelectors(),
+        base.endpointExpectations(),
+        true,
+        base.allowedRepositoryScopes(),
+        base.prefixChecks(),
+        List.of(
+            new TaskAcceptanceContract.AcceptanceCheck("REPOSITORY_SCOPE", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck(
+                "REQUIRED_PATHS_PRESENT", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck(
+                "BOOTSTRAP_ARTIFACT_INTEGRITY", ".executespec/bootstrap", true),
+            new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("TESTS_PASSED", "candidate", false)),
+        Map.of(".executespec/bootstrap/test_acceptance.py", DigestUtils.sha256Hex(originalContent)),
+        "d".repeat(64));
   }
 }

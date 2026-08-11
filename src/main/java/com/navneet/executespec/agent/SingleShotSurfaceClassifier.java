@@ -40,6 +40,17 @@ final class SingleShotSurfaceClassifier {
     return surface == Plan.RuntimeSurface.STATIC_WEB ? "node-frontend" : "unknown";
   }
 
+  static String projectType(String spec, Plan.RuntimeSurface surface) {
+    String text = spec == null ? "" : spec.toLowerCase(Locale.ROOT);
+    if (text.contains("fastapi") || text.matches("(?s).*\\bpython\\b.*")) return "python";
+    if (text.contains("spring boot") || text.contains("springboot")) return "java-spring-boot";
+    if (text.contains("express") || text.contains("node.js") || text.contains("nodejs")) {
+      return surface == Plan.RuntimeSurface.STATIC_WEB ? "node-frontend" : "node-backend";
+    }
+    if (text.contains("react") || text.contains("vite")) return "node-frontend";
+    return projectType(surface);
+  }
+
   static String taskConstraint(Plan.RuntimeSurface surface) {
     return surface == Plan.RuntimeSurface.STATIC_WEB
         ? "\n\nThis is a browser user-interface deliverable. Create a working page with HTML and"

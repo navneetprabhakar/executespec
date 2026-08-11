@@ -148,6 +148,7 @@ final class PlanModelOwnershipReconciler {
         .description(description)
         .complexity(source.complexity())
         .touchesFiles(source.touchesFiles())
+        .requiredArtifacts(source.requiredArtifacts())
         .dependsOn(source.dependsOn())
         .hardConstraints(constraints)
         .meetsRequirements(source.meetsRequirements())

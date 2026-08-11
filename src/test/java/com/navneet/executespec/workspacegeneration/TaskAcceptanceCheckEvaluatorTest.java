@@ -22,11 +22,13 @@ class TaskAcceptanceCheckEvaluatorTest {
             true,
             true,
             true,
+            true,
             true);
     var escaped =
         TaskAcceptanceCheckEvaluator.evaluate(
             contract,
             List.of("repos/api/src/App.java", "repos/web/src/App.ts"),
+            true,
             true,
             true,
             true,
@@ -53,7 +55,7 @@ class TaskAcceptanceCheckEvaluatorTest {
 
     var result =
         TaskAcceptanceCheckEvaluator.evaluate(
-            contract, List.of("src/app.py"), true, true, true, true, true, true, false);
+            contract, List.of("src/app.py"), true, true, true, true, true, true, false, true);
 
     assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.FAILED);
     assertThat(result.results())
@@ -96,7 +98,7 @@ class TaskAcceptanceCheckEvaluatorTest {
 
     var result =
         TaskAcceptanceCheckEvaluator.evaluate(
-            contract, List.of("src/app.py"), true, true, true, true, true, true, true);
+            contract, List.of("src/app.py"), true, true, true, true, true, true, true, true);
 
     assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.UNAVAILABLE);
   }

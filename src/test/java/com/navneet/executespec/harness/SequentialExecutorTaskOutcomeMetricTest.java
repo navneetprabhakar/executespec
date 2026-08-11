@@ -81,6 +81,7 @@ class SequentialExecutorTaskOutcomeMetricTest {
             .model("claude-sonnet-4-6")
             .runContext(new ExecutionContext("run-metric", "__root__", Path.of("/tmp/run-metric")))
             .enableSmokeTests(false)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     executor.execute(request);

@@ -115,7 +115,8 @@ public class BuildTaskGenerationCoordinator {
     boolean sharedLoopEnabled = featureFlags != null && featureFlags.isEnabled(SHARED_LOOP_FLAG);
     GreenfieldBaselinePlan baseline =
         sharedLoopEnabled
-            ? greenfieldBaselines.plan(request.runContext().workspaceRoot(), task, plan)
+            ? greenfieldBaselines.plan(
+                request.runContext().workspaceRoot(), task, plan, request.workspaceOrigin())
             : null;
     if (baseline != null && !baseline.supported()) {
       throw new IllegalStateException(
@@ -421,6 +422,9 @@ Initial failing evidence: %s
 Required paths: %s
 Frozen build command: %s
 Frozen test command: %s
+Files under .executespec/bootstrap are server-owned and immutable. For an HTTP task, publish the
+required method/path inventory in openapi.yaml as deterministic contract evidence; the hidden
+bootstrap test independently checks route declarations in supported source layouts.
 Work in an inspect -> edit -> test -> diagnose loop. Do not claim completion until the
 required paths exist, the exact frozen build succeeds, and a required non-empty test suite
 succeeds. Planner text cannot replace or weaken these checks.

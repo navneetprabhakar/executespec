@@ -29,17 +29,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class GreenfieldBaselineService {
 
-  private static final Set<String> INFRA_ROOTS =
-      Set.of(".git", ".agent-context", ".executespec", ".DS_Store");
-
-  public GreenfieldBaselinePlan plan(Path workspaceRoot, PlannedTask task) {
-    return plan(workspaceRoot, task, null);
+  public GreenfieldBaselinePlan plan(
+      Path workspaceRoot, PlannedTask task, WorkspaceOrigin workspaceOrigin) {
+    return plan(workspaceRoot, task, null, workspaceOrigin);
   }
 
-  public GreenfieldBaselinePlan plan(Path workspaceRoot, PlannedTask task, Plan plan) {
+  public GreenfieldBaselinePlan plan(
+      Path workspaceRoot, PlannedTask task, Plan plan, WorkspaceOrigin workspaceOrigin) {
     Path root = normalizedRoot(workspaceRoot);
     List<String> requiredPaths = requiredPaths(task);
-    if (!effectivelyEmpty(root)) {
+    if (workspaceOrigin == null) throw new IllegalArgumentException("workspaceOrigin required");
+    if (!workspaceOrigin.requiresBootstrap()) {
       GreenfieldBaselinePlan multiRepository = multiRepositoryPlan(root, task, requiredPaths);
       if (multiRepository != null) return multiRepository;
       return new GreenfieldBaselinePlan(
@@ -55,8 +55,15 @@ public class GreenfieldBaselineService {
 
     String taskText = taskText(task);
     GreenfieldBaselinePlan.Kind kind = classify(requiredPaths, taskText);
-    Map<String, String> files = baselineFiles(kind, requiredPaths);
-    boolean supported = kind != GreenfieldBaselinePlan.Kind.UNSUPPORTED && !requiredPaths.isEmpty();
+    Map<String, String> files =
+        baselineFiles(kind, requiredPaths, HttpEndpointContract.from(task, plan));
+    // Only the external Python bootstrap is qualified. The older Node/Java/React baselines write
+    // customer manifests/tests and then freeze those bytes, so the shared kernel must fail those
+    // stacks before provider dispatch until their external adapters are proven.
+    boolean supported =
+        (kind == GreenfieldBaselinePlan.Kind.PYTHON
+                || kind == GreenfieldBaselinePlan.Kind.NODE_JAVASCRIPT)
+            && !requiredPaths.isEmpty();
     return new GreenfieldBaselinePlan(
         kind,
         runtimeSurface(kind, plan),
@@ -88,8 +95,9 @@ public class GreenfieldBaselineService {
     for (Map.Entry<String, List<String>> entry : pathsByRoot.entrySet()) {
       List<String> relativePaths = entry.getValue().stream().distinct().sorted().toList();
       GreenfieldBaselinePlan.Kind kind = classify(relativePaths, taskText(task));
-      if (kind == GreenfieldBaselinePlan.Kind.UNSUPPORTED) supported = false;
-      baselineFiles(kind, relativePaths)
+      if (kind != GreenfieldBaselinePlan.Kind.PYTHON
+          && kind != GreenfieldBaselinePlan.Kind.NODE_JAVASCRIPT) supported = false;
+      baselineFiles(kind, relativePaths, List.of())
           .forEach((path, content) -> files.put(entry.getKey() + "/" + path, content));
       targets.add(
           new GreenfieldBaselinePlan.RepositoryTarget(
@@ -143,8 +151,11 @@ public class GreenfieldBaselineService {
     if (paths.stream().anyMatch(path -> path.endsWith(".java"))) {
       return GreenfieldBaselinePlan.Kind.JAVA_MAVEN;
     }
-    if (paths.stream().anyMatch(GreenfieldBaselineService::nodePath)) {
+    if (paths.stream().anyMatch(GreenfieldBaselineService::typescriptPath)) {
       return GreenfieldBaselinePlan.Kind.NODE_TYPESCRIPT;
+    }
+    if (paths.stream().anyMatch(GreenfieldBaselineService::javascriptPath)) {
+      return GreenfieldBaselinePlan.Kind.NODE_JAVASCRIPT;
     }
     if (taskText.contains("react") || taskText.contains("frontend") || taskText.contains("vite")) {
       return GreenfieldBaselinePlan.Kind.FRONTEND_REACT;
@@ -162,110 +173,34 @@ public class GreenfieldBaselineService {
   }
 
   private static Map<String, String> baselineFiles(
-      GreenfieldBaselinePlan.Kind kind, List<String> requiredPaths) {
+      GreenfieldBaselinePlan.Kind kind,
+      List<String> requiredPaths,
+      List<String> endpointExpectations) {
     Map<String, String> files = new LinkedHashMap<>();
     switch (kind) {
       case PYTHON -> {
-        files.put("requirements.txt", "pytest\n");
-        files.put("tests/test_executespec_acceptance.py", pythonAcceptanceTest(requiredPaths));
+        files.put(".executespec/bootstrap/python.marker", "python3\n");
+        files.put(
+            ".executespec/bootstrap/test_acceptance.py",
+            pythonAcceptanceTest(requiredPaths, endpointExpectations));
       }
       case NODE_TYPESCRIPT -> {
-        files.put(
-            "package.json",
-            """
-            {
-              "private": true,
-              "type": "module",
-              "scripts": {
-                "build": "tsc --noEmit",
-                "test": "node --import tsx --test tests/*.test.ts"
-              },
-              "devDependencies": {
-                "tsx": "^4.19.0",
-                "typescript": "^5.7.0"
-              }
-            }
-            """);
-        files.put(
-            "tsconfig.json",
-            """
-            {
-              "compilerOptions": {
-                "target": "ES2022",
-                "module": "NodeNext",
-                "moduleResolution": "NodeNext",
-                "strict": true,
-                "noEmit": true
-              },
-              "include": ["src/**/*.ts", "test/**/*.ts", "tests/**/*.ts"]
-            }
-            """);
-        files.put("tests/executespec-acceptance.test.ts", nodeAcceptanceTest(requiredPaths));
+        // Unqualified adapter: coordinator fails before materialization/provider dispatch.
+      }
+      case NODE_JAVASCRIPT -> {
+        String entry =
+            requiredPaths.stream()
+                .filter(GreenfieldBaselineService::javascriptPath)
+                .findFirst()
+                .orElseThrow();
+        files.put(".executespec/bootstrap/node-js.marker", entry + "\n");
+        files.put(".executespec/bootstrap/test_acceptance.mjs", nodeAcceptanceTest(requiredPaths));
       }
       case JAVA_MAVEN -> {
-        files.put(
-            "pom.xml",
-            """
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>generated.executespec</groupId>
-  <artifactId>build-task</artifactId>
-  <version>1.0-SNAPSHOT</version>
-  <properties>
-    <maven.compiler.release>21</maven.compiler.release>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <junit.version>5.11.4</junit.version>
-  </properties>
-  <dependencies>
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <version>${junit.version}</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
-  <build><plugins><plugin>
-    <groupId>org.apache.maven.plugins</groupId>
-    <artifactId>maven-surefire-plugin</artifactId>
-    <version>3.5.2</version>
-  </plugin></plugins></build>
-</project>
-""");
-        files.put(
-            "src/test/java/ExecutespecAcceptanceTest.java", javaAcceptanceTest(requiredPaths));
+        // Unqualified adapter: coordinator fails before materialization/provider dispatch.
       }
       case FRONTEND_REACT -> {
-        files.put(
-            "package.json",
-            """
-            {
-              "private": true,
-              "type": "module",
-              "scripts": {
-                "build": "vite build",
-                "test": "vitest run"
-              },
-              "dependencies": {
-                "@vitejs/plugin-react": "^4.3.0",
-                "vite": "^6.0.0",
-                "react": "^18.3.0",
-                "react-dom": "^18.3.0"
-              },
-              "devDependencies": {
-                "vitest": "^2.1.0",
-                "typescript": "^5.7.0"
-              }
-            }
-            """);
-        files.put(
-            "index.html",
-            "<div id=\"root\"></div><script type=\"module\" src=\"/src/main.tsx\"></script>\n");
-        files.put(
-            "tsconfig.json",
-            "{\"compilerOptions\":{\"target\":\"ES2022\",\"jsx\":\"react-jsx\",\"strict\":true,\"noEmit\":true},\"include\":[\"src\",\"tests\"]}\n");
-        files.put("tests/executespec-acceptance.test.ts", frontendAcceptanceTest(requiredPaths));
+        // Unqualified adapter: coordinator fails before materialization/provider dispatch.
       }
       case EXISTING, MULTI_REPOSITORY, UNSUPPORTED -> {
         // Existing repositories already own their baseline. Unsupported empty repositories fail
@@ -275,7 +210,8 @@ public class GreenfieldBaselineService {
     return Map.copyOf(files);
   }
 
-  private static String pythonAcceptanceTest(List<String> requiredPaths) {
+  private static String pythonAcceptanceTest(
+      List<String> requiredPaths, List<String> endpointExpectations) {
     String assertions =
         requiredPaths.stream()
             .map(
@@ -286,9 +222,56 @@ public class GreenfieldBaselineService {
                         + path
                         + "\"")
             .collect(java.util.stream.Collectors.joining("\n"));
+    String endpointAssertions =
+        endpointExpectations.stream()
+            .map(
+                endpoint -> {
+                  int split = endpoint.indexOf(' ');
+                  String method = endpoint.substring(0, split);
+                  String path = endpoint.substring(split + 1);
+                  return "    assert (\""
+                      + method
+                      + "\", \""
+                      + path
+                      + "\") in routes, \"required route missing: "
+                      + endpoint
+                      + "\"";
+                })
+            .collect(java.util.stream.Collectors.joining("\n"));
+    String entrypoint =
+        requiredPaths.stream()
+            .filter(path -> path.endsWith(".py"))
+            .filter(path -> !path.toLowerCase(Locale.ROOT).contains("test"))
+            .findFirst()
+            .orElse("main.py");
+    String routeTest =
+        endpointExpectations.isEmpty()
+            ? ""
+            : "\n\ndef test_required_http_routes_are_wired():\n"
+                + "    import ast\n"
+                + "    source = Path(\""
+                + entrypoint
+                + "\").read_text(encoding=\"utf-8\")\n"
+                + "    tree = ast.parse(source)\n"
+                + "    routes = set()\n"
+                + "    for node in ast.walk(tree):\n"
+                + "        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):\n"
+                + "            continue\n"
+                + "        for decorator in node.decorator_list:\n"
+                + "            if not isinstance(decorator, ast.Call) or not decorator.args:\n"
+                + "                continue\n"
+                + "            function = decorator.func\n"
+                + "            if not isinstance(function, ast.Attribute):\n"
+                + "                continue\n"
+                + "            path = decorator.args[0]\n"
+                + "            if isinstance(path, ast.Constant) and isinstance(path.value, str):\n"
+                + "                routes.add((function.attr.upper(), path.value))\n"
+                + endpointAssertions
+                + "\n";
     return "from pathlib import Path\n\n\ndef test_required_task_paths_exist():\n"
         + assertions
-        + "\n";
+        + "\n"
+        + routeTest;
   }
 
   private static String nodeAcceptanceTest(List<String> requiredPaths) {
@@ -310,49 +293,9 @@ public class GreenfieldBaselineService {
         + "\n});\n";
   }
 
-  private static String javaAcceptanceTest(List<String> requiredPaths) {
-    String assertions =
-        requiredPaths.stream()
-            .map(
-                path ->
-                    "    assertTrue(Files.exists(Path.of(\""
-                        + path
-                        + "\")), \"required path missing: "
-                        + path
-                        + "\");")
-            .collect(java.util.stream.Collectors.joining("\n"));
-    return "import static org.junit.jupiter.api.Assertions.assertTrue;\n\n"
-        + "import java.nio.file.Files;\n"
-        + "import java.nio.file.Path;\n"
-        + "import org.junit.jupiter.api.Test;\n\n"
-        + "class ExecutespecAcceptanceTest {\n"
-        + "  @Test void requiredTaskPathsExist() {\n"
-        + assertions
-        + "\n  }\n}\n";
-  }
-
-  private static String frontendAcceptanceTest(List<String> requiredPaths) {
-    String assertions =
-        requiredPaths.stream()
-            .map(
-                path ->
-                    "    expect(existsSync(\""
-                        + path
-                        + "\"), \"required path missing: "
-                        + path
-                        + "\").toBe(true);")
-            .collect(java.util.stream.Collectors.joining("\n"));
-    return "import { existsSync } from \"node:fs\";\n"
-        + "import { describe, expect, it } from \"vitest\";\n\n"
-        + "describe(\"task contract\", () => {\n"
-        + "  it(\"has every required task path\", () => {\n"
-        + assertions
-        + "\n  });\n});\n";
-  }
-
   private static List<String> requiredPaths(PlannedTask task) {
-    if (task == null || task.touchesFiles() == null) return List.of();
-    return task.touchesFiles().stream()
+    if (task == null || task.requiredArtifacts() == null) return List.of();
+    return task.requiredArtifacts().stream()
         .filter(path -> path != null && !path.isBlank())
         .map(path -> path.replace('\\', '/'))
         .filter(GreenfieldBaselineService::safeDeclaredPath)
@@ -378,8 +321,14 @@ public class GreenfieldBaselineService {
     try (var children = Files.list(root)) {
       return children.allMatch(
           path ->
-              INFRA_ROOTS.contains(
-                  path.getFileName() == null ? "" : path.getFileName().toString()));
+              Set.of(
+                      ".git",
+                      ".agent-context",
+                      ".executespec",
+                      ".DS_Store",
+                      ".gitignore",
+                      ".gitattributes")
+                  .contains(path.getFileName() == null ? "" : path.getFileName().toString()));
     } catch (IOException failure) {
       throw new IllegalStateException("GREENFIELD_BASELINE_INSPECTION_FAILED", failure);
     }
@@ -423,9 +372,14 @@ public class GreenfieldBaselineService {
     return lower.endsWith(".tsx") || lower.endsWith(".jsx");
   }
 
-  private static boolean nodePath(String path) {
+  private static boolean typescriptPath(String path) {
     String lower = path.toLowerCase(Locale.ROOT);
-    return lower.endsWith(".ts") || lower.endsWith(".js") || lower.endsWith(".mjs");
+    return lower.endsWith(".ts");
+  }
+
+  private static boolean javascriptPath(String path) {
+    String lower = path.toLowerCase(Locale.ROOT);
+    return lower.endsWith(".js") || lower.endsWith(".mjs");
   }
 
   private static String runtimeSurface(GreenfieldBaselinePlan.Kind kind) {
@@ -445,6 +399,7 @@ public class GreenfieldBaselineService {
     return switch (kind) {
       case EXISTING -> "EXISTING_REPOSITORY";
       case PYTHON -> "PYTHON_LIBRARY";
+      case NODE_JAVASCRIPT -> "NODE_JAVASCRIPT_APPLICATION";
       case NODE_TYPESCRIPT -> "NODE_TYPESCRIPT_LIBRARY";
       case JAVA_MAVEN -> "JAVA_MAVEN_MODULE";
       case FRONTEND_REACT -> "REACT_FRONTEND";

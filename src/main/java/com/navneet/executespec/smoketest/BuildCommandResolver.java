@@ -1,5 +1,6 @@
 package com.navneet.executespec.smoketest;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -117,6 +118,13 @@ public class BuildCommandResolver {
 
   private Optional<BuildCommand> inferFromFramework(Path workspaceRoot) {
     // Order matters: more-specific markers checked first.
+    if (exists(workspaceRoot, ".executespec/bootstrap/node-js.marker")) {
+      return Optional.of(
+          build(
+              "node --check " + nodeJavascriptEntry(workspaceRoot),
+              120,
+              "executespec-bootstrap-node-check"));
+    }
     if (exists(workspaceRoot, "pom.xml")) {
       String wrapper = executable(workspaceRoot, "mvnw") ? "./mvnw" : "mvn";
       return Optional.of(build(wrapper + " -q -DskipTests compile", 300, "inferred:maven"));
@@ -151,7 +159,8 @@ public class BuildCommandResolver {
     }
     if (exists(workspaceRoot, "pyproject.toml")
         || exists(workspaceRoot, "setup.py")
-        || exists(workspaceRoot, "requirements.txt")) {
+        || exists(workspaceRoot, "requirements.txt")
+        || exists(workspaceRoot, ".executespec/bootstrap/python.marker")) {
       // Python has no "compile" — use a syntax check across the project as a smoke proxy.
       // Always use python3: python2 is deprecated, many systems (incl. modern macOS)
       // ship only python3, bare `python` often exits 127 with "command not found".
@@ -165,6 +174,17 @@ public class BuildCommandResolver {
       return Optional.of(build("python3 -m compileall -q .", 60, "inferred:python-loose"));
     }
     return Optional.empty();
+  }
+
+  private static String nodeJavascriptEntry(Path workspaceRoot) {
+    try {
+      String entry =
+          Files.readString(workspaceRoot.resolve(".executespec/bootstrap/node-js.marker")).trim();
+      if (entry.matches("[A-Za-z0-9._@+-]+(?:/[A-Za-z0-9._@+-]+)*\\.(?:js|mjs)")) return entry;
+    } catch (IOException ignored) {
+      // The immutable bootstrap digest reports the exact corruption. Keep this resolver fail-red.
+    }
+    return ".executespec/bootstrap/invalid-node-entry.js";
   }
 
   private static boolean executable(Path dir, String name) {

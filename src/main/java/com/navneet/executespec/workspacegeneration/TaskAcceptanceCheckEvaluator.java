@@ -17,7 +17,8 @@ final class TaskAcceptanceCheckEvaluator {
       boolean buildPassed,
       boolean testsExecuted,
       boolean testsPassed,
-      boolean endpointExpectationsPassed) {
+      boolean endpointExpectationsPassed,
+      boolean bootstrapArtifactsMatch) {
     List<Result> results = new ArrayList<>();
     boolean mutationPresent = changedFiles != null && !changedFiles.isEmpty();
     boolean repositoryScopePassed = withinScopes(changedFiles, contract.allowedRepositoryScopes());
@@ -35,6 +36,11 @@ final class TaskAcceptanceCheckEvaluator {
                 result(check, repositoryScopePassed, "changed files stay inside frozen scopes");
             case "REQUIRED_PATHS_PRESENT" ->
                 result(check, requiredPathsPresent, "all frozen required paths exist");
+            case "BOOTSTRAP_ARTIFACT_INTEGRITY" ->
+                result(
+                    check,
+                    bootstrapArtifactsMatch,
+                    "server-owned bootstrap artifacts retain their frozen bytes");
             case "MEANINGFUL_DIFF" ->
                 result(check, mutationPresent, "candidate has a non-empty product diff");
             case "BUILD_PASSED" -> result(check, buildPassed, "exact frozen build passed");

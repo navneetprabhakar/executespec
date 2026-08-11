@@ -40,6 +40,7 @@ final class CoherenceMutableTask {
         .description(description)
         .complexity(base.complexity())
         .touchesFiles(List.copyOf(touchesFiles))
+        .requiredArtifacts(base.requiredArtifacts())
         .dependsOn(List.copyOf(dependsOn))
         .hardConstraints(List.copyOf(hardConstraints))
         .meetsRequirements(List.copyOf(meetsRequirements))

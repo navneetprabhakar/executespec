@@ -20,6 +20,14 @@ Legacy in-place retry is rejected for a task already inside the accepted BUILD p
 change needs the durable correction lifecycle or a fresh run so downstream prefix evidence is not
 silently invalidated.
 
+The replacement BUILD admission path carries a required typed `WorkspaceOrigin` on every
+`ExecutionRequest`, including resume and correction reconstruction. `BuildTaskGenerationCoordinator`
+passes that fact to the bootstrap planner and never infers greenfield state from initialized Git
+metadata. With the shared-loop flag on, unsupported greenfield adapters stop before the BUILD-task
+LLM operation is claimed. Qualified Python and plain Node JavaScript tasks freeze external hidden
+checks plus exact non-no-op commands; the worker directive names public required paths and commands
+but never leaks hidden endpoint targets.
+
 V373 existing-PR admission proves both the durable checkout branch and immutable 40-hex
 `publicationHeadSha`. `WorkspaceInitService.requirePublicationHead` delegates to the focused
 `WorkspaceRepositoryRevisionService` after fresh clone and on crash recovery before
