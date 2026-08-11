@@ -34,6 +34,7 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
@@ -140,6 +141,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             new ObjectMapper(),
             mock(PlatformTransactionManager.class),
             mock(TaskStatusPersistenceService.class),
+            mock(WorkspaceGenerationTaskTransitionService.class),
             gcs,
             archives,
             runs,
@@ -206,6 +208,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             new ObjectMapper(),
             transactionManager(),
             mock(TaskStatusPersistenceService.class),
+            mock(WorkspaceGenerationTaskTransitionService.class),
             gcs,
             archives,
             runs,
@@ -265,6 +268,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             new ObjectMapper(),
             transactionManager(),
             mock(TaskStatusPersistenceService.class),
+            mock(WorkspaceGenerationTaskTransitionService.class),
             gcs,
             mock(WorkspaceGenerationArchiveService.class),
             runs,
@@ -387,7 +391,6 @@ class WorkspaceGenerationRecoveryServiceTest {
       assertThat(Files.readString(nested.resolve("api.txt"))).isEqualTo("api-before\n");
       assertThat(root.resolve("baseline-cache")).doesNotExist();
       assertThat(root.resolve("scratch")).doesNotExist();
-      verify(taskStatuses).reopenForContinuation(runId, "T1", null);
       verify(attempts)
           .recordRecoveryEvidence(
               eq(attemptId),
@@ -424,6 +427,7 @@ class WorkspaceGenerationRecoveryServiceTest {
         .thenReturn(0);
     RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
     when(lease.ownerToken()).thenReturn(recoveryToken);
+    PlatformTransactionManager transactionManager = transactionManager();
     WorkspaceGenerationRecoveryService recovery =
         recoveryService(
             attempts,
@@ -431,13 +435,18 @@ class WorkspaceGenerationRecoveryServiceTest {
             mock(TaskStatusPersistenceService.class),
             mock(WorkspaceIgnoredArtifactGuard.class),
             new AgentProperties(),
-            transactionManager());
+            transactionManager);
 
     assertThatThrownBy(() -> recovery.recover(stale, lease))
         .hasMessageContaining("RECOVERY_CLAIM_FAILED");
 
     verify(attempts, never()).markRecoveredFailure(any(), any(), any(), any(), any(), any(), any());
     verify(lease).close();
+    ArgumentCaptor<TransactionDefinition> definition =
+        ArgumentCaptor.forClass(TransactionDefinition.class);
+    verify(transactionManager).getTransaction(definition.capture());
+    assertThat(definition.getValue().getPropagationBehavior())
+        .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   private WorkspaceGenerationRecoveryService recoveryService(
@@ -454,6 +463,7 @@ class WorkspaceGenerationRecoveryServiceTest {
         new ObjectMapper(),
         transactionManager,
         taskStatuses,
+        mock(WorkspaceGenerationTaskTransitionService.class),
         mock(GcsWorkspaceStore.class),
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
         mock(PipelineRunRepository.class),
@@ -472,6 +482,7 @@ class WorkspaceGenerationRecoveryServiceTest {
         new ObjectMapper(),
         transactionManager(),
         mock(TaskStatusPersistenceService.class),
+        mock(WorkspaceGenerationTaskTransitionService.class),
         mock(GcsWorkspaceStore.class),
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
         runs,

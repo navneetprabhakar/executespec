@@ -238,9 +238,12 @@ public class BuildTaskGenerationCoordinator {
         telemetry.execution(
             effectiveProvider,
             effectiveModel,
-            outcome == null ? "NULL" : outcome.status().name(),
+            outcome == null || outcome.status() == null ? "MALFORMED" : outcome.status().name(),
             iterations,
             usage.costUsd());
+      }
+      if (outcome == null || outcome.status() == null) {
+        throw new IllegalStateException("BUILD_TASK_DISPATCH_OUTCOME_INVALID");
       }
       clearThreadState();
 
@@ -303,7 +306,7 @@ public class BuildTaskGenerationCoordinator {
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
         operations.fail(operation, "BUILD_TASK_VERIFICATION_REJECTED");
         operationClosed = true;
-        return rejectedOutcome(outcome, reason);
+        return BuildTaskAcceptanceOutcomes.rejected(outcome, reason);
       }
 
       generations.beginCheckpoint(prepared);
@@ -333,7 +336,7 @@ public class BuildTaskGenerationCoordinator {
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       operations.complete(operation);
       operationClosed = true;
-      return acceptedOutcome(task, outcome);
+      return BuildTaskAcceptanceOutcomes.accepted(task, outcome);
     } catch (RuntimeException failure) {
       clearThreadState();
       if (failure.getMessage() != null
@@ -403,13 +406,18 @@ public class BuildTaskGenerationCoordinator {
 SERVER-OWNED BUILD ACCEPTANCE CONTRACT (immutable for this task)
 Contract digest: %s
 Runtime surface: %s
+Required proof strength: %s
 Initial failing evidence: %s
 Required paths: %s
 Frozen build command: %s
 Frozen test command: %s
-Files under .executespec/bootstrap are server-owned and immutable. For an HTTP task, publish the
-required method/path inventory in openapi.yaml as deterministic contract evidence; the hidden
-bootstrap test independently checks route declarations in supported source layouts.
+Files under .executespec/bootstrap are server-owned and immutable. Static route declarations or a
+hand-written OpenAPI file do not prove an HTTP service; the server must verify the running
+application before accepting it.
+For a Python HTTP task, requirements.txt is executed offline and may declare only fastapi,
+uvicorn, pydantic, and typing-extensions. The qualified image currently provides FastAPI
+0.115.12, Uvicorn 0.34.3, and Pydantic 2.11.5. Use the Python standard library for persistence;
+do not add a dependency that the frozen runtime kit cannot install.
 Work in an inspect -> edit -> test -> diagnose loop. Do not claim completion until the
 required paths exist, the exact frozen build succeeds, and a required non-empty test suite
 succeeds. Planner text cannot replace or weaken these checks.
@@ -417,6 +425,7 @@ succeeds. Planner text cannot replace or weaken these checks.
         .formatted(
             contract.digest(),
             contract.runtimeSurface(),
+            contract.requiredProofStrength(),
             initialFailure.code() + ": " + initialFailure.detail(),
             contract.requiredPaths(),
             contract.buildCommand() == null ? "UNAVAILABLE" : contract.buildCommand().command(),
@@ -454,36 +463,7 @@ succeeds. Planner text cannot replace or weaken these checks.
   }
 
   public static boolean acceptanceFailed(TaskOutcome outcome) {
-    if (outcome == null) return true;
-    return switch (outcome.status()) {
-      case SUCCESS, SUCCESS_AFTER_RETRY -> false;
-      case COMPLETED_WITH_WARNING, WORKER_FAILED, SKIPPED -> true;
-    };
-  }
-
-  private static TaskOutcome acceptedOutcome(PlannedTask task, TaskOutcome source) {
-    if (source != null
-        && (source.status() == TaskOutcome.Status.SUCCESS
-            || source.status() == TaskOutcome.Status.SUCCESS_AFTER_RETRY)
-        && Boolean.TRUE.equals(source.smokeTestPassed())) {
-      return source;
-    }
-    boolean retried = source != null && source.retryAttempted();
-    return TaskOutcome.builder()
-        .taskId(source == null ? task.id() : source.taskId())
-        .taskTitle(source == null ? task.title() : source.taskTitle())
-        .status(retried ? TaskOutcome.Status.SUCCESS_AFTER_RETRY : TaskOutcome.Status.SUCCESS)
-        .workerOutcome(source == null ? null : source.workerOutcome())
-        .retryAttempted(retried)
-        .retryWorkerOutcome(source == null ? null : source.retryWorkerOutcome())
-        .smokeTestPassed(true)
-        .smokeTestExitCode(0)
-        .smokeTestOutput(source == null ? null : source.smokeTestOutput())
-        .totalLatencyMs(source == null ? 0 : source.totalLatencyMs())
-        .toolCallsDispatched(source == null ? 0 : source.toolCallsDispatched())
-        .dispatchedProvider(source == null ? null : source.dispatchedProvider())
-        .dispatchedModel(source == null ? null : source.dispatchedModel())
-        .build();
+    return BuildTaskAcceptanceOutcomes.failed(outcome);
   }
 
   public static boolean emitStopIfUnaccepted(
@@ -492,33 +472,7 @@ succeeds. Planner text cannot replace or weaken these checks.
       PlannedTask task,
       int remaining,
       SseBroadcaster broadcaster) {
-    if (!acceptanceFailed(outcome)) return false;
-    log.warn(
-        "BUILD acceptance stop run={} task={} status={} smokePassed={} remaining={}",
-        runId,
-        task.id(),
-        outcome.status(),
-        outcome.smokeTestPassed(),
-        remaining);
-    String failure =
-        "Task acceptance failed: "
-            + outcome.status()
-            + (Boolean.FALSE.equals(outcome.smokeTestPassed())
-                ? " (deterministic verification failed)"
-                : " (completion was not proven)");
-    broadcaster.emit(
-        runId,
-        RunEvent.log(
-            runId,
-            task.id(),
-            remaining > 0
-                ? failure
-                    + "; skipping "
-                    + remaining
-                    + " dependent task"
-                    + (remaining == 1 ? "" : "s")
-                : failure + "; execution cannot enter review as accepted"));
-    return true;
+    return BuildTaskAcceptanceOutcomes.emitStop(outcome, runId, task, remaining, broadcaster, log);
   }
 
   static void requireServerOwnedWorkspace(Boolean localHandsMode) {
@@ -567,30 +521,6 @@ succeeds. Planner text cannot replace or weaken these checks.
 
   private static boolean sharedLoopContract(TaskAcceptanceContract contract) {
     return contract != null && contract.schemaVersion() >= 2;
-  }
-
-  private static TaskOutcome rejectedOutcome(TaskOutcome outcome, String reason) {
-    return TaskOutcome.builder()
-        .taskId(outcome.taskId())
-        .taskTitle(outcome.taskTitle())
-        .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
-        .workerOutcome(outcome.workerOutcome())
-        .retryAttempted(outcome.retryAttempted())
-        .retryWorkerOutcome(outcome.retryWorkerOutcome())
-        .smokeTestPassed(false)
-        .smokeTestExitCode(outcome.smokeTestExitCode())
-        .smokeTestOutput(
-            (outcome.smokeTestOutput() == null ? "" : outcome.smokeTestOutput() + "\n") + reason)
-        .totalLatencyMs(outcome.totalLatencyMs())
-        .toolCallsDispatched(outcome.toolCallsDispatched())
-        .dispatchedProvider(outcome.dispatchedProvider())
-        .dispatchedModel(outcome.dispatchedModel())
-        .goalDonenessDecision(outcome.goalDonenessDecision())
-        .continuationDecision(outcome.continuationDecision())
-        .continuationAction(outcome.continuationAction())
-        .continuationActionProvider(outcome.continuationActionProvider())
-        .continuationActionModel(outcome.continuationActionModel())
-        .build();
   }
 
   @FunctionalInterface

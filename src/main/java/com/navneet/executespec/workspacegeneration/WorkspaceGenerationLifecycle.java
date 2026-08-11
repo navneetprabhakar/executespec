@@ -435,6 +435,11 @@ public class WorkspaceGenerationLifecycle {
             || (result.testsExecuted() && result.testsPassed() <= 0))) {
       throw new IllegalArgumentException("WORKSPACE_GENERATION_PASSING_RECEIPT_INVALID");
     }
+    AcceptanceProofStrength required = proofStrength(result.requiredProofStrength());
+    AcceptanceProofStrength achieved = proofStrength(result.achievedProofStrength());
+    if ("PASSED".equals(result.outcome()) && !achieved.satisfies(required)) {
+      throw new IllegalArgumentException("WORKSPACE_GENERATION_PROOF_STRENGTH_INSUFFICIENT");
+    }
     if (result.startedAt() == null
         || result.completedAt() == null
         || result.completedAt().isBefore(result.startedAt())) {
@@ -448,6 +453,14 @@ public class WorkspaceGenerationLifecycle {
   private static int nonNegative(int value, String label) {
     if (value < 0) throw new IllegalArgumentException(label + " must be non-negative");
     return value;
+  }
+
+  private static AcceptanceProofStrength proofStrength(String value) {
+    try {
+      return AcceptanceProofStrength.valueOf(value);
+    } catch (RuntimeException invalid) {
+      throw new IllegalArgumentException("WORKSPACE_GENERATION_PROOF_STRENGTH_INVALID", invalid);
+    }
   }
 
   private String writeRepositories(
@@ -550,6 +563,8 @@ public class WorkspaceGenerationLifecycle {
       int testsErrors,
       int testsSkipped,
       String evidenceJson,
+      String requiredProofStrength,
+      String achievedProofStrength,
       Instant startedAt,
       Instant completedAt) {}
 }

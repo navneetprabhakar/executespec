@@ -119,7 +119,7 @@ class TaskAcceptanceContractResolverTest {
   }
 
   @Test
-  void httpContractFreezesOwnedMethodPathsAndRequiresOpenApiVerification() {
+  void httpContractFreezesOwnedMethodPathsAndRequiresRuntimeProof() {
     PlannedTask task =
         PlannedTask.builder()
             .id("T1")
@@ -149,13 +149,12 @@ class TaskAcceptanceContractResolverTest {
         resolver.resolveFailureFirst(task, plan, 0, workspace, baseline);
 
     assertThat(contract.runtimeSurface()).isEqualTo("HTTP_SERVICE");
+    assertThat(contract.requiredProofStrength())
+        .isEqualTo(AcceptanceProofStrength.RUNTIME_CONTRACT);
     assertThat(contract.endpointExpectations()).containsExactly("GET /health", "POST /items");
     assertThat(contract.finalChecks())
         .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
-        .contains("ENDPOINT_CONTRACT");
-    assertThat(contract.finalChecks())
-        .filteredOn(check -> "ENDPOINT_CONTRACT".equals(check.kind()))
-        .allMatch(TaskAcceptanceContract.AcceptanceCheck::hidden);
+        .doesNotContain("ENDPOINT_CONTRACT");
   }
 
   @Test

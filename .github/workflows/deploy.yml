@@ -123,6 +123,7 @@ jobs:
           echo "${JAR_SHA256}  ${JAR_BASENAME}" > "$JAR_CHECKSUM_FILE"
           echo "JAR_PATH=$JAR" >> "$GITHUB_ENV"
           echo "JAR_SHA256=$JAR_SHA256" >> "$GITHUB_ENV"
+          echo "DEPLOY_ATTEMPT_ID=${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
           echo "JAR_CHECKSUM_FILE=$JAR_CHECKSUM_FILE" >> "$GITHUB_ENV"
           echo "Deploy artifact: ${JAR_BASENAME}" >> "$GITHUB_STEP_SUMMARY"
           echo "SHA-256: \`${JAR_SHA256}\`" >> "$GITHUB_STEP_SUMMARY"
@@ -182,15 +183,15 @@ jobs:
               -h "x-goog-meta-sha256:${{ env.JAR_SHA256 }}" \
               cp "${{ env.JAR_PATH }}" "$JAR_URI"
           fi
-          # Capture the marker we are about to overwrite so a failed post-deploy health check can
-          # restore it (see the "Revert CURRENT_SHA on failed deploy" step). CURRENT_SHA is bumped
-          # here, before health verification, so the deploy can proceed — but a crash-looping build
-          # (e.g. the 2026-08-09 filter->JPA boot crash) would otherwise leave CURRENT_SHA pointing
-          # at a build that never passed health checks, misleading the next operator/preflight.
+          # Capture the exact pointer generation for a later compare-and-set. The pointer is not
+          # changed until the remote deploy command has completed, and it is never blindly reverted
+          # after the host may already be running the candidate.
           PREVIOUS_CURRENT_SHA=$(gsutil cat "$DEPLOY_BUCKET/CURRENT_SHA" 2>/dev/null | tr -d '\r\n' || echo "")
+          PREVIOUS_CURRENT_GENERATION=$(gsutil stat "$DEPLOY_BUCKET/CURRENT_SHA" 2>/dev/null \
+            | awk '/Generation:/ { print $2; exit }' || true)
           echo "PREVIOUS_CURRENT_SHA=$PREVIOUS_CURRENT_SHA" >> "$GITHUB_ENV"
+          echo "PREVIOUS_CURRENT_GENERATION=$PREVIOUS_CURRENT_GENERATION" >> "$GITHUB_ENV"
           echo "CURRENT_SHA_BUCKET=$DEPLOY_BUCKET/CURRENT_SHA" >> "$GITHUB_ENV"
-          echo "${{ env.TARGET_SHA }}" | gsutil cp - "$DEPLOY_BUCKET/CURRENT_SHA"
           echo "Ready: $JAR_URI (sha256 ${{ env.JAR_SHA256 }})"
 
       # ── Set static instance name (standalone VM — no MIG) ──────────────
@@ -456,6 +457,8 @@ jobs:
           SERVICE
 
       - name: Deploy JAR to GCE (${{ env.DEPLOY_ENV }})
+        id: activate_release
+        continue-on-error: true
         run: |
           REMOTE_ENV_PATCH="/tmp/env-patch-${{ github.run_id }}-${{ github.run_attempt }}.sh"
           REMOTE_JAR="/tmp/app-${{ env.TARGET_SHA }}.jar"
@@ -511,8 +514,21 @@ jobs:
               cd /opt/app/releases
               sudo sha256sum -c app-${{ env.TARGET_SHA }}.jar.sha256
               sudo bash \"\$REMOTE_ENV_PATCH\" '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy' '${{ env.DEPLOY_ENV }}'
+              sudo sed -i '/^EXECUTESPEC_RELEASE_SOURCE_SHA=/d; /^EXECUTESPEC_RELEASE_ARTIFACT_SHA256=/d; /^EXECUTESPEC_RELEASE_ATTEMPT_ID=/d' /opt/app/executespec.env
+              printf '%s\n' \
+                'EXECUTESPEC_RELEASE_SOURCE_SHA=${{ env.TARGET_SHA }}' \
+                'EXECUTESPEC_RELEASE_ARTIFACT_SHA256=${{ env.JAR_SHA256 }}' \
+                'EXECUTESPEC_RELEASE_ATTEMPT_ID=${{ env.DEPLOY_ATTEMPT_ID }}' \
+                | sudo tee -a /opt/app/executespec.env >/dev/null
               sudo ln -sf /opt/app/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/app.jar
-              echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA
+              RELEASE_MARKER_TMP='/opt/app/.RUNNING_RELEASE.${{ env.DEPLOY_ATTEMPT_ID }}.tmp'
+              printf '%s\n' \
+                'source_sha=${{ env.TARGET_SHA }}' \
+                'artifact_sha256=${{ env.JAR_SHA256 }}' \
+                'attempt_id=${{ env.DEPLOY_ATTEMPT_ID }}' \
+                | sudo tee "\$RELEASE_MARKER_TMP" >/dev/null
+              sudo mv "\$RELEASE_MARKER_TMP" /opt/app/RUNNING_RELEASE
+              echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA >/dev/null
               if [ '${{ env.DEPLOY_ENV }}' = 'benchmark' ]; then
                 sudo mv \"\$REMOTE_SERVICE\" /etc/systemd/system/executespec.service
                 sudo systemctl daemon-reload
@@ -522,20 +538,27 @@ jobs:
               echo 'Deploy done — service restarting'
             "
 
-      # ── Prove the host marker, then wait for app boot ─────────────────
-      - name: Verify deployed RUNNING_SHA
+      # An SSH response is not activation authority: the connection can disappear after the host
+      # switched. Re-read the atomic source/artifact/attempt tuple even when activation errored.
+      - name: Reconcile host release candidate
+        if: always()
         run: |
-          RUNNING_SHA=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+          EXPECTED_MARKER=$(printf '%s\n' \
+            'source_sha=${{ env.TARGET_SHA }}' \
+            'artifact_sha256=${{ env.JAR_SHA256 }}' \
+            'attempt_id=${{ env.DEPLOY_ATTEMPT_ID }}')
+          OBSERVED_MARKER=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
-            --command="sudo cat /opt/app/RUNNING_SHA" | tr -d '\r\n')
-          echo "RUNNING_SHA=${RUNNING_SHA}"
-          if [ "$RUNNING_SHA" != "${{ env.TARGET_SHA }}" ]; then
-            echo "::error::RUNNING_SHA mismatch: expected ${{ env.TARGET_SHA }}, observed ${RUNNING_SHA:-missing}"
+            --command="sudo cat /opt/app/RUNNING_RELEASE" | tr -d '\r')
+          if [ "$OBSERVED_MARKER" != "$EXPECTED_MARKER" ]; then
+            echo "::error::Host release tuple does not identify this exact deployment attempt."
+            printf 'expected:\n%s\nobserved:\n%s\n' "$EXPECTED_MARKER" "${OBSERVED_MARKER:-missing}"
             exit 1
           fi
+          echo "Host attests exact source/artifact/attempt tuple; activation outcome was ${{ steps.activate_release.outcome }}."
 
       - name: Wait for app startup
         run: sleep 45
@@ -581,6 +604,35 @@ jobs:
           echo "Health check FAILED after 20 attempts"
           exit 1
 
+      # /proc/<MainPID>/environ is bound to the JVM that passed health. A mutable host marker alone
+      # cannot prove which process answered the request.
+      - name: Verify running JVM release identity
+        run: |
+          EXPECTED=$(printf '%s\n' \
+            'EXECUTESPEC_RELEASE_SOURCE_SHA=${{ env.TARGET_SHA }}' \
+            'EXECUTESPEC_RELEASE_ARTIFACT_SHA256=${{ env.JAR_SHA256 }}' \
+            'EXECUTESPEC_RELEASE_ATTEMPT_ID=${{ env.DEPLOY_ATTEMPT_ID }}' | sort)
+          OBSERVED=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo tr '\\0' '\\n' < /proc/\$PID/environ | grep '^EXECUTESPEC_RELEASE_' | sort" \
+            | tr -d '\r')
+          if [ "$OBSERVED" != "$EXPECTED" ]; then
+            echo "::error::Healthy JVM release tuple mismatch."
+            printf 'expected:\n%s\nobserved:\n%s\n' "$EXPECTED" "${OBSERVED:-missing}"
+            exit 1
+          fi
+          echo "Healthy JVM is the exact source/artifact/attempt candidate."
+
+      # Publish only after the restarted JVM itself is proven. A lost GCS response is reconciled
+      # idempotently by accepting an already-equal pointer; a stale concurrent writer is rejected.
+      - name: Publish verified live release pointer
+        if: env.DEPLOY_ENV != 'benchmark'
+        run: |
+          bash scripts/publish-release-pointer.sh
+
       # ── Provider key verification ────────────────────────────────────────
       # A deploy that lands without a valid key for the providers it routes to 401s EVERY run —
       # invisible to the authenticated customer (it surfaces as an opaque upstream auth error, e.g.
@@ -619,23 +671,6 @@ jobs:
             exit 1
           fi
           echo "Required provider keys present."
-
-      # ── Revert CURRENT_SHA on a failed deploy ────────────────────────────
-      # CURRENT_SHA is bumped to the new build before health verification (so the deploy can
-      # proceed), so a failed health check would otherwise leave the marker pointing at a broken
-      # build. If any step above failed, restore the marker to the value captured immediately before
-      # it was overwritten. No-op if we never got as far as overwriting it (PREVIOUS_CURRENT_SHA
-      # unset) or there was no prior value (first deploy).
-      - name: Revert CURRENT_SHA on failed deploy
-        if: failure()
-        run: |
-          if [ -z "${PREVIOUS_CURRENT_SHA:-}" ] || [ -z "${CURRENT_SHA_BUCKET:-}" ]; then
-            echo "CURRENT_SHA was not overwritten this run (or had no prior value); nothing to revert."
-            exit 0
-          fi
-          echo "Deploy failed — reverting CURRENT_SHA to the previous value: $PREVIOUS_CURRENT_SHA"
-          printf '%s' "$PREVIOUS_CURRENT_SHA" | gsutil cp - "$CURRENT_SHA_BUCKET"
-          echo "CURRENT_SHA restored to $PREVIOUS_CURRENT_SHA."
 
       # ── Dump logs on failure ─────────────────────────────────────────────
       - name: Dump app logs (on failure)

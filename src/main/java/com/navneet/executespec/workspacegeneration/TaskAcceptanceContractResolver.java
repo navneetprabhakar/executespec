@@ -122,11 +122,6 @@ public class TaskAcceptanceContractResolver {
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck(
             "TESTS_PASSED", "candidate", "OPTIONAL".equals(testRequirement)));
-    if (!endpoints.isEmpty()) {
-      finalChecks.add(
-          new TaskAcceptanceContract.AcceptanceCheck("ENDPOINT_CONTRACT", "openapi", true));
-    }
-
     Map<String, Object> unsigned = new java.util.LinkedHashMap<>();
     unsigned.put("schemaVersion", 2);
     unsigned.put("taskId", task.id());
@@ -136,6 +131,9 @@ public class TaskAcceptanceContractResolver {
     unsigned.put("testRequirement", testRequirement);
     unsigned.put("declaredTouchPaths", touchPaths);
     unsigned.put("runtimeSurface", baseline.runtimeSurface());
+    AcceptanceProofStrength requiredProofStrength =
+        AcceptanceProofStrength.requiredFor(baseline.runtimeSurface(), testRequirement);
+    unsigned.put("requiredProofStrength", requiredProofStrength);
     unsigned.put("baselineKind", baseline.kind().name());
     unsigned.put("buildCommand", build);
     unsigned.put("testCommand", test);
@@ -163,6 +161,7 @@ public class TaskAcceptanceContractResolver {
         testRequirement,
         touchPaths,
         baseline.runtimeSurface(),
+        requiredProofStrength,
         baseline.kind().name(),
         build,
         test,

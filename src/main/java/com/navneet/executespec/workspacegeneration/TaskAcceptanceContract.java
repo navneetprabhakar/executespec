@@ -13,6 +13,7 @@ public record TaskAcceptanceContract(
     String testRequirement,
     List<String> declaredTouchPaths,
     String runtimeSurface,
+    AcceptanceProofStrength requiredProofStrength,
     String baselineKind,
     ResolvedCommand buildCommand,
     ResolvedCommand testCommand,
@@ -41,6 +42,56 @@ public record TaskAcceptanceContract(
         immutableBootstrapArtifactDigests == null
             ? Map.of()
             : Map.copyOf(immutableBootstrapArtifactDigests);
+    requiredProofStrength =
+        requiredProofStrength == null
+            ? AcceptanceProofStrength.requiredFor(runtimeSurface, testRequirement)
+            : requiredProofStrength;
+  }
+
+  /** Compatibility constructor for callers created before proof strength became explicit. */
+  public TaskAcceptanceContract(
+      int schemaVersion,
+      String taskId,
+      int taskIndex,
+      String verificationPolicy,
+      String buildRequirement,
+      String testRequirement,
+      List<String> declaredTouchPaths,
+      String runtimeSurface,
+      String baselineKind,
+      ResolvedCommand buildCommand,
+      ResolvedCommand testCommand,
+      List<String> requiredPaths,
+      List<String> requiredTestSelectors,
+      List<String> endpointExpectations,
+      boolean meaningfulDiffRequired,
+      List<String> allowedRepositoryScopes,
+      List<AcceptanceCheck> prefixChecks,
+      List<AcceptanceCheck> finalChecks,
+      Map<String, String> immutableBootstrapArtifactDigests,
+      String digest) {
+    this(
+        schemaVersion,
+        taskId,
+        taskIndex,
+        verificationPolicy,
+        buildRequirement,
+        testRequirement,
+        declaredTouchPaths,
+        runtimeSurface,
+        AcceptanceProofStrength.requiredFor(runtimeSurface, testRequirement),
+        baselineKind,
+        buildCommand,
+        testCommand,
+        requiredPaths,
+        requiredTestSelectors,
+        endpointExpectations,
+        meaningfulDiffRequired,
+        allowedRepositoryScopes,
+        prefixChecks,
+        finalChecks,
+        immutableBootstrapArtifactDigests,
+        digest);
   }
 
   /** Compatibility constructor for schema-v2 fixtures created before bootstrap digest binding. */
@@ -73,6 +124,7 @@ public record TaskAcceptanceContract(
         testRequirement,
         declaredTouchPaths,
         runtimeSurface,
+        AcceptanceProofStrength.requiredFor(runtimeSurface, testRequirement),
         baselineKind,
         buildCommand,
         testCommand,
@@ -106,6 +158,7 @@ public record TaskAcceptanceContract(
         testRequirement,
         declaredTouchPaths,
         "UNSPECIFIED",
+        AcceptanceProofStrength.requiredFor("UNSPECIFIED", testRequirement),
         "LEGACY",
         null,
         null,

@@ -39,6 +39,7 @@ public class TaskAcceptanceVerifier {
   private final TestCommandResolver testCommands;
   private final BuildProjectTool buildProjectTool;
   private final WorkspaceTestRunner testRunner;
+  private final PythonHttpRuntimeAcceptanceService pythonHttpRuntime;
   private final ObjectMapper objectMapper;
 
   /**
@@ -81,18 +82,6 @@ public class TaskAcceptanceVerifier {
           "No executable server-resolved test command is available",
           null,
           List.of());
-    }
-    if (!contract.endpointExpectations().isEmpty()
-        && !endpointExpectationsPassed(
-            context.workspaceRoot(),
-            contract.allowedRepositoryScopes(),
-            contract.endpointExpectations())) {
-      return new InitialFailure(
-          "FAILURE_OBSERVED",
-          "ENDPOINT_CONTRACT_UNSATISFIED",
-          "The admitted OpenAPI contract does not declare every required method/path",
-          null,
-          contract.endpointExpectations());
     }
     List<String> missing = missingRequiredPaths(context.workspaceRoot(), contract.requiredPaths());
     if (!missing.isEmpty()) {
@@ -218,28 +207,74 @@ public class TaskAcceptanceVerifier {
             && exactResolvedBuild
             && frozenBuildMatches
             && requiredPathsPresent;
+    boolean bootstrapArtifactsMatch = bootstrapArtifactsMatch(context.workspaceRoot(), contract);
     String outcome;
 
+    boolean pythonHttpRuntimeRequired =
+        "HTTP_SERVICE".equals(contract.runtimeSurface())
+            && "PYTHON".equals(contract.baselineKind())
+            && !contract.endpointExpectations().isEmpty();
+    Optional<PythonHttpRuntimeAcceptanceService.Result> runtimeResult = Optional.empty();
     Optional<DetailedResult> testResult = Optional.empty();
-    if (buildPassed && test.isPresent()) {
+    if (buildPassed && pythonHttpRuntimeRequired && bootstrapArtifactsMatch) {
+      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+          context.runId());
+      runtimeResult =
+          Optional.of(pythonHttpRuntime.verify(context.runId(), context.workspaceRoot()));
+    } else if (buildPassed && test.isPresent()) {
       com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
           context.runId());
       testResult = testRunner.runTestsDetailed(context.runId(), context.workspaceRoot());
     }
-    TestExecutionSummary summary = testResult.map(DetailedResult::summary).orElse(null);
-    boolean testsExecuted = testResult.isPresent();
-    boolean testsPassed =
-        summary != null
-            && testResult.get().exitCode() == 0
-            && summary.getTotalTests() > 0
-            && summary.getFailed() == 0
-            && summary.getErrors() == 0;
-    boolean bootstrapArtifactsMatch = bootstrapArtifactsMatch(context.workspaceRoot(), contract);
-    boolean endpointExpectationsPassed =
-        endpointExpectationsPassed(
-            context.workspaceRoot(),
-            contract.allowedRepositoryScopes(),
-            contract.endpointExpectations());
+    TestExecutionSummary summary;
+    boolean testsExecuted;
+    boolean testsPassed;
+    if (runtimeResult.isPresent()) {
+      summary = summary(runtimeResult.get());
+      testsExecuted = runtimeResult.get().executed();
+      testsPassed = runtimeResult.get().passed();
+    } else {
+      summary = testResult.map(DetailedResult::summary).orElse(null);
+      testsExecuted = testResult.isPresent();
+      testsPassed =
+          summary != null
+              && testResult.isPresent()
+              && testResult.get().exitCode() == 0
+              && summary.getTotalTests() > 0
+              && summary.getFailed() == 0
+              && summary.getErrors() == 0;
+    }
+    boolean serverOwnedRuntimeCommand =
+        pythonHttpRuntimeRequired
+            && contract.testCommand() != null
+            && "executespec-bootstrap-pytest".equals(contract.testCommand().source())
+            && contract
+                .testCommand()
+                .command()
+                .contains(".executespec/bootstrap/test_acceptance.py")
+            && contract
+                .immutableBootstrapArtifactDigests()
+                .containsKey(".executespec/bootstrap/test_acceptance.py")
+            && runtimeResult
+                .map(
+                    result ->
+                        PythonHttpRuntimeAcceptanceService.RUNTIME_COMMAND.equals(
+                            result.evidence().get("runtimeCommand")))
+                .orElse(false);
+    boolean runtimeContractExecuted =
+        serverOwnedRuntimeCommand
+            && runtimeResult.map(PythonHttpRuntimeAcceptanceService.Result::executed).orElse(false);
+    boolean runtimeContractPassed =
+        runtimeContractExecuted
+            && runtimeResult.map(PythonHttpRuntimeAcceptanceService.Result::passed).orElse(false);
+    AcceptanceProofPolicy.Decision proof =
+        AcceptanceProofPolicy.evaluate(
+            contract.requiredProofStrength(),
+            buildPassed,
+            testsExecuted,
+            testsPassed,
+            runtimeContractPassed,
+            false);
     TaskAcceptanceCheckEvaluator.Evaluation checkEvaluation =
         TaskAcceptanceCheckEvaluator.evaluate(
             contract,
@@ -250,10 +285,14 @@ public class TaskAcceptanceVerifier {
             buildPassed,
             testsExecuted,
             testsPassed,
-            endpointExpectationsPassed,
+            runtimeContractPassed,
             bootstrapArtifactsMatch);
 
-    if (schemaV2 && checkEvaluation.status() == TaskAcceptanceCheckEvaluator.Status.FAILED) {
+    if (runtimeResult
+        .map(result -> result.status() == PythonHttpRuntimeAcceptanceService.Status.FAILED)
+        .orElse(false)) {
+      outcome = "FAILED";
+    } else if (schemaV2 && checkEvaluation.status() == TaskAcceptanceCheckEvaluator.Status.FAILED) {
       outcome = "FAILED";
     } else if (schemaV2
         && checkEvaluation.status() == TaskAcceptanceCheckEvaluator.Status.UNAVAILABLE) {
@@ -270,6 +309,8 @@ public class TaskAcceptanceVerifier {
       outcome = testsExecuted ? "FAILED" : "UNAVAILABLE";
     } else if (test.isPresent() && testsExecuted && !testsPassed) {
       outcome = "FAILED";
+    } else if (!proof.sufficient()) {
+      outcome = "UNAVAILABLE";
     } else {
       outcome = "PASSED";
     }
@@ -302,7 +343,21 @@ public class TaskAcceptanceVerifier {
     evidence.put("testsErrors", summary == null ? 0 : summary.getErrors());
     evidence.put("testsSkipped", summary == null ? 0 : summary.getSkipped());
     evidence.put("endpointExpectations", contract.endpointExpectations());
-    evidence.put("endpointExpectationsPassed", endpointExpectationsPassed);
+    evidence.put("runtimeContractExecuted", runtimeContractExecuted);
+    evidence.put("runtimeContractPassed", runtimeContractPassed);
+    evidence.put("serverOwnedRuntimeCommand", serverOwnedRuntimeCommand);
+    evidence.put(
+        "runtimeAcceptanceStatus",
+        runtimeResult.map(result -> result.status().name()).orElse(null));
+    evidence.put(
+        "runtimeAcceptanceDetail",
+        runtimeResult.map(PythonHttpRuntimeAcceptanceService.Result::detail).orElse(null));
+    evidence.put(
+        "runtimeAcceptanceEvidence",
+        runtimeResult.map(PythonHttpRuntimeAcceptanceService.Result::evidence).orElse(Map.of()));
+    evidence.put("requiredProofStrength", proof.required().name());
+    evidence.put("achievedProofStrength", proof.achieved().name());
+    evidence.put("proofStrengthSufficient", proof.sufficient());
     evidence.put("acceptanceCheckOutcome", checkEvaluation.status().name());
     evidence.put("acceptanceCheckResults", checkEvaluation.results());
 
@@ -317,6 +372,8 @@ public class TaskAcceptanceVerifier {
         summary == null ? 0 : summary.getErrors(),
         summary == null ? 0 : summary.getSkipped(),
         json(evidence),
+        proof.required().name(),
+        proof.achieved().name(),
         started,
         Instant.now());
   }
@@ -327,6 +384,18 @@ public class TaskAcceptanceVerifier {
     } catch (JsonProcessingException impossible) {
       throw new IllegalStateException("TASK_ACCEPTANCE_EVIDENCE_SERIALIZATION_FAILED", impossible);
     }
+  }
+
+  private static TestExecutionSummary summary(PythonHttpRuntimeAcceptanceService.Result result) {
+    return TestExecutionSummary.builder()
+        .totalTests(result.testsTotal())
+        .passed(result.testsPassed())
+        .failed(result.testsFailed())
+        .errors(result.testsErrors())
+        .skipped(0)
+        .executionVerified(result.executed())
+        .unverifiedReason(result.executed() ? null : result.detail())
+        .build();
   }
 
   private static boolean matches(
@@ -372,58 +441,6 @@ public class TaskAcceptanceVerifier {
         + value.substring(value.length() - 4_000);
   }
 
-  private boolean endpointExpectationsPassed(
-      Path workspaceRoot, List<String> scopes, List<String> expectations) {
-    if (expectations == null || expectations.isEmpty()) return true;
-    Path workspace = workspaceRoot.toAbsolutePath().normalize();
-    List<String> roots = scopes == null || scopes.isEmpty() ? List.of(".") : scopes;
-    List<Path> candidates =
-        roots.stream()
-            .flatMap(
-                root ->
-                    java.util.stream.Stream.of("openapi.yaml", "openapi.yml", "openapi.json")
-                        .map(name -> workspace.resolve(root).resolve(name).normalize()))
-            .filter(path -> path.startsWith(workspace))
-            .filter(Files::isRegularFile)
-            .toList();
-    for (Path candidate : candidates) {
-      try {
-        if (Files.size(candidate) > 1_000_000) continue;
-        String body = Files.readString(candidate);
-        Object parsed =
-            candidate.toString().endsWith(".json")
-                ? objectMapper.readValue(body, Object.class)
-                : com.navneet.executespec.util.SafeYamlLoader.load(body);
-        if (parsed instanceof Map<?, ?> root
-            && root.get("paths") instanceof Map<?, ?> paths
-            && expectations.stream()
-                .allMatch(expectation -> endpointDeclared(paths, expectation))) {
-          return true;
-        }
-      } catch (Exception ignoredMalformedContract) {
-        // Another candidate may still be the admitted contract; malformed files never pass.
-      }
-    }
-    return false;
-  }
-
-  private static boolean endpointDeclared(Map<?, ?> paths, String expectation) {
-    if (expectation == null) return false;
-    int separator = expectation.indexOf(' ');
-    if (separator <= 0 || separator == expectation.length() - 1) return false;
-    String method = expectation.substring(0, separator).toLowerCase(java.util.Locale.ROOT);
-    String path = expectation.substring(separator + 1);
-    String canonical = HttpEndpointContract.canonicalPath(path);
-    return paths.entrySet().stream()
-        .anyMatch(
-            entry ->
-                entry.getKey() instanceof String candidate
-                    && java.util.Objects.equals(
-                        canonical, HttpEndpointContract.canonicalPath(candidate))
-                    && entry.getValue() instanceof Map<?, ?> operations
-                    && operations.containsKey(method));
-  }
-
   private static boolean bootstrapArtifactsMatch(
       Path workspaceRoot, TaskAcceptanceContract contract) {
     Path root = workspaceRoot.toAbsolutePath().normalize();
@@ -432,7 +449,9 @@ public class TaskAcceptanceVerifier {
       try {
         Path path = root.resolve(artifact.getKey()).normalize();
         if (!path.startsWith(root)
-            || !Files.isRegularFile(path)
+            || !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+            || Files.isSymbolicLink(path)
+            || hasSymlinkComponent(root, path)
             || !artifact.getValue().equals(DigestUtils.sha256Hex(Files.readAllBytes(path)))) {
           return false;
         }
@@ -441,6 +460,15 @@ public class TaskAcceptanceVerifier {
       }
     }
     return true;
+  }
+
+  private static boolean hasSymlinkComponent(Path root, Path path) {
+    Path current = root;
+    for (Path segment : root.relativize(path)) {
+      current = current.resolve(segment);
+      if (Files.isSymbolicLink(current)) return true;
+    }
+    return false;
   }
 
   public record InitialFailure(

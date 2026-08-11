@@ -196,6 +196,27 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "recovery_started_at")
   private Instant recoveryStartedAt;
 
+  @Column(name = "task_transition_kind", length = 24)
+  private String taskTransitionKind;
+
+  @Column(name = "task_transition_state", length = 16)
+  private String taskTransitionState;
+
+  @Column(name = "task_transition_expected_status", length = 64)
+  private String taskTransitionExpectedStatus;
+
+  @Column(name = "task_transition_expected_recovery_attempt")
+  private Integer taskTransitionExpectedRecoveryAttempt;
+
+  @Column(name = "task_transition_completed_at")
+  private Instant taskTransitionCompletedAt;
+
+  @Column(name = "task_transition_failure_reason", columnDefinition = "TEXT")
+  private String taskTransitionFailureReason;
+
+  @Column(name = "task_transition_failure_at")
+  private Instant taskTransitionFailureAt;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
 

@@ -67,6 +67,14 @@ class RunWorkspaceAuthorityServiceIntegrationTest {
           "UPDATE run_workspace_authority SET lease_expires_at = NOW() - INTERVAL '1 second'"
               + " WHERE run_id = ?",
           "run-1");
+      hostA.heartbeatLocalLeases();
+      assertThat(
+              jdbc.queryForObject(
+                  "SELECT lease_expires_at < NOW() FROM run_workspace_authority WHERE run_id=?",
+                  Boolean.class,
+                  "run-1"))
+          .as("a heartbeat must never resurrect an already expired authority")
+          .isTrue();
       assertThatThrownBy(lease::assertOwned)
           .isInstanceOf(IllegalStateException.class)
           .hasMessage("RUN_WORKSPACE_AUTHORITY_LOST");

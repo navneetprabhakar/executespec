@@ -3,6 +3,7 @@ package com.navneet.executespec.workspacegeneration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -40,6 +41,8 @@ class TaskAcceptanceVerifierTest {
   private final TestCommandResolver testCommands = mock(TestCommandResolver.class);
   private final BuildProjectTool buildTool = mock(BuildProjectTool.class);
   private final WorkspaceTestRunner testRunner = mock(WorkspaceTestRunner.class);
+  private final PythonHttpRuntimeAcceptanceService pythonRuntime =
+      mock(PythonHttpRuntimeAcceptanceService.class);
   private final ExecutionContext context =
       new ExecutionContext("run-1", "T1", Path.of(".").toAbsolutePath().normalize());
   private TaskAcceptanceVerifier verifier;
@@ -48,7 +51,19 @@ class TaskAcceptanceVerifierTest {
   void setUp() {
     verifier =
         new TaskAcceptanceVerifier(
-            buildCommands, testCommands, buildTool, testRunner, new ObjectMapper());
+            buildCommands, testCommands, buildTool, testRunner, pythonRuntime, new ObjectMapper());
+    when(pythonRuntime.verify(anyString(), any(Path.class)))
+        .thenReturn(
+            new PythonHttpRuntimeAcceptanceService.Result(
+                PythonHttpRuntimeAcceptanceService.Status.UNAVAILABLE,
+                false,
+                false,
+                0,
+                0,
+                0,
+                0,
+                "strict runtime unavailable",
+                Map.of("runtimeCommand", PythonHttpRuntimeAcceptanceService.RUNTIME_COMMAND)));
     when(buildCommands.resolve(any(Path.class), nullable(String.class)))
         .thenReturn(
             BuildCommand.builder()
@@ -186,7 +201,7 @@ class TaskAcceptanceVerifierTest {
   }
 
   @Test
-  void heldOutEndpointCheckRejectsCandidateEvenWhenGeneratedTestsPass() throws Exception {
+  void staticOpenApiCannotSatisfyRuntimeProofEvenWhenGeneratedTestsPass() throws Exception {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     Files.createDirectories(workspace.resolve("src/main"));
     Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
@@ -206,16 +221,16 @@ class TaskAcceptanceVerifierTest {
         verifier.verify(
             v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
 
-    assertThat(result.outcome()).isEqualTo("FAILED");
+    assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
     assertThat(result.testsPassed()).isEqualTo(2);
     assertThat(result.evidenceJson())
-        .contains("\"endpointExpectationsPassed\":false")
-        .contains("\"kind\":\"ENDPOINT_CONTRACT\"")
-        .contains("\"status\":\"FAILED\"");
+        .contains("\"requiredProofStrength\":\"RUNTIME_CONTRACT\"")
+        .contains("\"achievedProofStrength\":\"TEST\"")
+        .contains("\"proofStrengthSufficient\":false");
   }
 
   @Test
-  void heldOutEndpointCheckPassesTheRequiredMethodAndPath() throws Exception {
+  void staticOpenApiCannotPromoteAnHttpCandidate() throws Exception {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     Files.createDirectories(workspace.resolve("src/main"));
     Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
@@ -233,12 +248,12 @@ class TaskAcceptanceVerifierTest {
         verifier.verify(
             v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
 
-    assertThat(result.outcome()).isEqualTo("PASSED");
-    assertThat(result.evidenceJson()).contains("\"endpointExpectationsPassed\":true");
+    assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
+    assertThat(result.evidenceJson()).contains("\"runtimeContractExecuted\":false");
   }
 
   @Test
-  void heldOutEndpointCheckIgnoresPathParameterVariableNames() throws Exception {
+  void staticPathNormalizationCannotReplaceRuntimeExecution() throws Exception {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     Files.createDirectories(workspace.resolve("src/main"));
     Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
@@ -258,8 +273,8 @@ class TaskAcceptanceVerifierTest {
             endpointContract("DELETE /todos/{id}"),
             List.of("src/main/App.java", "openapi.json"));
 
-    assertThat(result.outcome()).isEqualTo("PASSED");
-    assertThat(result.evidenceJson()).contains("\"endpointExpectationsPassed\":true");
+    assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
+    assertThat(result.evidenceJson()).contains("\"runtimeContractExecuted\":false");
   }
 
   @Test
@@ -277,7 +292,7 @@ class TaskAcceptanceVerifierTest {
   }
 
   @Test
-  void initialProbeUsesMissingHeldOutEndpointAsExecutableRedSignal() throws Exception {
+  void initialProbeDoesNotInventAStaticOpenApiRequirement() throws Exception {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     Files.createDirectories(workspace.resolve("src/main"));
     Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
@@ -286,10 +301,9 @@ class TaskAcceptanceVerifierTest {
 
     var result = verifier.probeInitial(v2Context, endpointContract());
 
-    assertThat(result.observed()).isTrue();
-    assertThat(result.code()).isEqualTo("ENDPOINT_CONTRACT_UNSATISFIED");
-    assertThat(result.failedTargets()).containsExactly("GET /health");
-    org.mockito.Mockito.verifyNoInteractions(buildTool, testRunner);
+    assertThat(result.observed()).isFalse();
+    assertThat(result.code()).isEqualTo("INITIAL_TEST_EVIDENCE_UNAVAILABLE");
+    verify(buildTool).execute(any(), eq(v2Context));
   }
 
   @Test

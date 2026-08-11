@@ -76,9 +76,13 @@ class FlywayMigrationInventoryTest {
     // bringing the exact inventory to 363. V378 freezes the actually observed pre-provider BUILD
     // failure evidence, bringing the exact inventory to 364. V379 adds the nullable, staged
     // workspace-origin discriminator for new BUILD writes without rewriting historical rows,
-    // bringing the exact inventory to 365.
-    assertThat(migrations).hasSize(365);
-    assertThat(migrations.getLast().version()).isEqualTo("379");
+    // bringing the exact inventory to 365. V380 adds the replayable task-transition outbox that
+    // prevents a restored workspace from being resolved while its task row remains stale. V381
+    // database-fences rollback evidence and resolution against the exact current workspace owner.
+    // V382 preserves resolved-attempt immutability while permitting only the V380 task-transition
+    // receipt state machine, bringing the exact inventory to 368.
+    assertThat(migrations).hasSize(368);
+    assertThat(migrations.getLast().version()).isEqualTo("382");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

@@ -195,6 +195,58 @@ class TaskStatusPersistenceServiceTest {
   }
 
   @Test
+  void workspaceRollbackPublicationIsIdempotentButFencesInterveningTaskState() {
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("WORKING")
+            .recoveryAttempt(2)
+            .build();
+    when(repository.findByIdForUpdate(task.getTaskId())).thenReturn(Optional.of(task));
+    TaskStatusPersistenceService service = transactionalProxy(repository);
+
+    assertEquals(
+        TaskStatusPersistenceService.Result.UPDATED,
+        service.publishWorkspaceGenerationTransition(
+            task.getRunId(), "T1", "PARTIAL", "WORKING", 2, "runtime red"));
+    assertEquals("PARTIAL", task.getStatus());
+    assertEquals(
+        TaskStatusPersistenceService.Result.UPDATED,
+        service.publishWorkspaceGenerationTransition(
+            task.getRunId(), "T1", "PARTIAL", "WORKING", 2, "runtime red"));
+
+    task.setStatus("COMPLETE");
+    assertEquals(
+        TaskStatusPersistenceService.Result.TERMINAL_OVERWRITE,
+        service.publishWorkspaceGenerationTransition(
+            task.getRunId(), "T1", "PARTIAL", "WORKING", 2, "runtime red"));
+    assertEquals("COMPLETE", task.getStatus());
+  }
+
+  @Test
+  void workspaceRollbackPublicationFencesRecoveryGeneration() {
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("WORKING")
+            .recoveryAttempt(3)
+            .build();
+    when(repository.findByIdForUpdate(task.getTaskId())).thenReturn(Optional.of(task));
+
+    TaskStatusPersistenceService.Result result =
+        transactionalProxy(repository)
+            .publishWorkspaceGenerationTransition(
+                task.getRunId(), "T1", "PENDING", "WORKING", 2, null);
+
+    assertEquals(TaskStatusPersistenceService.Result.STALE_RECOVERY_ATTEMPT, result);
+    assertEquals("WORKING", task.getStatus());
+  }
+
+  @Test
   void goalDecisionForMissingRowIsNotFound() {
     AgentTaskRepository repository = mock(AgentTaskRepository.class);
     when(repository.findByIdForUpdate("12345678_T9")).thenReturn(Optional.empty());

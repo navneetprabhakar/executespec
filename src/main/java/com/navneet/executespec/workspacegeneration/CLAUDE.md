@@ -19,6 +19,12 @@ admits dispatch. `WorkspaceGenerationLifecycle`
 owns `PREPARED → MUTATING → VERIFYING → VERIFIED → CHECKPOINTING → ACCEPTED`; every rejection uses
 `ROLLING_BACK → ROLLED_BACK`, and crash recovery may use `RECOVERY_FAILED → ROLLING_BACK` retries.
 Never infer acceptance from a worker outcome or task status.
+V380 adds a replayable task-transition outbox to each rolled-back generation. Normal rejection
+publishes `MARK_PARTIAL`; crash recovery publishes `REOPEN_PENDING`. Downstream admission remains
+closed while publication is pending, and the completion receipt uses an independent transaction.
+V381 requires the exact current database workspace authority for rollback intent and resolution.
+V382 permits only the byte-identical `PENDING → COMPLETED` task receipt on a resolved attempt; all
+generation, rejection, checkpoint, authority and task-transition identity evidence stays immutable.
 The worker outcome is advisory even when it is `COMPLETED_WITH_WARNING` or `WORKER_FAILED`: after
 authorized mutation, the frozen server verifier always decides acceptance. A passing receipt
 normalizes the task outcome to success while retaining raw worker evidence; a failed receipt rolls
@@ -46,7 +52,10 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   even when planner wording classified the task as documentation/configuration.
 - HTTP route checks canonicalize parameter names (`/todos/{id}` and `/todos/{todo_id}` are the same
   reachable route shape) while preserving exact methods and literal path segments.
-- Under `build.shared-code-change-loop.enabled`, `GreenfieldBaselineService` trusts the typed
+- Under `build.shared-code-change-loop.enabled`, the small `GreenfieldBaselineService` facade
+  delegates immutable contract planning to `GreenfieldBaselinePlanner`, symlink-safe lease-bound
+  writes to `GreenfieldBaselineMaterializer`, and hidden acceptance-source rendering to
+  `GreenfieldAcceptanceTestSource`. The planning path trusts the typed
   `WorkspaceOrigin` carried from durable run admission rather than rediscovering origin from
   filesystem metadata. Python and path-explicit plain Node JavaScript use qualified external bootstrap markers
   and hidden tests under `.executespec/bootstrap`; every bootstrap byte is digest-bound and checked
@@ -102,7 +111,10 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   `V377__workspace_generation_execution_evidence.sql`, and
   `V378__observed_initial_build_failure.sql`, and
   `V379__persist_workspace_origin.sql` (nullable staged origin for new writes; no historical
-  rewrite or premature NOT NULL tightening).
+  rewrite or premature NOT NULL tightening),
+  `V380__durable_workspace_generation_task_transition.sql`,
+  `V381__fence_workspace_generation_rollback_authority.sql`, and
+  `V382__allow_workspace_generation_task_transition_receipts.sql`.
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
@@ -141,7 +153,8 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   deterministic verification, flag-off
   telemetry isolation, schema-v2 execution evidence, typed lifecycle emission, initial-delta seed,
   and hidden-verifier non-disclosure to the worker.
-- `GreenfieldBaselineServiceTest` + `GreenfieldWorkspaceCompositionTest`: typed-origin behavior,
+- `GreenfieldBaselineServiceTest` + `GreenfieldWorkspaceCompositionTest`: the split
+  planner/materializer facade, typed-origin behavior,
   executable external Python/Node red baselines, no product implementation, exact multi-repository
   scoping, real frozen commands, and held-out FastAPI/Node behavior.
 - `WorkspaceOriginResolverTest` + `RunWorkspaceOriginServiceTest`: submit/history derivation,

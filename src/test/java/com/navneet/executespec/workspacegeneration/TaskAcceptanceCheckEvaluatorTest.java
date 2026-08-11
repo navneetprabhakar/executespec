@@ -57,17 +57,12 @@ class TaskAcceptanceCheckEvaluatorTest {
         TaskAcceptanceCheckEvaluator.evaluate(
             contract, List.of("src/app.py"), true, true, true, true, true, true, false, true);
 
-    assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.FAILED);
+    assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.UNAVAILABLE);
     assertThat(result.results())
         .anySatisfy(
             check -> {
               assertThat(check.kind()).isEqualTo("REQUIRED_TEST_SELECTORS");
               assertThat(check.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.UNAVAILABLE);
-            })
-        .anySatisfy(
-            check -> {
-              assertThat(check.kind()).isEqualTo("ENDPOINT_EXPECTATIONS");
-              assertThat(check.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.FAILED);
             });
   }
 

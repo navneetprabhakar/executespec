@@ -21,6 +21,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselinePlan;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselineService;
+import com.navneet.executespec.workspacegeneration.PythonHttpRuntimeAcceptanceService;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
@@ -115,13 +116,14 @@ class GreenfieldWorkspaceCompositionTest {
                 testCommands,
                 mock(BuildProjectTool.class),
                 mock(WorkspaceTestRunner.class),
+                mock(PythonHttpRuntimeAcceptanceService.class),
                 json)
             .probeInitial(new ExecutionContext("run-fastapi", "T1", root), contract);
 
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:python");
     assertThat(contract.testCommand().source()).isEqualTo("executespec-bootstrap-pytest");
     assertThat(initial.observed()).isTrue();
-    assertThat(initial.code()).isEqualTo("ENDPOINT_CONTRACT_UNSATISFIED");
+    assertThat(initial.code()).isEqualTo("REQUIRED_PATH_MISSING");
 
     Files.writeString(
         root.resolve("main.py"),
@@ -161,40 +163,12 @@ class GreenfieldWorkspaceCompositionTest {
             raise HTTPException(status_code=404, detail="todo not found")
         """);
     Files.writeString(root.resolve("requirements.txt"), "fastapi\nuvicorn\n");
-    Files.writeString(
-        root.resolve("openapi.yaml"),
-        """
-        openapi: 3.0.0
-        paths:
-          /health:
-            get: {}
-          /todos:
-            get: {}
-            post: {}
-          /todos/{id}:
-            delete: {}
-        """);
-    Files.writeString(
-        root.resolve("held_out_test.py"),
-        """
-        from fastapi.testclient import TestClient
-        from main import app
-
-        client = TestClient(app)
-        assert client.get("/health").json() == {"status": "ok"}
-        assert client.get("/todos").json() == []
-        first = client.post("/todos", json={"title": "first"})
-        assert first.status_code == 200
-        assert first.json() == {"id": 1, "title": "first", "done": False}
-        second = client.post("/todos", json={"title": "second"})
-        assert second.json()["id"] == 2
-        assert client.delete("/todos/1").json() == {"deleted": True}
-        assert client.delete("/todos/999").status_code == 404
-        """);
-
     assertThat(run(root, contract.buildCommand().command())).isZero();
-    assertThat(run(root, contract.testCommand().command())).isZero();
-    assertThat(run(root, "python3 held_out_test.py")).isZero();
+    assertThat(root.resolve(".executespec/bootstrap/test_acceptance.py")).isRegularFile();
+    assertThat(Files.readString(root.resolve(".executespec/bootstrap/test_acceptance.py")))
+        .contains("/openapi.json")
+        .contains("runtime route unreachable")
+        .doesNotContain("openapi.yaml");
   }
 
   @Test

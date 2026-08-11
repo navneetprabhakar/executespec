@@ -37,10 +37,4 @@ public final class HttpEndpointContract {
     }
     return List.copyOf(endpoints);
   }
-
-  /** HTTP path-parameter names do not change the route's externally reachable URL shape. */
-  static String canonicalPath(String path) {
-    if (path == null) return null;
-    return path.replaceAll("\\{[^/{}]+}", "{}");
-  }
 }

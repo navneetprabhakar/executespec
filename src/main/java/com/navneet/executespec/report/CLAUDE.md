@@ -24,6 +24,9 @@ load run state, call providers, or mutate score/report entities. `ValidationRepo
 compatibility seam used by report projections and scoring/rescore flows.
 `ValidationEndpointCoverageEvidence` owns the runtime-surface applicability row so the main builder
 stays below the architecture size ceiling while preserving explicit non-HTTP `N/A` evidence.
+The 2026-08-11 Graphify cleanup removed two private `LegacyUnused` scoring implementations from
+`ValidationReportService`; additive and rollback-compatible multiplicative scoring remain owned by
+the active calculator/policy seams and their existing test pins.
 
 `RunChangeEvidenceService` is the authoritative baseline-to-final Git evidence boundary. It excludes
 pre-existing files and deterministic ExecuteSpec metadata, includes tracked and untracked changes,

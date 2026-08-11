@@ -1,6 +1,7 @@
 package com.navneet.executespec.workspacegeneration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,6 +50,23 @@ class GreenfieldBaselineServiceTest {
     assertThat(node.filesToCreate())
         .containsOnlyKeys(
             ".executespec/bootstrap/node-js.marker", ".executespec/bootstrap/test_acceptance.mjs");
+
+    Plan nodeHttpPlan =
+        Plan.builder()
+            .planTitle("Node API")
+            .projectType("node-backend")
+            .runtimeSurface(Plan.RuntimeSurface.HTTP)
+            .tasks(List.of(task("Node HTTP API", List.of("server.js"))))
+            .build();
+    GreenfieldBaselinePlan nodeHttp =
+        service.plan(
+            workspace,
+            task("Node HTTP API", List.of("server.js")),
+            nodeHttpPlan,
+            WorkspaceOrigin.GREENFIELD);
+    assertThat(nodeHttp.kind()).isEqualTo(GreenfieldBaselinePlan.Kind.NODE_JAVASCRIPT);
+    assertThat(nodeHttp.runtimeSurface()).isEqualTo("HTTP_SERVICE");
+    assertThat(nodeHttp.supported()).isFalse();
 
     GreenfieldBaselinePlan typescript =
         service.plan(
@@ -125,8 +143,10 @@ class GreenfieldBaselineServiceTest {
         service.plan(workspace, task, plan, WorkspaceOrigin.GREENFIELD);
 
     assertThat(baseline.filesToCreate().get(".executespec/bootstrap/test_acceptance.py"))
-        .contains("re.sub(r\"\\{[^/{}]+\\}\", \"{}\", path.value)")
-        .contains("assert (\"DELETE\", \"/todos/{}\") in routes");
+        .contains("APP_TARGET = \"main:app\"")
+        .contains("EXPECTED_ENDPOINTS = [(\"DELETE\", \"/todos/{id}\")]")
+        .contains("runtime route unreachable")
+        .contains("runtime route crashed");
   }
 
   @Test
@@ -163,6 +183,22 @@ class GreenfieldBaselineServiceTest {
             WorkspaceOrigin.GREENFIELD);
 
     assertThat(plan.requiredTaskPaths()).containsExactly("safe.py");
+  }
+
+  @Test
+  void symlinkedBootstrapParentCannotRedirectServerOwnedFilesOutsideWorkspace() throws Exception {
+    Path outside = Files.createTempDirectory("executespec-baseline-outside-");
+    Files.createSymbolicLink(workspace.resolve(".executespec"), outside);
+    GreenfieldBaselinePlan plan =
+        service.plan(
+            workspace, task("Python task", List.of("calculator.py")), WorkspaceOrigin.GREENFIELD);
+
+    assertThatThrownBy(() -> service.materialize(workspace, plan))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("GREENFIELD_BASELINE_WRITE_FAILED");
+    assertThat(outside.resolve("bootstrap/test_acceptance.py")).doesNotExist();
+    Files.deleteIfExists(workspace.resolve(".executespec"));
+    Files.deleteIfExists(outside);
   }
 
   @Test

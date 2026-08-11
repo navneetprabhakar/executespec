@@ -15,7 +15,12 @@ class RunningReleaseIdentityControllerTest {
     RunningReleaseIdentityService service = mock(RunningReleaseIdentityService.class);
     var identity =
         new RunningReleaseIdentityService.ReleaseIdentity(
-            1, "a".repeat(40), RunningReleaseIdentityService.AUTHORITY, Instant.EPOCH);
+            2,
+            "a".repeat(40),
+            "b".repeat(64),
+            "1-1",
+            RunningReleaseIdentityService.AUTHORITY,
+            Instant.EPOCH);
     when(service.read()).thenReturn(identity);
 
     var response = new RunningReleaseIdentityController(service).read();

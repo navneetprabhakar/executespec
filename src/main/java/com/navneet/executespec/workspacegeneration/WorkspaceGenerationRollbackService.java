@@ -9,6 +9,7 @@ import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,7 @@ public class WorkspaceGenerationRollbackService {
                 "patchFullBytes", diff.patchFullBytes(),
                 "patchTruncated", diff.patchTruncated(),
                 "patchRedacted", diff.patchRedacted()));
-    TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+    TransactionTemplate transactions = independentTransactions();
     requireCas(
         transactions.execute(
             ignored ->
@@ -136,5 +137,11 @@ public class WorkspaceGenerationRollbackService {
 
   private static void requireCas(Integer updated, String code) {
     if (updated == null || updated != 1) throw new IllegalStateException(code);
+  }
+
+  private TransactionTemplate independentTransactions() {
+    TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+    transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    return transactions;
   }
 }
