@@ -35,7 +35,8 @@ class DeploymentPointerProtocolTest {
         .contains("attempt_id=${{ env.DEPLOY_ATTEMPT_ID }}")
         .contains("/opt/app/RUNNING_RELEASE")
         .contains("bash scripts/publish-release-pointer.sh")
-        .contains("/proc/\\$PID/environ")
+        .contains("sudo cat /proc/\\$PID/environ | tr")
+        .doesNotContain("sudo tr '\\\\0' '\\\\n' < /proc/\\$PID/environ")
         .doesNotContain("Revert CURRENT_SHA on failed deploy")
         .doesNotContain("CURRENT_SHA restored to");
     assertThat(publisher)
@@ -65,6 +66,7 @@ class DeploymentPointerProtocolTest {
         .contains("RUNNING_RELEASE")
         .contains("artifact_sha256=$JAR_SHA256")
         .contains("attempt_id=$DEPLOY_ATTEMPT_ID")
-        .contains("/proc/\\$PID/environ");
+        .contains("sudo cat /proc/\\$PID/environ | tr")
+        .doesNotContain("sudo tr '\\\\0' '\\\\n' < /proc/\\$PID/environ");
   }
 }

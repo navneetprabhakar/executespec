@@ -23,13 +23,16 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 
 ## Key files
 
-- `RunningReleaseIdentityService.java` / `RunningReleaseIdentityController.java` — read the exact
-  deployment workflow marker at `/opt/app/RUNNING_SHA` for every SUPER_ADMIN/no-store
-  `GET /api/admin/release-identity` call. Only a lowercase-normalized 40-character Git commit SHA is
-  accepted; missing or malformed authority returns 503. The paired BUILD harness compares this
-  value to its frozen candidate SHA before each paid submission, so a caller-supplied label cannot
-  attest a different running binary. Candidate evidence retains the returned SHA, canonical
-  authority and read timestamp for independent validation.
+- `RunningReleaseIdentityService.java` / `RunningReleaseIdentityController.java` — expose the
+  immutable source SHA, JAR SHA-256 and deployment-attempt tuple captured in the serving JVM's
+  startup environment for every SUPER_ADMIN/no-store `GET /api/admin/release-identity` call.
+  Missing or malformed tuple fields return 503. The deploy workflow first reconciles the atomic
+  host marker, then health-checks the restarted service, reads `/proc/<MainPID>/environ` through a
+  root-owned producer (`sudo cat`, not a non-root shell redirection), and only then generation-CAS
+  publishes `CURRENT_SHA`. The paired BUILD harness compares the endpoint tuple with its frozen
+  candidate before each paid submission, so mutable host files or caller labels cannot attest a
+  different running binary. Candidate evidence retains the tuple, canonical authority and read
+  timestamp for independent validation.
 
 - `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews owned by this process. **Distributed safety:** absence from the JVM-local `active` map is never treated as proof that a Docker/Cloud Run resource is orphaned unless the operator explicitly sets `PREVIEW_ORPHAN_DISCOVERY_ENABLED=true`; the default is false. JVM shutdown also preserves active previews by default so rolling deployment cannot destroy them (`PREVIEW_TEARDOWN_ON_SHUTDOWN=false`). **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings, and fail-safe cleanup gates. Docker/Cloud Run orphan discovery remains disabled until a durable cross-JVM resource registry is authoritative.
