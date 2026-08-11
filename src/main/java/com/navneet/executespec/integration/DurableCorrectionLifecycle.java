@@ -53,14 +53,14 @@ public class DurableCorrectionLifecycle {
             .orElseThrow(
                 () -> new IllegalStateException("Correction task does not exist: " + taskId));
     return prepare(
-        runId, taskId, workspaceRoot, AutomaticCorrectionLifecycle.snapshotTask(task), null, null);
+        runId, taskId, workspaceRoot, CorrectionStateSnapshots.snapshotTask(task), null, null);
   }
 
   public Prepared prepare(
       String runId,
       String taskId,
       Path workspaceRoot,
-      AutomaticCorrectionLifecycle.TaskState taskSnapshot) {
+      CorrectionStateSnapshots.TaskState taskSnapshot) {
     return prepare(runId, taskId, workspaceRoot, taskSnapshot, null, null);
   }
 
@@ -68,7 +68,7 @@ public class DurableCorrectionLifecycle {
       String runId,
       String taskId,
       Path workspaceRoot,
-      AutomaticCorrectionLifecycle.TaskState taskSnapshot,
+      CorrectionStateSnapshots.TaskState taskSnapshot,
       String approvalId,
       String proposalDigest) {
     if ((approvalId == null) != (proposalDigest == null)
@@ -355,9 +355,9 @@ public class DurableCorrectionLifecycle {
 
   private void restoreTask(CorrectionAttempt attempt, boolean terminateApprovalReceipt) {
     try {
-      AutomaticCorrectionLifecycle.TaskState snapshot =
+      CorrectionStateSnapshots.TaskState snapshot =
           objectMapper.readValue(
-              attempt.getTaskSnapshotJson(), AutomaticCorrectionLifecycle.TaskState.class);
+              attempt.getTaskSnapshotJson(), CorrectionStateSnapshots.TaskState.class);
       AgentTask current =
           tasks
               .findById(attempt.getTaskId())

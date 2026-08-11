@@ -246,13 +246,7 @@ class AsyncAllowlistTest {
               // carrying only String/enum fields (no JPA entity, no lazy collection) and delegates
               // to the already-allowlisted ActivityEventEmitter#emit. Same decoupled profile as
               // the RunActivityFeedListener entries above.
-              "PlanGateDecisionActivityListener#onDecisionCommitted",
-
-              // RL-2026-05-041 (audit #2) — GcsTaskCheckpointService checkpoints the workspace to
-              // GCS at each task boundary for mid-run durability. Reads the run row +
-              // exports/uploads
-              // the workspace zip; no lazy JPA collection navigation. No-op when GCS unconfigured.
-              "GcsTaskCheckpointService#checkpointAfterTask"));
+              "PlanGateDecisionActivityListener#onDecisionCommitted"));
 
   @Test
   void asyncMethodAllowlistInSync() {

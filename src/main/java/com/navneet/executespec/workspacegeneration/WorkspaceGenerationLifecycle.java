@@ -54,27 +54,46 @@ public class WorkspaceGenerationLifecycle {
   private final WorkspaceIgnoredArtifactGuard ignoredArtifacts;
   private final PlatformTransactionManager transactionManager;
 
-  /** Creates the durable PREPARED row before any BUILD task may dispatch a provider or tool. */
+  /**
+   * Acquires authority, creates the durable before-checkpoint, and advances an already admitted
+   * attempt to PREPARED. The attempt and exact LLM operation are persisted before this method.
+   */
   public Prepared prepareBuild(
-      String runId,
-      String taskId,
-      int taskIndex,
+      UUID attemptId,
       Path workspaceRoot,
-      String authorityDigest,
-      String taskContractDigest,
-      String taskContractJson,
-      String initialFailureEvidenceJson,
-      String requestedProvider,
-      String requestedModel) {
-    requireHash(authorityDigest, "WORKSPACE_GENERATION_AUTHORITY_DIGEST_INVALID");
-    requireHash(taskContractDigest, "WORKSPACE_GENERATION_TASK_CONTRACT_DIGEST_INVALID");
-    if (taskIndex < 0)
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_TASK_INDEX_INVALID");
-
-    recoveryService.recoverRunOrThrow(runId);
+      String llmOperationId,
+      int llmAttemptNumber,
+      UUID llmLeaseToken) {
+    requireText(llmOperationId, "WORKSPACE_GENERATION_LLM_OPERATION_INVALID");
+    if (attemptId == null || llmAttemptNumber <= 0 || llmLeaseToken == null) {
+      throw new IllegalArgumentException("WORKSPACE_GENERATION_LLM_LEASE_INVALID");
+    }
+    WorkspaceGenerationAttempt admitted = require(attemptId);
+    if (admitted.getState() != WorkspaceGenerationState.OPERATION_CLAIMED
+        || !Objects.equals(admitted.getLlmOperationId(), llmOperationId)
+        || !Objects.equals(admitted.getLlmAttemptNumber(), llmAttemptNumber)
+        || !Objects.equals(admitted.getLlmLeaseToken(), llmLeaseToken)) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_OPERATION_BINDING_MISMATCH");
+    }
+    String runId = admitted.getRunId();
+    String taskId = admitted.getTaskId();
     Lease lease = workspaceAuthorities.acquire(runId, Authority.BUILD_GENERATION);
     try {
+      requireCas(
+          attempts.acquireAuthority(
+              attemptId,
+              lease.ownerToken(),
+              llmOperationId,
+              llmAttemptNumber,
+              llmLeaseToken,
+              WorkspaceGenerationState.OPERATION_CLAIMED,
+              WorkspaceGenerationState.AUTHORITY_ACQUIRED,
+              Instant.now()),
+          "WORKSPACE_GENERATION_AUTHORITY_ACQUIRE_CAS_FAILED");
       Path canonicalRoot = realPath(workspaceRoot);
+      if (!canonicalRoot.equals(realPath(Path.of(admitted.getWorkspaceRoot())))) {
+        throw new IllegalStateException("WORKSPACE_GENERATION_ROOT_MISMATCH");
+      }
       CorrectionWorkspaceTransaction.Checkpoint checkpoint =
           canonicalCheckpoint(canonicalRoot, workspaces.begin(canonicalRoot));
       WorkspaceIgnoredArtifactGuard.Baseline ignoredBaseline =
@@ -83,57 +102,43 @@ public class WorkspaceGenerationLifecycle {
       com.navneet.executespec.deployment.GcsTaskCheckpointService.CheckpointReceipt
           beforeCheckpoint =
               checkpointService.checkpointGeneration(runId, taskId + ":before", checkpoint);
-
-      Instant now = Instant.now();
-      WorkspaceGenerationAttempt attempt =
-          WorkspaceGenerationAttempt.builder()
-              .id(UUID.randomUUID())
-              .runId(runId)
-              .taskId(taskId)
-              .taskIndex(taskIndex)
-              .attemptNumber(attempts.maximumAttemptNumber(runId, taskId) + 1)
-              .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
-              .state(WorkspaceGenerationState.PREPARED)
-              .workspaceRoot(canonicalRoot.toString())
-              .beforeGeneration(beforeGeneration)
-              .repositoriesJson(writeRepositories(canonicalRoot, checkpoint))
-              .ignoredArtifactBaselineJson(ignoredBaseline.json())
-              .ignoredArtifactBaselineDigest(ignoredBaseline.digest())
-              .authorityDigest(authorityDigest)
-              .taskContractDigest(taskContractDigest)
-              .taskContractJson(
-                  taskContractJson == null || taskContractJson.isBlank()
-                      ? null
-                      : canonicalJson(taskContractJson))
-              .initialFailureEvidenceJson(
-                  initialFailureEvidenceJson == null || initialFailureEvidenceJson.isBlank()
-                      ? null
-                      : canonicalJson(initialFailureEvidenceJson))
-              .requestedProvider(
-                  requestedProvider == null || requestedProvider.isBlank()
-                      ? null
-                      : requestedProvider)
-              .requestedModel(
-                  requestedModel == null || requestedModel.isBlank() ? null : requestedModel)
-              .workspaceLeaseToken(lease.ownerToken())
-              .beforeCheckpointKind(beforeCheckpoint.kind())
-              .beforeCheckpointKey(beforeCheckpoint.key())
-              .beforeCheckpointDigest(beforeCheckpoint.artifactDigest())
-              .beforeCheckpointCompletedAt(beforeCheckpoint.completedAt())
-              .createdAt(now)
-              .updatedAt(now)
-              .build();
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
       transaction.executeWithoutResult(
           ignored -> {
-            seedOrAssertFrontier(runId, taskIndex, beforeGeneration);
-            attempts.saveAndFlush(attempt);
+            seedOrAssertFrontier(runId, admitted.getTaskIndex(), beforeGeneration);
+            requireCas(
+                attempts.completePreparation(
+                    attemptId,
+                    lease.ownerToken(),
+                    beforeGeneration,
+                    writeRepositories(canonicalRoot, checkpoint),
+                    ignoredBaseline.json(),
+                    ignoredBaseline.digest(),
+                    beforeCheckpoint.kind(),
+                    beforeCheckpoint.key(),
+                    beforeCheckpoint.artifactDigest(),
+                    beforeCheckpoint.completedAt(),
+                    WorkspaceGenerationState.AUTHORITY_ACQUIRED,
+                    WorkspaceGenerationState.PREPARED,
+                    Instant.now()),
+                "WORKSPACE_GENERATION_PREPARE_CAS_FAILED");
           });
-      return new Prepared(attempt.getId(), checkpoint, lease);
+      return new Prepared(attemptId, checkpoint, lease);
     } catch (RuntimeException failure) {
       lease.close();
       throw failure;
     }
+  }
+
+  /** Admission fence for a replacement BUILD attempt before its task row may be reopened. */
+  public void assertContinuationReady(String runId, Path workspaceRoot) {
+    recoveryService.recoverRunOrThrow(runId);
+    recoveryService.assertAcceptedFrontier(runId, workspaceRoot, "BUILD_CONTINUATION");
+  }
+
+  /** Synchronous convergence hook for supervisor failures before a Prepared handle is returned. */
+  public void recoverRunOrThrow(String runId) {
+    recoveryService.recoverRunOrThrow(runId);
   }
 
   @Transactional
@@ -147,26 +152,6 @@ public class WorkspaceGenerationLifecycle {
             WorkspaceGenerationState.MUTATING,
             Instant.now()),
         "WORKSPACE_GENERATION_MUTATING_CAS_FAILED");
-  }
-
-  /** Binds the exact current per-task LLM operation lease before the first provider call. */
-  @Transactional
-  public void bindLlmAttempt(
-      Prepared prepared, String operationId, int attemptNumber, UUID llmLeaseToken) {
-    assertOwned(prepared);
-    if (attemptNumber <= 0 || llmLeaseToken == null) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_LLM_LEASE_INVALID");
-    }
-    requireCas(
-        attempts.bindLlmAttempt(
-            prepared.attemptId(),
-            prepared.lease().ownerToken(),
-            requireText(operationId, "WORKSPACE_GENERATION_LLM_OPERATION_INVALID"),
-            attemptNumber,
-            llmLeaseToken,
-            WorkspaceGenerationState.MUTATING,
-            Instant.now()),
-        "WORKSPACE_GENERATION_LLM_BIND_CAS_FAILED");
   }
 
   /** Fresh database fence used before every task provider/tool dispatch. */
@@ -345,57 +330,52 @@ public class WorkspaceGenerationLifecycle {
   /** Atomically accepts the attempt and advances the run's accepted-generation frontier. */
   @Transactional
   public void accept(Prepared prepared) {
-    try {
-      assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
-      WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
-      String current =
-          workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);
-      if (!Objects.equals(attempt.getCandidateGeneration(), current)) {
-        throw new IllegalStateException("WORKSPACE_GENERATION_CHANGED_BEFORE_ACCEPT");
-      }
-      requireCas(
-          attempts.accept(
-              attempt.getId(),
-              prepared.lease().ownerToken(),
-              current,
-              WorkspaceGenerationState.CHECKPOINTING,
-              WorkspaceGenerationState.ACCEPTED,
-              Instant.now()),
-          "WORKSPACE_GENERATION_ACCEPT_CAS_FAILED");
-      requireCas(
-          runMutations.advanceAcceptedWorkspaceFrontier(
-              attempt.getRunId(),
-              attempt.getBeforeGeneration(),
-              attempt.getTaskIndex() - 1,
-              current,
-              attempt.getTaskIndex(),
-              attempt.getId(),
-              attempt.getCheckpointKind(),
-              attempt.getCheckpointKey(),
-              attempt.getCheckpointDigest(),
-              attempt.getCheckpointCompletedAt()),
-          "WORKSPACE_GENERATION_FRONTIER_CAS_FAILED");
-    } finally {
-      releaseAfterCompletion(prepared.lease());
+    assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
+    WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
+    String current =
+        workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);
+    if (!Objects.equals(attempt.getCandidateGeneration(), current)) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_CHANGED_BEFORE_ACCEPT");
     }
+    requireCas(
+        attempts.accept(
+            attempt.getId(),
+            prepared.lease().ownerToken(),
+            current,
+            WorkspaceGenerationState.CHECKPOINTING,
+            WorkspaceGenerationState.ACCEPTED,
+            Instant.now()),
+        "WORKSPACE_GENERATION_ACCEPT_CAS_FAILED");
+    requireCas(
+        runMutations.advanceAcceptedWorkspaceFrontier(
+            attempt.getRunId(),
+            attempt.getBeforeGeneration(),
+            attempt.getTaskIndex() - 1,
+            current,
+            attempt.getTaskIndex(),
+            attempt.getId(),
+            attempt.getCheckpointKind(),
+            attempt.getCheckpointKey(),
+            attempt.getCheckpointDigest(),
+            attempt.getCheckpointCompletedAt()),
+        "WORKSPACE_GENERATION_FRONTIER_CAS_FAILED");
   }
 
   /** Restores the exact pre-attempt multi-repository trees before resolving the rejection. */
   public void rollback(Prepared prepared, String failureCode, String failureReason) {
-    try {
-      assertOwned(prepared);
-      rollbackService.rollback(
-          prepared.attemptId(),
-          prepared.lease().ownerToken(),
-          prepared.checkpoint(),
-          prepared.lease()::assertOwned,
-          failureCode,
-          failureReason);
-    } finally {
-      // Diff/rejection evidence is committed before filesystem mutation. A partial restore can
-      // therefore never erase the candidate the system rejected, and RECOVERY_FAILED is explicit.
-      releaseAfterCompletion(prepared.lease());
-    }
+    assertOwned(prepared);
+    rollbackService.rollback(
+        prepared.attemptId(),
+        prepared.lease().ownerToken(),
+        prepared.checkpoint(),
+        prepared.lease()::assertOwned,
+        failureCode,
+        failureReason);
+  }
+
+  /** Releases BUILD authority only after task, outbox, and LLM-operation finalization. */
+  public void release(Prepared prepared) {
+    if (prepared != null) releaseAfterCompletion(prepared.lease());
   }
 
   private void seedOrAssertFrontier(String runId, int taskIndex, String beforeGeneration) {

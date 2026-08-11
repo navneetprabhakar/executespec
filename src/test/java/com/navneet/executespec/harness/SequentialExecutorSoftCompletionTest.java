@@ -52,6 +52,7 @@ import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -102,15 +103,64 @@ class SequentialExecutorSoftCompletionTest {
   private final ModelMatrixProperties matrixProps = mock(ModelMatrixProperties.class);
   private final AvailableProviderResolver availableProviderResolver =
       mock(AvailableProviderResolver.class);
-  private final com.navneet.executespec.deployment.GcsTaskCheckpointService taskCheckpointService =
-      mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class);
+
+  @BeforeEach
+  void defaultAvailableProvider() {
+    lenient()
+        .when(availableProviderResolver.resolve(anyString()))
+        .thenReturn(Set.of(LlmProvider.ANTHROPIC));
+  }
 
   private SequentialExecutor newExecutor() {
-    return newExecutor(null);
+    return newExecutor(null, passThroughBuildSupervisor());
   }
 
   private SequentialExecutor newExecutor(GoalContinuationAdvisor goalContinuationAdvisor) {
-    return newExecutor(goalContinuationAdvisor, null);
+    return newExecutor(goalContinuationAdvisor, passThroughBuildSupervisor());
+  }
+
+  private BuildTaskGenerationCoordinator passThroughBuildSupervisor() {
+    BuildTaskGenerationCoordinator coordinator = mock(BuildTaskGenerationCoordinator.class);
+    lenient()
+        .when(coordinator.pendingStatus(anyString()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    lenient()
+        .when(coordinator.childContext(any(ExecutionContext.class), anyString()))
+        .thenAnswer(
+            invocation ->
+                ((ExecutionContext) invocation.getArgument(0)).child(invocation.getArgument(1)));
+    lenient()
+        .when(
+            coordinator.execute(
+                anyInt(), any(), any(), any(), any(java.util.function.Supplier.class), any()))
+        .thenAnswer(
+            invocation ->
+                ((java.util.function.Supplier<TaskOutcome>) invocation.getArgument(4)).get());
+    lenient()
+        .when(
+            coordinator.executeContinuation(
+                anyInt(),
+                any(),
+                any(),
+                any(),
+                anyString(),
+                anyString(),
+                any(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                any(java.util.function.Supplier.class),
+                any()))
+        .thenAnswer(
+            invocation -> {
+              ExecutionRequest request = invocation.getArgument(3);
+              var lease = mock(RunWorkspaceAuthorityService.Lease.class);
+              when(lease.runId()).thenReturn(request.runContext().runId());
+              return RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
+                  lease,
+                  () -> {},
+                  () ->
+                      ((java.util.function.Supplier<TaskOutcome>) invocation.getArgument(8)).get());
+            });
+    return coordinator;
   }
 
   private SequentialExecutor newExecutor(
@@ -140,7 +190,6 @@ class SequentialExecutorSoftCompletionTest {
         org.mockito.Mockito.mock(com.navneet.executespec.context.ContextStore.class),
         costTracker,
         null,
-        taskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         null,
@@ -459,8 +508,8 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void intermediate_task_must_pass_smoke_before_next_task_runs() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\ncompile failed"),
@@ -472,10 +521,9 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(TaskOutcome.Status.COMPLETED_WITH_WARNING, result.perTask().get(0).status());
     assertFalse(result.perTask().get(0).smokeTestPassed());
     assertEquals(TaskOutcome.Status.SKIPPED, result.perTask().get(1).status());
-    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
-    verify(worker, times(1)).run(any(WorkerTaskRequest.class));
+    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
+    verify(worker, never()).run(any(WorkerTaskRequest.class));
     verify(buildProjectTool, times(2)).execute(any(), any());
-    verify(taskCheckpointService, never()).checkpointAfterTask(anyString(), anyString());
   }
 
   @Test
@@ -491,12 +539,23 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(2, result.tasksSuccessful());
     verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
     verify(buildProjectTool, times(2)).execute(any(), any());
-    verify(taskCheckpointService).checkpointAfterTask("run-soft", "T1");
-    verify(taskCheckpointService).checkpointAfterTask("run-soft", "T2");
   }
 
   @Test
-  void transactionalBuildNeverQueuesTheLegacyRacyWorkspaceCheckpoint() {
+  void buildWithoutAttemptSupervisorFailsBeforeWorkerDispatch() {
+    stubTaskRow();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> newExecutor(null, null).execute(req(singleTaskPlan(), true)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("BUILD_ATTEMPT_SUPERVISOR_REQUIRED");
+
+    verify(worker, never()).run(any(WorkerTaskRequest.class), any());
+    verify(worker, never()).run(any(WorkerTaskRequest.class));
+  }
+
+  @Test
+  void correctionLeaseCannotBypassBuildAttemptSupervisor() {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class), any()))
         .thenReturn(workerCompleted(1), workerCompleted(1));
@@ -515,28 +574,6 @@ class SequentialExecutorSoftCompletionTest {
               java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(4);
               return dispatch.get();
             });
-
-    ExecutionResult result = newExecutor(null, generations).execute(req(multiTaskPlan(), true));
-
-    assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
-    verify(generations, times(2)).execute(anyInt(), any(), any(), any(), any(), any());
-    verify(taskCheckpointService, never()).checkpointAfterTask(anyString(), anyString());
-  }
-
-  @Test
-  void durableCorrectionRemainsTheOnlyGenerationAuthorityForApprovedRetry() {
-    stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class), any()))
-        .thenReturn(workerCompleted(1), workerCompleted(1));
-    when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
-    BuildTaskGenerationCoordinator generations = mock(BuildTaskGenerationCoordinator.class);
-    when(generations.childContext(any(ExecutionContext.class), anyString()))
-        .thenAnswer(
-            invocation ->
-                ((ExecutionContext) invocation.getArgument(0))
-                    .child(invocation.getArgument(1, String.class)));
-    when(generations.pendingStatus(anyString()))
-        .thenAnswer(invocation -> invocation.getArgument(0));
     RunWorkspaceAuthorityService.Lease correction = mock(RunWorkspaceAuthorityService.Lease.class);
     when(correction.runId()).thenReturn("run-soft");
 
@@ -545,8 +582,7 @@ class SequentialExecutorSoftCompletionTest {
             correction, () -> newExecutor(null, generations).execute(req(multiTaskPlan(), true)));
 
     assertEquals(ExecutionResult.Overall.ALL_SUCCESS, result.overall());
-    verify(generations, never()).execute(anyInt(), any(), any(), any(), any(), any());
-    verify(taskCheckpointService, never()).checkpointAfterTask(anyString(), anyString());
+    verify(generations, times(2)).execute(anyInt(), any(), any(), any(), any(), any());
   }
 
   // 2: Single-task + iter-limit + writes + smoke pass → COMPLETE+warning
@@ -961,8 +997,8 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void goal_decision_uses_configured_false_done_limit() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(2), workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
@@ -991,8 +1027,20 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void goal_decision_uses_configured_repeated_failure_limit() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    WorkerResult repeatedBuildFailure =
+        WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED)
+            .iterations(12)
+            .toolCallsDispatched(4)
+            .completionSummary("done")
+            .toolCallLog(
+                List.of(
+                    "buildProject({}) -> ERR: first compile failure",
+                    "buildProject({}) -> ERR: second compile failure"))
+            .totalLatencyMs(20_000L)
+            .build();
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(repeatedBuildFailure, workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
@@ -1033,8 +1081,8 @@ class SequentialExecutorSoftCompletionTest {
                     "shell({\"command\":\"npm test\"}) -> ERR: third failure"))
             .totalLatencyMs(18_000L)
             .build();
-    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(repeatedShellFailure);
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(1), repeatedShellFailure);
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nTests failed"),
@@ -1075,8 +1123,7 @@ class SequentialExecutorSoftCompletionTest {
                     "writeFile({\"path\":\"src/App.tsx\",\"content\":\"final\"})"))
             .totalLatencyMs(20_000L)
             .build();
-    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1));
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(churned);
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(1), churned);
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
@@ -1294,8 +1341,8 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void goal_decision_uses_configured_task_wall_clock_ceiling_evidence() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2, 25_000L));
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
+    when(worker.run(any(WorkerTaskRequest.class), any()))
+        .thenReturn(workerCompleted(2, 25_000L), workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(
             new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"),
@@ -1314,8 +1361,8 @@ class SequentialExecutorSoftCompletionTest {
                         && "STOP_WASTE_GUARD".equals(event.data().get("recommendedDecision"))
                         && String.valueOf(event.data().get("reason"))
                             .contains("configured task wall-clock ceiling reached")
-                        && ((List<?>) event.data().get("evidence")).contains("wallClockMs=20000")
-                        && Long.valueOf(20_000L).equals(event.data().get("wallClockMs"))));
+                        && ((List<?>) event.data().get("evidence")).contains("wallClockMs=25000")
+                        && Long.valueOf(25_000L).equals(event.data().get("wallClockMs"))));
   }
 
   @Test
@@ -1913,6 +1960,7 @@ class SequentialExecutorSoftCompletionTest {
   @Test
   void pre_retry_route_pinned_block_keeps_same_provider_retry() {
     stubTaskRow();
+    when(availableProviderResolver.resolve("run-soft")).thenReturn(Set.of(LlmProvider.ANTHROPIC));
     when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerCompleted(2));
     when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerCompleted(1));
     when(buildProjectTool.execute(any(), any()))
@@ -1943,8 +1991,8 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals(TaskOutcome.Status.SUCCESS_AFTER_RETRY, result.perTask().get(0).status());
     assertEquals("anthropic", result.perTask().get(0).dispatchedProvider());
     assertEquals("claude-haiku-4-5-20251001", result.perTask().get(0).dispatchedModel());
-    verify(worker, times(1)).run(any(WorkerTaskRequest.class), any());
-    verify(worker, times(1)).run(any(WorkerTaskRequest.class));
+    verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
+    verify(worker, never()).run(any(WorkerTaskRequest.class));
     verify(buildProjectTool, times(2)).execute(any(), any());
     assertTrue(
         saveLog.stream()
@@ -2214,8 +2262,8 @@ class SequentialExecutorSoftCompletionTest {
         "Expected durable continuation action history on T1. Saw: " + saveLog);
     assertTrue(
         saveLog.stream()
-            .anyMatch(s -> "run-soft_T1".equals(s.taskKey()) && "PENDING".equals(s.status())),
-        "Expected selected continuation to reopen the terminal primary row before rerun. Saw: "
+            .noneMatch(s -> "run-soft_T1".equals(s.taskKey()) && "PENDING".equals(s.status())),
+        "Executor must not reopen the terminal primary row outside the BUILD supervisor. Saw: "
             + saveLog);
     assertTrue(
         saveLog.stream()
@@ -2267,22 +2315,35 @@ class SequentialExecutorSoftCompletionTest {
                     .child(invocation.getArgument(1, String.class)));
     when(generations.pendingStatus(anyString()))
         .thenAnswer(invocation -> invocation.getArgument(0));
-    when(generations.isolatesRouteChanges()).thenReturn(true);
     when(generations.execute(anyInt(), any(), any(), any(), any(), any()))
         .thenAnswer(
             invocation -> {
               java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(4);
               return dispatch.get();
             });
-    when(generations.execute(anyInt(), any(), any(), any(), anyString(), anyString(), any(), any()))
+    when(generations.executeContinuation(
+            anyInt(),
+            any(),
+            any(),
+            any(),
+            anyString(),
+            anyString(),
+            any(),
+            org.mockito.ArgumentMatchers.anyBoolean(),
+            any(),
+            any()))
         .thenAnswer(
             invocation -> {
               assertEquals("openai", invocation.getArgument(4));
               assertEquals("gpt-5.4", invocation.getArgument(5));
               replacementAttemptActive.set(true);
               try {
-                java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(6);
-                return dispatch.get();
+                java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(8);
+                ExecutionRequest request = invocation.getArgument(3);
+                var lease = mock(RunWorkspaceAuthorityService.Lease.class);
+                when(lease.runId()).thenReturn(request.runContext().runId());
+                return RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
+                    lease, () -> {}, dispatch::get);
               } finally {
                 replacementAttemptActive.set(false);
               }
@@ -2295,7 +2356,17 @@ class SequentialExecutorSoftCompletionTest {
     assertEquals("gpt-5.4", result.perTask().get(0).dispatchedModel());
     verify(generations).execute(anyInt(), any(), any(), any(), any(), any());
     verify(generations)
-        .execute(anyInt(), any(), any(), any(), eq("openai"), eq("gpt-5.4"), any(), any());
+        .executeContinuation(
+            anyInt(),
+            any(),
+            any(),
+            any(),
+            eq("openai"),
+            eq("gpt-5.4"),
+            any(),
+            org.mockito.ArgumentMatchers.anyBoolean(),
+            any(),
+            any());
     verify(worker, times(2)).run(any(WorkerTaskRequest.class), any());
   }
 

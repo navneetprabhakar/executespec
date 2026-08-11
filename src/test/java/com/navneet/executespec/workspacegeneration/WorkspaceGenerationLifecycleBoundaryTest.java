@@ -124,6 +124,7 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             eq(WorkspaceGenerationState.ROLLING_BACK),
             eq(WorkspaceGenerationState.RECOVERY_FAILED),
             any(Instant.class));
+    lifecycle.release(prepared);
     verify(lease).close();
     ArgumentCaptor<TransactionDefinition> definitions =
         ArgumentCaptor.forClass(TransactionDefinition.class);
@@ -286,6 +287,7 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             eq(WorkspaceGenerationState.CHECKPOINTING),
             eq(WorkspaceGenerationState.ACCEPTED),
             any(Instant.class));
+    lifecycle.release(prepared);
     verify(lease).close();
   }
 

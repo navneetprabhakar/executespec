@@ -80,6 +80,10 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   probe permission disables the store at boot even when object access would otherwise work.
   Construction is also disabled before ADC initialization when workspace GCS is off or the bucket
   is blank; local runs must never probe credentials or attempt `gs:///local/...` checkpoints.
+- `GcsTaskCheckpointService.java` — strict, synchronous V374/V383 generation archival only. The
+  legacy async post-task export/fallback was removed because it could race the next BUILD mutation;
+  accepted-frontier advancement consumes only the exact generation archive receipt produced while
+  the coordinator still owns workspace authority.
 - `WorkspaceRestoreService.java` — Materializes a run archive when local state has expired. Absence
   of a run row or durable object key is reported as `WorkspaceArchiveUnavailableException`, which
   lets run sync distinguish a permanent lifecycle 410 from retryable GCS/platform restoration

@@ -53,24 +53,47 @@ class WorkspaceGenerationProtocolPostgresTest {
             + "now() + interval '10 minutes',now())",
         runId,
         workspaceToken.toString());
+    String unboundRun = "run-v383-unbound";
+    UUID unboundAttempt = UUID.randomUUID();
+    jdbc.update("INSERT INTO pipeline_run(run_id,status) VALUES (?, 'WORKING')", unboundRun);
     jdbc.update(
-        """
-        INSERT INTO workspace_generation_attempt(
-          id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,
-          before_generation,repositories_json,authority_digest,task_contract_digest,
-          ignored_artifact_baseline_json,ignored_artifact_baseline_digest,
-          workspace_lease_token,before_checkpoint_kind,before_checkpoint_key,
-          before_checkpoint_digest,before_checkpoint_completed_at)
-        VALUES (?,'run-v374','T1',0,1,'BUILD_TASK','PREPARED','/tmp/run-v374',?,
-          '[]'::jsonb,?,?,'{}'::jsonb,?,?,'GCS','gs://bucket/base.zip',?,NOW())
-        """,
+        "INSERT INTO workspace_generation_attempt(id,run_id,task_id,task_index,attempt_number,"
+            + "attempt_kind,state,workspace_root,authority_digest,task_contract_digest)"
+            + " VALUES (?,?,'T1',0,1,'BUILD_TASK','ADMITTED','/tmp/unbound',repeat('1',64),"
+            + "repeat('2',64))",
+        unboundAttempt,
+        unboundRun);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET state='VERIFYING',"
+                        + "candidate_generation=? WHERE id=?",
+                    candidate,
+                    unboundAttempt))
+        .rootCause()
+        .hasMessageContaining("lacks exact RUNNING LLM operation");
+    WorkspaceGenerationPostgresFixture.insertPrepared(
+        jdbc,
         attemptId,
+        runId,
+        "T1",
+        0,
+        1,
+        "/tmp/run-v374",
+        workspaceToken,
         before,
+        "[]",
         "d".repeat(64),
         contract,
+        "{}",
         "8".repeat(64),
-        workspaceToken,
-        "9".repeat(64));
+        "GCS",
+        "gs://bucket/base.zip",
+        "9".repeat(64),
+        llmContextId,
+        llmOperationId,
+        llmToken,
+        java.time.Duration.ofMillis(500));
     jdbc.update(
         "UPDATE pipeline_run SET accepted_workspace_generation=?,accepted_task_index=-1"
             + " WHERE run_id=?",
@@ -145,15 +168,9 @@ class WorkspaceGenerationProtocolPostgresTest {
                     """
 INSERT INTO workspace_generation_attempt(
   id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,
-  before_generation,repositories_json,authority_digest,task_contract_digest,
-  ignored_artifact_baseline_json,ignored_artifact_baseline_digest,
-  workspace_lease_token,before_checkpoint_kind,before_checkpoint_key,
-  before_checkpoint_digest,before_checkpoint_completed_at)
-SELECT ?,run_id,'T-race',0,1,'BUILD_TASK','PREPARED',workspace_root,
-  before_generation,repositories_json,authority_digest,task_contract_digest,
-  ignored_artifact_baseline_json,ignored_artifact_baseline_digest,
-  workspace_lease_token,before_checkpoint_kind,before_checkpoint_key,
-  before_checkpoint_digest,before_checkpoint_completed_at
+  authority_digest,task_contract_digest)
+SELECT ?,run_id,'T-race',0,1,'BUILD_TASK','ADMITTED',workspace_root,
+  authority_digest,task_contract_digest
 FROM workspace_generation_attempt WHERE id=?
 """,
                     competingAttemptId,
@@ -166,9 +183,9 @@ FROM workspace_generation_attempt WHERE id=?
                     "UPDATE workspace_generation_attempt SET state='VERIFYING',"
                         + " candidate_generation=? WHERE id=?",
                     candidate,
-                    attemptId))
+                    unboundAttempt))
         .rootCause()
-        .hasMessageContaining("without an exact LLM attempt binding");
+        .hasMessageContaining("lacks exact RUNNING LLM operation");
     assertThatThrownBy(
             () ->
                 jdbc.update(
@@ -178,38 +195,6 @@ FROM workspace_generation_attempt WHERE id=?
         .rootCause()
         .hasMessageContaining("immutable identity");
 
-    jdbc.update(
-        "INSERT INTO llm_execution_context("
-            + "id,context_type,feature,source_type,source_id,correlation_id,scope_mode,isolation_key,"
-            + "key_source_mode,allowed_providers_json,allowed_provider_models_json,"
-            + "provider_key_sources_json,model_overrides_json,routing_mode,route_snapshot_version,status,max_attempts,idempotency_key,request_fingerprint)"
-            + " VALUES (?,'PIPELINE_RUN','worker','PIPELINE',?,'correlation-v374',"
-            + "'PLATFORM_INTERNAL','platform:internal','SYSTEM','[]'::jsonb,'{}'::jsonb,"
-            + "'{}'::jsonb,'{}'::jsonb,'PROVIDER_PREFERRED',1,'QUEUED',1,?,repeat('4',64))",
-        llmContextId,
-        runId,
-        "idem-v374");
-    jdbc.update(
-        "INSERT INTO llm_execution_operation("
-            + "id,llm_execution_context_id,operation_key,operation_kind,invocation,"
-            + "operation_fingerprint,status,attempt,max_attempts,next_attempt_at,created_at,updated_at)"
-            + " VALUES (?,?,?,'RUN_BUILD_TASK',1,repeat('5',64),'QUEUED',0,1,now(),now(),now())",
-        llmOperationId,
-        llmContextId,
-        "pipeline-run:run-v374:build-task:T1");
-    jdbc.update(
-        "UPDATE llm_execution_operation SET status='RUNNING',attempt=1,lease_owner='owner-v374',"
-            + "lease_token=?::uuid,lease_expires_at=now() + interval '500 milliseconds',"
-            + "heartbeat_at=now(),not_reclaim_before=now() + interval '10 minutes',"
-            + "next_attempt_at=NULL,started_at=now(),updated_at=now() WHERE id=?",
-        llmToken.toString(),
-        llmOperationId);
-    jdbc.update(
-        "UPDATE workspace_generation_attempt SET llm_operation_id=?,llm_attempt_number=1,"
-            + "llm_lease_token=?::uuid WHERE id=?",
-        llmOperationId,
-        llmToken.toString(),
-        attemptId);
     assertThat(authorityCount(jdbc, attemptId, "MUTATING")).isEqualTo(1);
     assertThatThrownBy(
             () -> jdbc.update("DELETE FROM llm_execution_operation WHERE id=?", llmOperationId))
@@ -258,7 +243,7 @@ FROM workspace_generation_attempt WHERE id=?
                     candidate,
                     attemptId))
         .rootCause()
-        .hasMessageContaining("LLM attempt lease is not current");
+        .hasMessageContaining("lacks exact RUNNING LLM operation");
     jdbc.update(
         "UPDATE llm_execution_operation SET heartbeat_at=now(),"
             + "lease_expires_at=now() + interval '10 minutes',updated_at=now() WHERE id=?",
@@ -274,7 +259,7 @@ FROM workspace_generation_attempt WHERE id=?
                     candidate,
                     attemptId))
         .rootCause()
-        .hasMessageContaining("workspace generation run is not working");
+        .hasMessageContaining("workspace generation admission requires WORKING run");
     jdbc.update("UPDATE pipeline_run SET status='WORKING' WHERE run_id=?", runId);
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='VERIFYING', candidate_generation=?"
@@ -357,6 +342,18 @@ FROM workspace_generation_attempt WHERE id=?
         attemptId,
         runId);
 
+    WorkspaceGenerationOperationReconciler operationReconciler =
+        new WorkspaceGenerationOperationReconciler(jdbc);
+    assertThat(operationReconciler.reconcile(attemptId))
+        .isEqualTo(WorkspaceGenerationOperationReconciler.Outcome.RECONCILED);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT status FROM llm_execution_operation WHERE id=?",
+                String.class,
+                llmOperationId))
+        .isEqualTo("SUCCEEDED");
+    operationReconciler.assertRunConverged(runId);
+
     assertThat(
             jdbc.queryForObject(
                 "SELECT gcs_workspace_key FROM pipeline_run WHERE run_id=?", String.class, runId))
@@ -390,6 +387,73 @@ FROM workspace_generation_attempt WHERE id=?
                         + " WHERE run_id=?",
                     runId))
         .rootCause()
+        .hasMessageContaining("accepted workspace generation frontier is immutable");
+
+    UUID nextAttemptId = UUID.randomUUID();
+    String nextCandidate = "6".repeat(64);
+    String nextContract = "4".repeat(64);
+    WorkspaceGenerationPostgresFixture.insertPrepared(
+        jdbc,
+        nextAttemptId,
+        runId,
+        "T-checkpoint-proof",
+        1,
+        1,
+        "/tmp/run-v374",
+        workspaceToken,
+        candidate,
+        "[]",
+        "d".repeat(64),
+        nextContract,
+        "{}",
+        "8".repeat(64),
+        "GCS",
+        "gs://bucket/run-v374.zip",
+        "1".repeat(64));
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='MUTATING' WHERE id=?", nextAttemptId);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='VERIFYING',candidate_generation=? WHERE"
+            + " id=?",
+        nextCandidate,
+        nextAttemptId);
+    jdbc.update(
+        receiptInsert().replace("'FAILED',FALSE", "'PASSED',TRUE"),
+        UUID.randomUUID(),
+        nextAttemptId,
+        nextCandidate,
+        nextContract,
+        "5".repeat(64),
+        "6".repeat(64));
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='VERIFIED' WHERE id=?", nextAttemptId);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='CHECKPOINTING' WHERE id=?", nextAttemptId);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET checkpoint_kind='GCS',"
+            + "checkpoint_key='gs://bucket/run-v374-next.zip',checkpoint_generation=?,"
+            + "checkpoint_digest=?,checkpoint_completed_at=NOW() WHERE id=?",
+        nextCandidate,
+        "7".repeat(64),
+        nextAttemptId);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='ACCEPTED',resolved_at=NOW() WHERE id=?",
+        nextAttemptId);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE pipeline_run SET accepted_workspace_generation=?,accepted_task_index=1,"
+                        + "accepted_generation_attempt_id=?,accepted_checkpoint_kind='GCS',"
+                        + "accepted_checkpoint_key='gs://bucket/wrong-next.zip',"
+                        + "accepted_checkpoint_digest=?,accepted_checkpoint_completed_at=(SELECT "
+                        + "checkpoint_completed_at FROM workspace_generation_attempt WHERE id=?) "
+                        + "WHERE run_id=?",
+                    nextCandidate,
+                    nextAttemptId,
+                    "7".repeat(64),
+                    nextAttemptId,
+                    runId))
+        .rootCause()
         .hasMessageContaining("lacks exact checkpoint receipt");
 
     assertThatThrownBy(
@@ -406,51 +470,41 @@ FROM workspace_generation_attempt WHERE id=?
         .hasMessageContaining("cannot be deleted while its run exists");
 
     UUID cancelledAttemptId = UUID.randomUUID();
-    UUID cancelledLlmToken = UUID.randomUUID();
-    String cancelledLlmOperationId = "llmop-v374-cancelled";
-    jdbc.update(
-        "INSERT INTO llm_execution_operation("
-            + "id,llm_execution_context_id,operation_key,operation_kind,invocation,"
-            + "operation_fingerprint,status,attempt,max_attempts,next_attempt_at,created_at,updated_at)"
-            + " VALUES (?,?,?,'RUN_BUILD_TASK',1,repeat('7',64),'QUEUED',0,1,now(),now(),now())",
-        cancelledLlmOperationId,
-        llmContextId,
-        "pipeline-run:run-v374:build-task:T2");
-    jdbc.update(
-        "UPDATE llm_execution_operation SET status='RUNNING',attempt=1,"
-            + "lease_owner='owner-v374-cancelled',"
-            + "lease_token=?::uuid,lease_expires_at=now() + interval '10 minutes',"
-            + "heartbeat_at=now(),not_reclaim_before=now() + interval '10 minutes',"
-            + "next_attempt_at=NULL,started_at=now(),updated_at=now() WHERE id=?",
-        cancelledLlmToken.toString(),
-        cancelledLlmOperationId);
-    jdbc.update(
-        """
-        INSERT INTO workspace_generation_attempt(
-          id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,
-          before_generation,repositories_json,authority_digest,task_contract_digest,
-          ignored_artifact_baseline_json,ignored_artifact_baseline_digest,
-          workspace_lease_token,before_checkpoint_kind,before_checkpoint_key,
-          before_checkpoint_digest,before_checkpoint_completed_at)
-        VALUES (?,'run-v374','T2',1,1,'BUILD_TASK','PREPARED','/tmp/run-v374',?,
-          '[]'::jsonb,?,?,'{}'::jsonb,?,?,'GCS','gs://bucket/task-2-base.zip',?,NOW())
-        """,
+    WorkspaceGenerationPostgresFixture.insertPrepared(
+        jdbc,
         cancelledAttemptId,
+        runId,
+        "T2",
+        1,
+        1,
+        "/tmp/run-v374",
+        workspaceToken,
         candidate,
+        "[]",
         "4".repeat(64),
         contract,
+        "{}",
         "5".repeat(64),
-        workspaceToken,
+        "GCS",
+        "gs://bucket/task-2-base.zip",
         "6".repeat(64));
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='MUTATING' WHERE id=?", cancelledAttemptId);
-    jdbc.update(
-        "UPDATE workspace_generation_attempt SET llm_operation_id=?,"
-            + "llm_attempt_number=1,llm_lease_token=?::uuid WHERE id=?",
-        cancelledLlmOperationId,
-        cancelledLlmToken.toString(),
-        cancelledAttemptId);
     jdbc.update("UPDATE pipeline_run SET status='CANCELLED' WHERE run_id=?", runId);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    """
+INSERT INTO workspace_generation_attempt(
+  id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,
+  authority_digest,task_contract_digest)
+VALUES (?,'run-v374','T3',2,1,'BUILD_TASK','ADMITTED','/tmp/run-v374',?,?)
+""",
+                    UUID.randomUUID(),
+                    "4".repeat(64),
+                    contract))
+        .rootCause()
+        .hasMessageContaining("requires WORKING run");
     assertThat(authorityCount(jdbc, cancelledAttemptId, "MUTATING")).isZero();
     assertThatThrownBy(
             () ->
@@ -460,7 +514,7 @@ FROM workspace_generation_attempt WHERE id=?
                     "7".repeat(64),
                     cancelledAttemptId))
         .rootCause()
-        .hasMessageContaining("workspace generation run is not working");
+        .hasMessageContaining("workspace generation admission requires WORKING run");
 
     String recoveryRunId = "run-v374-prebind-recovery";
     UUID recoveryAttemptId = UUID.randomUUID();
@@ -473,24 +527,23 @@ FROM workspace_generation_attempt WHERE id=?
             + "now() + interval '10 minutes',now())",
         recoveryRunId,
         recoveryWorkspaceToken.toString());
-    jdbc.update(
-        """
-        INSERT INTO workspace_generation_attempt(
-          id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,
-          before_generation,repositories_json,authority_digest,task_contract_digest,
-          ignored_artifact_baseline_json,ignored_artifact_baseline_digest,
-          workspace_lease_token,before_checkpoint_kind,before_checkpoint_key,
-          before_checkpoint_digest,before_checkpoint_completed_at)
-        VALUES (?,?,'T1',0,1,'BUILD_TASK','PREPARED','/tmp/run-v374-recovery',?,
-          '[]'::jsonb,?,?,'{}'::jsonb,?,?,'GCS','gs://bucket/recovery-base.tar.gz',?,NOW())
-        """,
+    WorkspaceGenerationPostgresFixture.insertPrepared(
+        jdbc,
         recoveryAttemptId,
         recoveryRunId,
+        "T1",
+        0,
+        1,
+        "/tmp/run-v374-recovery",
+        recoveryWorkspaceToken,
         before,
+        "[]",
         "6".repeat(64),
         contract,
+        "{}",
         "7".repeat(64),
-        recoveryWorkspaceToken,
+        "GCS",
+        "gs://bucket/recovery-base.tar.gz",
         "8".repeat(64));
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='MUTATING' WHERE id=?", recoveryAttemptId);

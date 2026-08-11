@@ -92,24 +92,24 @@ class SequentialExecutorCancelCascadeTest {
    */
   private SequentialExecutor newExecutor(
       WorkerAgent worker, AgentTaskRepository taskRepo, ContextStore contextStore) {
-    return new SequentialExecutor(
-        worker,
-        mock(BuildProjectTool.class),
-        new ObjectMapper(),
-        mock(com.navneet.executespec.observability.Metrics.class),
-        mock(com.navneet.executespec.sse.SseBroadcaster.class),
-        taskRepo,
-        null, // modelResolver
-        null, // matrixProps
-        null, // retrievalService
-        null, // inLoopTestRunner
-        mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
-        contextStore,
-        null /* costTracker */,
-        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
-        mock(com.navneet.executespec.router.AvailableProviderResolver.class),
-        null /* goalContinuationAdvisor */,
-        null);
+    return SequentialExecutorTestSupervisor.attach(
+        new SequentialExecutor(
+            worker,
+            mock(BuildProjectTool.class),
+            new ObjectMapper(),
+            mock(com.navneet.executespec.observability.Metrics.class),
+            mock(com.navneet.executespec.sse.SseBroadcaster.class),
+            taskRepo,
+            null, // modelResolver
+            null, // matrixProps
+            null, // retrievalService
+            null, // inLoopTestRunner
+            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+            contextStore,
+            null /* costTracker */,
+            mock(com.navneet.executespec.router.AvailableProviderResolver.class),
+            null /* goalContinuationAdvisor */,
+            null));
   }
 
   /**
