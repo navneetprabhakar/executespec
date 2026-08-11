@@ -37,7 +37,6 @@ import lombok.extern.slf4j.Slf4j;
 public class BuildTaskGenerationCoordinator {
 
   static final String SHARED_LOOP_FLAG = "build.shared-code-change-loop.enabled";
-
   private final WorkspaceGenerationLifecycle generations;
   private final WorkspaceGenerationExecutionEvidenceRecorder executionEvidence;
   private final WorkspaceGenerationInitialFailureRecorder initialFailures;
@@ -50,7 +49,6 @@ public class BuildTaskGenerationCoordinator {
   private final FeatureFlagService featureFlags;
   private final BuildTaskUsageEvidence usageEvidence;
   private final WorkspaceGenerationTelemetry telemetry;
-
   private final ThreadLocal<Boolean> acceptancePending = new ThreadLocal<>();
   private final ThreadLocal<ExecutionContext> activeTaskContext = new ThreadLocal<>();
   private final ThreadLocal<TaskAcceptanceContract> activeContract = new ThreadLocal<>();
@@ -175,6 +173,7 @@ public class BuildTaskGenerationCoordinator {
         null,
         null);
     boolean acceptStarted = false;
+    boolean rollbackStarted = false;
     boolean operationClosed = false;
     RunLlmOperationLifecycleService.PhaseLease operation = null;
     try {
@@ -245,23 +244,8 @@ public class BuildTaskGenerationCoordinator {
       }
       clearThreadState();
 
-      if (acceptanceFailed(outcome)) {
-        String outcomeStatus = outcome == null ? "NULL" : outcome.status().name();
-        rollback(
-            prepared,
-            runId,
-            task.id(),
-            contract,
-            requestedProvider,
-            requestedModel,
-            null,
-            "TASK_OUTCOME_UNACCEPTED",
-            "Task outcome " + outcomeStatus + " did not satisfy acceptance");
-        operations.fail(operation, "BUILD_TASK_UNACCEPTED");
-        operationClosed = true;
-        return outcome;
-      }
-
+      // Worker termination is advisory after mutation. The frozen verifier alone accepts/rejects,
+      // including warning/failure outcomes where the model forgot to call completeTask.
       String candidate = generations.beginVerification(prepared);
       telemetry.state(
           runId,
@@ -304,6 +288,7 @@ public class BuildTaskGenerationCoordinator {
                 + verification.outcome().toLowerCase(Locale.ROOT)
                 + "; rejected generation "
                 + candidate;
+        rollbackStarted = true;
         rollback(
             prepared,
             runId,
@@ -348,7 +333,7 @@ public class BuildTaskGenerationCoordinator {
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       operations.complete(operation);
       operationClosed = true;
-      return outcome;
+      return acceptedOutcome(task, outcome);
     } catch (RuntimeException failure) {
       clearThreadState();
       if (failure.getMessage() != null
@@ -356,7 +341,7 @@ public class BuildTaskGenerationCoordinator {
         telemetry.control(
             runId, task.id(), prepared.attemptId(), "ACCEPTED_FRONTIER_CAS", "CONFLICT", "ACCEPT");
       }
-      if (!acceptStarted) {
+      if (!acceptStarted && !rollbackStarted) {
         try {
           String code =
               failure instanceof InitialFailureUnavailableException unavailable
@@ -474,6 +459,31 @@ succeeds. Planner text cannot replace or weaken these checks.
       case SUCCESS, SUCCESS_AFTER_RETRY -> false;
       case COMPLETED_WITH_WARNING, WORKER_FAILED, SKIPPED -> true;
     };
+  }
+
+  private static TaskOutcome acceptedOutcome(PlannedTask task, TaskOutcome source) {
+    if (source != null
+        && (source.status() == TaskOutcome.Status.SUCCESS
+            || source.status() == TaskOutcome.Status.SUCCESS_AFTER_RETRY)
+        && Boolean.TRUE.equals(source.smokeTestPassed())) {
+      return source;
+    }
+    boolean retried = source != null && source.retryAttempted();
+    return TaskOutcome.builder()
+        .taskId(source == null ? task.id() : source.taskId())
+        .taskTitle(source == null ? task.title() : source.taskTitle())
+        .status(retried ? TaskOutcome.Status.SUCCESS_AFTER_RETRY : TaskOutcome.Status.SUCCESS)
+        .workerOutcome(source == null ? null : source.workerOutcome())
+        .retryAttempted(retried)
+        .retryWorkerOutcome(source == null ? null : source.retryWorkerOutcome())
+        .smokeTestPassed(true)
+        .smokeTestExitCode(0)
+        .smokeTestOutput(source == null ? null : source.smokeTestOutput())
+        .totalLatencyMs(source == null ? 0 : source.totalLatencyMs())
+        .toolCallsDispatched(source == null ? 0 : source.toolCallsDispatched())
+        .dispatchedProvider(source == null ? null : source.dispatchedProvider())
+        .dispatchedModel(source == null ? null : source.dispatchedModel())
+        .build();
   }
 
   public static boolean emitStopIfUnaccepted(

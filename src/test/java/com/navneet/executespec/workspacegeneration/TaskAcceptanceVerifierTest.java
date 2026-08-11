@@ -215,7 +215,7 @@ class TaskAcceptanceVerifierTest {
   }
 
   @Test
-  void heldOutEndpointCheckPassesOnlyExactMethodAndPath() throws Exception {
+  void heldOutEndpointCheckPassesTheRequiredMethodAndPath() throws Exception {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     Files.createDirectories(workspace.resolve("src/main"));
     Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
@@ -232,6 +232,31 @@ class TaskAcceptanceVerifierTest {
     var result =
         verifier.verify(
             v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
+
+    assertThat(result.outcome()).isEqualTo("PASSED");
+    assertThat(result.evidenceJson()).contains("\"endpointExpectationsPassed\":true");
+  }
+
+  @Test
+  void heldOutEndpointCheckIgnoresPathParameterVariableNames() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    Files.writeString(
+        workspace.resolve("openapi.json"),
+        "{\"openapi\":\"3.0.0\",\"paths\":{\"/todos/{todo_id}\":{\"delete\":{}}}}");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(1).passed(1).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(
+            Optional.of(new DetailedResult(summary, "1 test passes", command.command(), 0)));
+
+    var result =
+        verifier.verify(
+            v2Context,
+            endpointContract("DELETE /todos/{id}"),
+            List.of("src/main/App.java", "openapi.json"));
 
     assertThat(result.outcome()).isEqualTo("PASSED");
     assertThat(result.evidenceJson()).contains("\"endpointExpectationsPassed\":true");
@@ -363,6 +388,10 @@ class TaskAcceptanceVerifierTest {
   }
 
   private static TaskAcceptanceContract endpointContract() {
+    return endpointContract("GET /health");
+  }
+
+  private static TaskAcceptanceContract endpointContract(String endpoint) {
     TaskAcceptanceContract base = failureFirstContract();
     return new TaskAcceptanceContract(
         base.schemaVersion(),
@@ -378,7 +407,7 @@ class TaskAcceptanceVerifierTest {
         base.testCommand(),
         base.requiredPaths(),
         base.requiredTestSelectors(),
-        List.of("GET /health"),
+        List.of(endpoint),
         true,
         base.allowedRepositoryScopes(),
         base.prefixChecks(),

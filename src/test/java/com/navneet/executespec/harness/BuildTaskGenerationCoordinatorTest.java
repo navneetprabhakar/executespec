@@ -285,9 +285,20 @@ class BuildTaskGenerationCoordinatorTest {
   }
 
   @Test
-  void unacceptedWorkerOutcomeRollsBackBeforeAnyVerification() {
+  void workerFailureCannotOutrankPassingServerVerification() {
     BuildTaskGenerationCoordinator.TaskStatusSink status =
         mock(BuildTaskGenerationCoordinator.TaskStatusSink.class);
+    WorkspaceGenerationLifecycle.Verification passing = verification("PASSED", true, true, 2, 0);
+    when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
+    when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/App.java"));
+    when(verifier.verify(any(), eq(contract), any())).thenReturn(passing);
+    CorrectionWorkspaceTransaction.Checkpoint candidate =
+        checkpoint("3".repeat(40), "4".repeat(40));
+    when(generations.snapshotCandidate(prepared)).thenReturn(candidate);
+    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+        .thenReturn(
+            new GcsTaskCheckpointService.CheckpointReceipt(
+                "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64), Instant.now()));
     TaskOutcome failed =
         TaskOutcome.builder()
             .taskId("T1")
@@ -297,16 +308,13 @@ class BuildTaskGenerationCoordinatorTest {
 
     TaskOutcome outcome = coordinator.execute(0, task, plan, request, () -> failed, status);
 
-    assertThat(outcome).isSameAs(failed);
-    verify(generations)
-        .rollback(
-            prepared,
-            "TASK_OUTCOME_UNACCEPTED",
-            "Task outcome WORKER_FAILED did not satisfy acceptance");
-    verify(operations).fail(operation, "BUILD_TASK_UNACCEPTED");
-    verify(generations, never()).beginVerification(any());
-    verify(verifier, never()).verify(any(), any(), any());
-    verify(generations, never()).accept(any());
+    assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.SUCCESS);
+    assertThat(outcome.workerOutcome()).isSameAs(failed.workerOutcome());
+    verify(generations).beginVerification(prepared);
+    verify(verifier).verify(any(), eq(contract), any());
+    verify(generations).accept(prepared);
+    verify(generations, never()).rollback(any(), anyString(), anyString());
+    verify(operations).complete(operation);
   }
 
   @Test
@@ -592,6 +600,10 @@ class BuildTaskGenerationCoordinatorTest {
                 "The admitted interface is not yet satisfied",
                 null,
                 List.of("GET /operator-only")));
+    WorkspaceGenerationLifecycle.Verification rejected = verification("FAILED", true, true, 1, 1);
+    when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
+    when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/app.py"));
+    when(verifier.verify(any(), eq(v2), any())).thenReturn(rejected);
 
     TaskOutcome outcome =
         coordinator.execute(
@@ -611,8 +623,8 @@ class BuildTaskGenerationCoordinatorTest {
             },
             mock(BuildTaskGenerationCoordinator.TaskStatusSink.class));
 
-    assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.WORKER_FAILED);
-    verify(generations).rollback(eq(prepared), eq("TASK_OUTCOME_UNACCEPTED"), anyString());
+    assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
+    verify(generations).rollback(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
   }
 
   private WorkspaceGenerationLifecycle.Verification verification(

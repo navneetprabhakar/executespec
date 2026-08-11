@@ -50,6 +50,7 @@ public class WorkspaceGenerationLifecycle {
   private final ObjectMapper objectMapper;
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService checkpointService;
   private final WorkspaceGenerationRecoveryService recoveryService;
+  private final WorkspaceGenerationRollbackService rollbackService;
   private final WorkspaceIgnoredArtifactGuard ignoredArtifacts;
   private final PlatformTransactionManager transactionManager;
 
@@ -370,56 +371,19 @@ public class WorkspaceGenerationLifecycle {
   }
 
   /** Restores the exact pre-attempt multi-repository trees before resolving the rejection. */
-  @Transactional
   public void rollback(Prepared prepared, String failureCode, String failureReason) {
     try {
       assertOwned(prepared);
-      WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
-      CorrectionWorkspaceTransaction.DiffEvidence diff =
-          workspaces.diffEvidence(prepared.checkpoint(), prepared.lease()::assertOwned);
-      String diffJson =
-          canonicalJson(
-              write(
-                  Map.of(
-                      "changedFiles", diff.changedFiles(),
-                      "unifiedPatch", diff.unifiedPatch(),
-                      "patchCapturedBytes", diff.patchCapturedBytes(),
-                      "patchFullBytes", diff.patchFullBytes(),
-                      "patchTruncated", diff.patchTruncated(),
-                      "patchRedacted", diff.patchRedacted())));
-      requireCas(
-          attempts.beginRollback(
-              attempt.getId(),
-              prepared.lease().ownerToken(),
-              attempt.getState(),
-              WorkspaceGenerationState.ROLLING_BACK,
-              diff.diffDigest(),
-              diffJson,
-              requireText(failureCode, "WORKSPACE_GENERATION_FAILURE_CODE_INVALID"),
-              boundedReason(failureReason),
-              Instant.now()),
-          "WORKSPACE_GENERATION_ROLLBACK_CAS_FAILED");
-      workspaces.rollback(prepared.checkpoint(), prepared.lease()::assertOwned);
-      ignoredArtifacts.cleanAttemptArtifacts(
+      rollbackService.rollback(
+          prepared.attemptId(),
+          prepared.lease().ownerToken(),
           prepared.checkpoint(),
-          attempt.getIgnoredArtifactBaselineJson(),
-          prepared.lease()::assertOwned);
-      String restored =
-          workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);
-      if (!attempt.getBeforeGeneration().equals(restored)) {
-        throw new IllegalStateException("WORKSPACE_GENERATION_ROLLBACK_UNPROVEN");
-      }
-      requireCas(
-          attempts.markRolledBack(
-              attempt.getId(),
-              prepared.lease().ownerToken(),
-              WorkspaceGenerationState.ROLLING_BACK,
-              WorkspaceGenerationState.ROLLED_BACK,
-              Instant.now()),
-          "WORKSPACE_GENERATION_ROLLED_BACK_CAS_FAILED");
+          prepared.lease()::assertOwned,
+          failureCode,
+          failureReason);
     } finally {
-      // If filesystem restoration throws, this transaction rolls the state update back to its
-      // prior unresolved phase. Recovery can then claim and replay the persisted checkpoint.
+      // Diff/rejection evidence is committed before filesystem mutation. A partial restore can
+      // therefore never erase the candidate the system rejected, and RECOVERY_FAILED is explicit.
       releaseAfterCompletion(prepared.lease());
     }
   }
@@ -552,11 +516,6 @@ public class WorkspaceGenerationLifecycle {
   private static String requireText(String value, String code) {
     if (value == null || value.isBlank()) throw new IllegalArgumentException(code);
     return value;
-  }
-
-  private static String boundedReason(String reason) {
-    if (reason == null || reason.isBlank()) return "unspecified";
-    return reason.length() <= 4000 ? reason : reason.substring(0, 4000);
   }
 
   private static void requireCas(int updated, String code) {
