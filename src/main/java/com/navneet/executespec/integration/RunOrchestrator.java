@@ -137,6 +137,7 @@ public class RunOrchestrator implements RunControlPort {
   private final OutlinePlannerAgent outlinePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
   private final SequentialExecutor executor;
+  private final com.navneet.executespec.harness.TaskStatusPersistenceService taskStatusPersistence;
   private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
       workspaceGenerationRecovery;
   private final GoalContinuationAdvisor goalContinuationAdvisor;
@@ -235,9 +236,7 @@ public class RunOrchestrator implements RunControlPort {
       brownfieldHttpContractGuard;
 
   /** Reversible workspace and durable-ledger lifecycle for automatic correction attempts. */
-  private final AutomaticCorrectionLifecycle automaticCorrectionLifecycle;
-
-  private final CorrectionValidationAdmission correctionValidationAdmission;
+  private final ContinuationActionRecorder continuationActionRecorder;
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
@@ -3692,7 +3691,7 @@ public class RunOrchestrator implements RunControlPort {
     ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
     if (candidate == null
         || action.targetTask() == null
-        || AutomaticCorrectionLifecycle.sameRoute(
+        || sameContinuationRoute(
             candidate,
             action.targetTask().dispatchedProvider(),
             action.targetTask().dispatchedModel())) {
@@ -3708,28 +3707,6 @@ public class RunOrchestrator implements RunControlPort {
           targetTaskKey);
       return Optional.empty();
     }
-    final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint;
-    final AutomaticCorrectionLifecycle.EvidenceCheckpoint correctionEvidenceCheckpoint;
-    try {
-      correctionCheckpoint =
-          automaticCorrectionLifecycle.begin(runId, targetTaskKey, rootCtx.workspaceRoot());
-      correctionEvidenceCheckpoint = automaticCorrectionLifecycle.invalidateEvidence(runId);
-    } catch (RuntimeException checkpointFailure) {
-      log.error(
-          "RunOrchestrator run={} automatic correction refused — workspace checkpoint failed: {}",
-          runId,
-          checkpointFailure.getMessage(),
-          checkpointFailure);
-      broadcaster.emit(
-          runId,
-          RunEvent.log(
-              runId,
-              targetTaskId,
-              "Automatic correction refused: the current workspace could not be checkpointed"
-                  + " safely."));
-      return Optional.empty();
-    }
-
     RunLlmOperationLifecycleService.PhaseLease postValidationOperation = null;
     if ("POST_VALIDATION_REPORT".equals(continuationActionSource(decision))) {
       postValidationOperation =
@@ -3782,7 +3759,7 @@ public class RunOrchestrator implements RunControlPort {
             limitData.used(),
             limitData.max()));
     broadcaster.emit(runId, RunEvent.log(runId, targetTaskId, summary));
-    automaticCorrectionLifecycle.recordExecuted(
+    continuationActionRecorder.recordExecuted(
         taskRow.get(),
         decision.decision().name(),
         candidate.provider(),
@@ -3793,15 +3770,9 @@ public class RunOrchestrator implements RunControlPort {
         limitData.max(),
         continuationActionSource(decision));
 
-    var task = taskRow.get();
-    var previousTaskState = automaticCorrectionLifecycle.snapshotTask(task);
-    task.setStatus("PENDING");
-    task.setStartedAt(null);
-    task.setCompletedAt(null);
-    taskRepo.save(task);
-    broadcaster.emit(runId, RunEvent.taskStatus(runId, targetTaskId, "PENDING"));
-
-    CorrectionWorkspaceTransaction.DiffEvidence correctionDiff = null;
+    workspaceGenerationRecovery.recoverRunOrThrow(runId);
+    workspaceGenerationRecovery.assertAcceptedFrontier(
+        runId, rootCtx.workspaceRoot(), "BUILD_CONTINUATION");
     try {
       ExecutionRequest correctionRequest =
           AutomaticCorrectionExecutionRequestFactory.create(
@@ -3819,9 +3790,7 @@ public class RunOrchestrator implements RunControlPort {
               contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds),
               workspaceOrigins.load(runId, selectedRepoIds));
       ExecutionResult rerunResult =
-          automaticCorrectionLifecycle.executeWithToolFence(
-              correctionCheckpoint,
-              executor,
+          executor.execute(
               correctionRequest,
               new SequentialExecutor.ResumeRequest(
                   targetTaskKey,
@@ -3843,11 +3812,8 @@ public class RunOrchestrator implements RunControlPort {
           candidate.provider().toUpperCase(Locale.ROOT),
           candidate.model());
 
-      automaticCorrectionLifecycle.assertAuthority(correctionCheckpoint);
-      automaticCorrectionLifecycle.runLintAutofix(runId, rootCtx.workspaceRoot());
-
-      String preReviewerGeneration =
-          automaticCorrectionLifecycle.currentGeneration(correctionCheckpoint);
+      workspaceGenerationRecovery.assertAcceptedFrontier(
+          runId, rootCtx.workspaceRoot(), "POST_CONTINUATION_REVIEWER");
       ProviderModel reviewerRoute = new ProviderModel(candidate.provider(), candidate.model());
       ReviewerResult rerunReviewResult = null;
       try {
@@ -3892,84 +3858,16 @@ public class RunOrchestrator implements RunControlPort {
             ex);
         rerunReviewResult = reviewerFailedResult(ex);
       }
-      AutomaticCorrectionLifecycle.ReviewAssessment reviewAssessment =
-          automaticCorrectionLifecycle.assessReadOnlyReview(
-              runId,
-              targetTaskId,
-              rootCtx.workspaceRoot(),
-              correctionCheckpoint,
-              preReviewerGeneration,
-              rerunResult,
-              rerunReviewResult);
-      correctionDiff = reviewAssessment.diff();
-      CorrectionAcceptancePolicy.Decision acceptance = reviewAssessment.decision();
-      if (!acceptance.accepted()) {
-        automaticCorrectionLifecycle.rollbackRejectedAttempt(
-            targetTaskKey,
-            correctionCheckpoint,
-            correctionEvidenceCheckpoint,
-            correctionDiff,
-            previousTaskState,
-            acceptance,
-            reviewAssessment.attemptValidation());
-        broadcaster.emit(
-            runId,
-            RunEvent.log(
-                runId,
-                targetTaskId,
-                "Automatic correction rolled back: "
-                    + acceptance.code()
-                    + " — "
-                    + acceptance.reason()));
-        if (postValidationOperation != null) {
-          runOperationLifecycle.terminateOneShot(
-              postValidationOperation, "POST_VALIDATION_CORRECTION_ROLLED_BACK");
-          postValidationOperation = null;
-        }
-        return Optional.empty();
-      }
-      automaticCorrectionLifecycle.assertAuthority(correctionCheckpoint);
-      correctionValidationAdmission.regenerateAndAssert(
-          runId,
-          rerunResult,
-          rerunReviewResult,
-          plan,
-          correctionCheckpoint,
-          reviewAssessment.workspaceGeneration());
-      if (automaticCorrectionLifecycle.rollbackIfEvidenceRegressed(
-          runId,
-          targetTaskId,
-          targetTaskKey,
-          correctionCheckpoint,
-          correctionEvidenceCheckpoint,
-          correctionDiff,
-          previousTaskState)) {
-        return Optional.empty();
-      }
-      var delta = automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
-      CorrectionWorkspaceTransaction.Accepted generations =
-          automaticCorrectionLifecycle.previewAcceptance(correctionCheckpoint);
+      workspaceGenerationRecovery.assertAcceptedFrontier(
+          runId, rootCtx.workspaceRoot(), "POST_CONTINUATION_REVIEWER");
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
       persistenceWriter.persistReview(runId, rerunReviewResult);
-      automaticCorrectionLifecycle.recordResolution(
-          targetTaskKey,
-          "ACCEPTED",
-          acceptance.code(),
-          acceptance.reason(),
-          generations.beforeGeneration(),
-          generations.afterGeneration(),
-          correctionDiff,
-          delta,
-          true);
-      automaticCorrectionLifecycle.accept(correctionCheckpoint);
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);
         postValidationOperation = null;
       }
       return Optional.of(new PostReviewContinuationResult(rerunResult, rerunReviewResult));
     } catch (Exception ex) {
-      automaticCorrectionLifecycle.rollbackFailedAttempt(
-          targetTaskKey, correctionCheckpoint, correctionEvidenceCheckpoint, correctionDiff, ex);
       if (postValidationOperation != null) {
         try {
           runOperationLifecycle.terminateOneShot(
@@ -3988,13 +3886,28 @@ public class RunOrchestrator implements RunControlPort {
           runId,
           RunEvent.log(
               runId, targetTaskId, "Post-review continuation action failed: " + ex.getMessage()));
-      automaticCorrectionLifecycle.restoreTask(targetTaskKey, previousTaskState);
+      taskStatusPersistence.persist(
+          runId,
+          targetTaskId,
+          "PARTIAL",
+          "BUILD continuation failed before terminal reconciliation",
+          null,
+          taskRow.get().getRecoveryAttempt());
       return Optional.empty();
     }
   }
 
   private record PostReviewContinuationResult(
       ExecutionResult execResult, ReviewerResult reviewResult) {}
+
+  private static boolean sameContinuationRoute(
+      ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
+    return candidate != null
+        && candidate
+            .provider()
+            .equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
+        && candidate.model().equalsIgnoreCase(dispatchedModel == null ? "" : dispatchedModel);
+  }
 
   static ReviewerResult reviewerFailedResult(Exception ex) {
     return PostReviewQualityPolicy.reviewerFailedResult(ex);

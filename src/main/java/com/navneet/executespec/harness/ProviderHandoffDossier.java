@@ -10,6 +10,7 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 
 /** Bounded, workspace-local metadata for an actual provider/model continuation handoff. */
 final class ProviderHandoffDossier {
@@ -33,6 +34,7 @@ final class ProviderHandoffDossier {
       String reason,
       String failure) {
     if (workspace == null || runId == null || taskId == null) return;
+    RunWorkspaceAuthorityService.assertWorkspaceGenerationToolDispatch(runId);
     Path target = workspace.resolve(".agent-context").resolve(FILE_NAME);
     Path temp = target.resolveSibling(FILE_NAME + ".tmp");
     try {

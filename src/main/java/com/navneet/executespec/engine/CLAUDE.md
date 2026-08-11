@@ -133,10 +133,11 @@ Three provider-neutral borrows on the worker dispatch path (default-on unless no
 - BUILD failure-delta continuity: `WorkerTaskRequest.initialFailureSnapshot` seeds auto-verify from V378's exact red count/signature and survives same-route retries. After every edit-burst verification, the active delta is pinned deterministically into any compacted dossier outside the model-generated summary, so compaction cannot silently discard the current failure.
 - context headroom (`context/ContextPlanner`): before each worker request, bind the exact worker tool schemas once, reserve requested output plus an 8% model-window safety margin, and compare against the larger of provider-reported input usage or a deterministic message/tool estimate. Unsafe headroom invokes the existing tool-pair-safe `WorkerHistoryCompactor`; unknown model metadata or missing planner dependencies preserve the legacy flag-gated trigger and provider-overflow recovery.
 - `WorkerHistoryPolicy` owns the stateless truncation, context-overflow detection, and hard-trim rules used by `WorkerAgent`; the public static wrappers remain only for compatibility with existing characterization tests.
-- `WorkerCorrectionToolFence` carries the exact durable correction workspace lease into virtual
-  threads used for parallel read dispatch and rechecks that lease before every ordinary or direct
-  tool call. A stale correction worker therefore cannot resume file, shell, build, test, finalizer,
-  or remote-tool side effects after authority has expired or moved to recovery/publication.
+- `WorkerCorrectionToolFence` carries both the exact durable correction lease (for historical
+  correction recovery) and the current V383 BUILD generation lease/fence into virtual threads used
+  for parallel dispatch. Every BUILD worker invocation and every ordinary/direct tool call fails
+  closed without the exact admitted generation, so a stale or unsupervised worker cannot resume
+  file, shell, build, test, finalizer, or remote-tool side effects.
 - Context-overflow recovery: `isContextLengthError` + compactNow → `hardTrimHistory` → ERROR (was: instant ERROR). The deterministic fallback now bounds oversized short tool envelopes while preserving assistant/tool pairing, and progress signatures use text-safe separators (no NUL byte). Pinned by `WorkerAgentOverflowRecoveryTest`.
 - `RepoOrientationService` (`worker.localization.enabled`): deterministic warm-start block (layout, identifier grep hits, resolver commands) injected into the BUILD planner cold-start and the first worker user message. The planner and worker share the same advisory evidence marker; the flag remains fail-open and default-off until a measured gate flips it.
 - `WorkerTaskRequest` gained `progressV2` + `autoVerify`. New `@RequiredArgsConstructor` deps go at the END of the field list (7 test ctor sites were churned by mid-list insertion).

@@ -46,7 +46,7 @@ class GodClassLineCeilingTest {
 
   private static Map<String, Integer> ceilings() {
     Map<String, Integer> ceilings = new LinkedHashMap<>();
-    ceilings.put("src/main/java/com/navneet/executespec/integration/RunOrchestrator.java", 4322);
+    ceilings.put("src/main/java/com/navneet/executespec/integration/RunOrchestrator.java", 4221);
     // Lowered 2026-07-22 (P1 audit-remediation): SequentialExecutor shed the legacy cross-provider
     // retry lane (RR-269) and WorkerAgent extracted helpers into ContinuationEscalationBudget /
     // WorkerAgentSupport. The ratchet only moves DOWN — these are the new measured line counts.

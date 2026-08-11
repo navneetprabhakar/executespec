@@ -112,21 +112,14 @@ class RunLifecycleServiceContinuationApprovalTest {
           mock(com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard.class);
   private final CorrectionWorkspaceTransaction correctionWorkspaceTransaction =
       mock(CorrectionWorkspaceTransaction.class);
-  private final WorkflowConfigEvidenceInspector workflowConfigEvidenceInspector =
-      mock(WorkflowConfigEvidenceInspector.class);
   private final ApprovedContinuationRouteAdmissionService approvedRouteAdmission =
       mock(ApprovedContinuationRouteAdmissionService.class);
   private final CorrectionValidationAdmission correctionValidationAdmission =
       mock(CorrectionValidationAdmission.class);
-  private final DurableCorrectionLifecycle durableCorrectionLifecycle =
-      mock(DurableCorrectionLifecycle.class);
-  private final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint =
-      new CorrectionWorkspaceTransaction.Checkpoint(
-          Path.of("/tmp/executespec-test-repository"),
-          java.util.List.of(
-              new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
-                  Path.of("/tmp/executespec-test-repository"), "head", "tree")));
-
+  private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+      workspaceGenerationRecovery =
+          mock(
+              com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService.class);
   private RunLifecycleService service;
 
   @BeforeEach
@@ -134,12 +127,6 @@ class RunLifecycleServiceContinuationApprovalTest {
     agentProps.setWorkspace(tempDir.toString());
     when(pool.executor()).thenReturn(executorService);
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
-    when(durableCorrectionLifecycle.prepare(any(), any(), any(), any(), any(), any()))
-        .thenReturn(
-            new DurableCorrectionLifecycle.Prepared(
-                UUID.fromString("33333333-3333-3333-3333-333333333333"),
-                correctionCheckpoint,
-                mock(RunWorkspaceAuthorityService.Lease.class)));
     service =
         new RunLifecycleService(
             runRepo,
@@ -174,10 +161,9 @@ class RunLifecycleServiceContinuationApprovalTest {
             effectiveRoutes,
             brownfieldHttpContractGuard,
             correctionWorkspaceTransaction,
-            durableCorrectionLifecycle,
-            workflowConfigEvidenceInspector,
             approvedRouteAdmission,
-            correctionValidationAdmission);
+            correctionValidationAdmission,
+            workspaceGenerationRecovery);
     LlmExecutionReference reference =
         new LlmExecutionReference(
             "llmctx-continuation-test", LlmExecutionScope.customer("test-org"));
@@ -236,12 +222,7 @@ class RunLifecycleServiceContinuationApprovalTest {
                 .finalTestsTotal(1)
                 .workspaceQuiescent(true)
                 .build());
-    when(correctionWorkspaceTransaction.begin(any())).thenReturn(correctionCheckpoint);
-    when(correctionWorkspaceTransaction.currentGeneration(
-            eq(correctionCheckpoint), any(Runnable.class)))
-        .thenReturn("b".repeat(64));
-    when(workflowConfigEvidenceInspector.inspect(any()))
-        .thenReturn(com.navneet.executespec.report.model.WorkflowConfigEvidence.notApplicable());
+    when(correctionWorkspaceTransaction.captureGeneration(any())).thenReturn("b".repeat(64));
     when(validationKickoff.generateValidationReport(any(), any(), any(), any()))
         .thenReturn(
             Optional.of(
@@ -262,10 +243,9 @@ class RunLifecycleServiceContinuationApprovalTest {
               when(validationReportRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(fresh));
               return fresh;
             });
-    when(correctionWorkspaceTransaction.accept(correctionCheckpoint))
-        .thenReturn(
-            new CorrectionWorkspaceTransaction.Accepted(
-                correctionCheckpoint.generation(), "b".repeat(64)));
+    when(correctionValidationAdmission.regenerateAndAssertAcceptedGeneration(
+            any(), any(), any(), any(), any(), any()))
+        .thenReturn(correctionValidationReport());
   }
 
   private static ValidationReport correctionValidationReport() {
@@ -507,7 +487,8 @@ class RunLifecycleServiceContinuationApprovalTest {
     assertThat(approval.proposalDigest()).hasSize(64);
     assertThat(request.getValue().runContext().llmExecutionContextId())
         .isEqualTo("llmctx-continuation-test");
-    assertThat(request.getValue().runContext().llmExecutionOperationAuthority()).isNotNull();
+    assertThat(request.getValue().runContext().llmExecutionOperationAuthority()).isNull();
+    assertThat(resume.getValue().mayReopenTerminalRun()).isTrue();
     assertThat(request.getValue().initialProviderSwitchesUsed()).isEqualTo(1);
     assertThat(request.getValue().initialModelStepUpsUsed()).isZero();
     assertThat(request.getValue().initialModelStepDownsUsed()).isZero();
@@ -984,18 +965,18 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(correctionValidationAdmission)
         .assertPreReview(eq(RUN_ID), eq(request.getValue().plan()), isNull(), any(Path.class));
     verify(correctionValidationAdmission)
-        .regenerateAndAssert(
+        .regenerateAndAssertAcceptedGeneration(
             eq(RUN_ID),
             eq(retryResult),
             eq(reviewResult),
             eq(request.getValue().plan()),
-            eq(correctionCheckpoint),
+            any(Path.class),
             eq("b".repeat(64)));
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
 
   @Test
-  void missingDeterministicRouteRollsBackBeforeReviewerOrValidationSpend() throws Exception {
+  void missingDeterministicRouteFailsWithoutLegacyRollbackOrMoreProviderSpend() throws Exception {
     Files.createDirectories(tempDir.resolve(RUN_ID));
     PipelineRun run =
         PipelineRun.builder()
@@ -1035,11 +1016,12 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
+    verify(correctionWorkspaceTransaction, never()).rollback(any(), any(Runnable.class));
+    verify(controlPort).terminate(eq(RUN_ID), eq("FAILED"), any(), any(), any());
     verify(reviewer, never()).review(any());
     verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
     verify(correctionValidationAdmission, never())
-        .regenerateAndAssert(any(), any(), any(), any(), any(), any());
+        .regenerateAndAssertAcceptedGeneration(any(), any(), any(), any(), any(), any());
   }
 
   @Test
@@ -1111,7 +1093,7 @@ class RunLifecycleServiceContinuationApprovalTest {
   }
 
   @Test
-  void physicalRouteMismatchPreventsAttributionReviewerAndAttestation() throws Exception {
+  void physicalRouteMismatchFailsWithoutAttributionReviewerOrLegacyRollback() throws Exception {
     Files.createDirectories(tempDir.resolve(RUN_ID));
     PipelineRun run =
         PipelineRun.builder()
@@ -1148,7 +1130,8 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
+    verify(correctionWorkspaceTransaction, never()).rollback(any(), any(Runnable.class));
+    verify(controlPort).terminate(eq(RUN_ID), eq("FAILED"), any(), any(), any());
     verify(tokenAttributor, never())
         .attributeWorkerAdditionalTask(any(), any(), anyLong(), anyLong(), any(), any());
     verify(reviewer, never()).review(any());
@@ -1187,8 +1170,7 @@ class RunLifecycleServiceContinuationApprovalTest {
                 .finalTestsTotal(5)
                 .workspaceQuiescent(true)
                 .build());
-    when(correctionWorkspaceTransaction.currentGeneration(
-            eq(correctionCheckpoint), any(Runnable.class)))
+    when(correctionWorkspaceTransaction.captureGeneration(any()))
         .thenReturn("b".repeat(64), "c".repeat(64));
     when(costTracker.snapshot(RUN_ID))
         .thenReturn(
@@ -1216,14 +1198,15 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
+    verify(correctionWorkspaceTransaction, never()).rollback(any(), any(Runnable.class));
+    verify(workspaceGenerationRecovery, atLeastOnce()).recoverRunOrThrow(RUN_ID);
+    verify(controlPort).terminate(eq(RUN_ID), eq("FAILED"), any(), any(), any());
     verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
     verify(persistenceWriter, never()).persistReview(any(), any());
   }
 
   @Test
-  void reviewerPhysicalRouteMismatchRollsBackWithoutReviewerAttributionOrValidation()
-      throws Exception {
+  void reviewerPhysicalRouteMismatchFailsWithoutLegacyRollbackOrValidation() throws Exception {
     Files.createDirectories(tempDir.resolve(RUN_ID));
     PipelineRun run =
         PipelineRun.builder()
@@ -1265,12 +1248,13 @@ class RunLifecycleServiceContinuationApprovalTest {
     service.approveContinuation(RUN_ID, TASK_ID);
     runnable.getValue().run();
 
-    verify(correctionWorkspaceTransaction).rollback(eq(correctionCheckpoint), any(Runnable.class));
+    verify(correctionWorkspaceTransaction, never()).rollback(any(), any(Runnable.class));
+    verify(controlPort).terminate(eq(RUN_ID), eq("FAILED"), any(), any(), any());
     verify(reviewer).review(any());
     verify(tokenAttributor, never())
         .attributeReviewerAdditionalFromAttempt(any(), anyLong(), anyLong(), any());
     verify(correctionValidationAdmission, never())
-        .regenerateAndAssert(any(), any(), any(), any(), any(), any());
+        .regenerateAndAssertAcceptedGeneration(any(), any(), any(), any(), any(), any());
     verify(persistenceWriter, never()).persistReview(any(), any());
   }
 

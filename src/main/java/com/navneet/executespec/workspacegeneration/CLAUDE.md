@@ -25,6 +25,13 @@ closed while publication is pending, and the completion receipt uses an independ
 V381 requires the exact current database workspace authority for rollback intent and resolution.
 V382 permits only the byte-identical `PENDING → COMPLETED` task receipt on a resolved attempt; all
 generation, rejection, checkpoint, authority and task-transition identity evidence stays immutable.
+V383 moves pre-dispatch admission into the same protocol:
+`ADMITTED → OPERATION_CLAIMED → AUTHORITY_ACQUIRED → PREPARED`. The admission transaction locks the
+run then task, creates the generation, claims the exact physical LLM operation, and binds it before
+any provider or mutating tool can run. Fresh and resumed BUILD tasks, same-route smoke retries,
+provider/model changes, approved continuations, and correction regeneration all use this path.
+`WorkspaceGenerationTerminalReconciler` converges task receipts, accepted task state, and the bound
+LLM operation after acceptance/rollback and during startup recovery.
 The worker outcome is advisory even when it is `COMPLETED_WITH_WARNING` or `WORKER_FAILED`: after
 authorized mutation, the frozen server verifier always decides acceptance. A passing receipt
 normalizes the task outcome to success while retaining raw worker evidence; a failed receipt rolls
@@ -38,8 +45,9 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
 
 ## Invariants
 
-- Persist PREPARED, its exact before checkpoint, frozen task/authority digests, ignored-artifact
-  baseline, and workspace lease before provider or tool mutation.
+- Persist ADMITTED, the exact physical operation claim, workspace authority, PREPARED, its exact
+  before checkpoint, frozen task/authority digests, ignored-artifact baseline, and workspace lease
+  before provider or tool mutation.
 - Bind MUTATING to the exact RUNNING `llm_execution_operation` attempt/lease. Every LLM and tool
   dispatch repeats the database join fence. Provider return is not authority: the same join is
   repeated with the exact expected state at MUTATING, VERIFYING, VERIFIED, and CHECKPOINTING before
@@ -75,6 +83,8 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   `UNAVAILABLE` rather than disappearing.
 - A provider/model change cannot continue inside a mutable generation attempt. It must create a
   new PREPARED attempt from the durable accepted frontier with its own exact LLM/workspace lease.
+- Same-provider build-smoke retry is also a fresh attempt. No correction lease or legacy task reopen
+  flag can bypass `BuildTaskGenerationCoordinator`.
 - Candidate acceptance requires an exact generation archive acknowledgement. Production may not
   use a same-host receipt.
 - `pipeline_run.accepted_workspace_generation`, task index, accepted attempt, and the exact internal
@@ -119,8 +129,9 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   `V379__persist_workspace_origin.sql` (nullable staged origin for new writes; no historical
   rewrite or premature NOT NULL tightening),
   `V380__durable_workspace_generation_task_transition.sql`,
-  `V381__fence_workspace_generation_rollback_authority.sql`, and
-  `V382__allow_workspace_generation_task_transition_receipts.sql`.
+  `V381__fence_workspace_generation_rollback_authority.sql`,
+  `V382__allow_workspace_generation_task_transition_receipts.sql`, and
+  `V383__fence_build_attempt_admission.sql`.
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
@@ -129,15 +140,19 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   token/cost tuple are write-once. Run detail deliberately omits prompts, patches and failure
   reasons while exposing bounded customer-safe proof and the newest immutable verification receipt.
 - V378's executed initial-probe JSON and observation timestamp are independently write-once.
-- `WorkspaceGenerationRecoveryService` runs before generic startup replay and reconciles the
-  ACCEPTED→task-COMPLETE crash window.
+- `WorkspaceGenerationRecoveryService` runs before generic startup replay and resolves pre-dispatch
+  crashes without filesystem access, restores mature mutation crashes, and invokes terminal
+  reconciliation for the ACCEPTED→task-COMPLETE and terminal LLM-operation windows.
 
 ## Tests
 
 - `WorkspaceGenerationProtocolPostgresTest`: real PostgreSQL transitions, exact task-operation and
   workspace-owner/expiry/LLM-expiry/pause/cancel fences, competing-active-attempt rejection,
-  single-winner recovery CAS, contiguous frontier monotonicity, pre-bind recovery, receipt binding
-  and retention.
+  single-winner recovery CAS, contiguous frontier monotonicity, atomic early admission/operation
+  claim, exact next-checkpoint admission, receipt binding and retention.
+- `WorkspaceGenerationTaskTransitionPostgresTest`: real-PostgreSQL task/run locking, cancellation
+  precedence, rollback publication, stale-transition rejection, and terminal convergence.
+- `WorkspaceGenerationTerminalReconcilerTest`: accepted/rolled-back task and operation convergence.
 - `WorkspaceGenerationAuthorityQueryContractTest`: the production JPA join takes the caller's exact
   lifecycle state and cannot regress to a hard-coded MUTATING-only query.
 - `MigratedSchemaBootSmokeTest`: all migrations + Hibernate validation.

@@ -5,12 +5,10 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
-import com.navneet.executespec.harness.TaskStatusPersistenceService;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService.Authority;
@@ -37,6 +35,9 @@ public class WorkspaceGenerationRecoveryService {
 
   static final List<WorkspaceGenerationState> UNRESOLVED =
       List.of(
+          WorkspaceGenerationState.ADMITTED,
+          WorkspaceGenerationState.OPERATION_CLAIMED,
+          WorkspaceGenerationState.AUTHORITY_ACQUIRED,
           WorkspaceGenerationState.PREPARED,
           WorkspaceGenerationState.MUTATING,
           WorkspaceGenerationState.VERIFYING,
@@ -50,8 +51,7 @@ public class WorkspaceGenerationRecoveryService {
   private final RunWorkspaceAuthorityService authorities;
   private final ObjectMapper objectMapper;
   private final PlatformTransactionManager transactionManager;
-  private final TaskStatusPersistenceService taskStatuses;
-  private final WorkspaceGenerationTaskTransitionService taskTransitions;
+  private final WorkspaceGenerationTerminalReconciler terminalReconciler;
   private final GcsWorkspaceStore gcsStore;
   private final WorkspaceGenerationArchiveService generationArchives;
   private final PipelineRunRepository runs;
@@ -77,9 +77,7 @@ public class WorkspaceGenerationRecoveryService {
           boundary);
       throw new IllegalStateException("WORKSPACE_GENERATION_UNRESOLVED");
     }
-    if (attempts.existsByRunIdAndTaskTransitionState(runId, "PENDING")) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_TASK_TRANSITION_PENDING");
-    }
+    terminalReconciler.assertConverged(runId);
   }
 
   /** Proves the current bytes are exactly the durable accepted BUILD frontier. */
@@ -110,7 +108,7 @@ public class WorkspaceGenerationRecoveryService {
             .findById(run.getAcceptedGenerationAttemptId())
             .orElseThrow(
                 () -> new IllegalStateException("WORKSPACE_GENERATION_ACCEPTANCE_MISSING"));
-    assertExactAcceptedAttempt(runId, currentGeneration, run, accepted);
+    WorkspaceGenerationAcceptanceProof.assertExact(runId, currentGeneration, run, accepted);
   }
 
   public void assertAcceptedFrontier(String runId, Path workspaceRoot) {
@@ -146,7 +144,7 @@ public class WorkspaceGenerationRecoveryService {
               }
             });
     ensureAcceptedWorkspaceAvailable(runId);
-    reconcileAcceptedTask(runId);
+    terminalReconciler.reconcileRun(runId);
   }
 
   /** Restores the latest accepted frontier on a replacement node before generic run replay. */
@@ -163,7 +161,8 @@ public class WorkspaceGenerationRecoveryService {
             .findById(run.getAcceptedGenerationAttemptId())
             .orElseThrow(
                 () -> new IllegalStateException("WORKSPACE_GENERATION_ACCEPTANCE_MISSING"));
-    assertExactAcceptedAttempt(runId, run.getAcceptedWorkspaceGeneration(), run, accepted);
+    WorkspaceGenerationAcceptanceProof.assertExact(
+        runId, run.getAcceptedWorkspaceGeneration(), run, accepted);
     Path root = currentWorkspaceRoot(accepted.getRunId());
     if (acceptedGenerationPresent(accepted, root)) return;
     Lease lease =
@@ -188,29 +187,6 @@ public class WorkspaceGenerationRecoveryService {
       }
     } finally {
       lease.close();
-    }
-  }
-
-  private static void assertExactAcceptedAttempt(
-      String runId,
-      String expectedGeneration,
-      PipelineRun run,
-      WorkspaceGenerationAttempt accepted) {
-    if (expectedGeneration == null
-        || accepted.getState() != WorkspaceGenerationState.ACCEPTED
-        || !runId.equals(accepted.getRunId())
-        || !expectedGeneration.equals(accepted.getCandidateGeneration())
-        || !Objects.equals(run.getAcceptedTaskIndex(), accepted.getTaskIndex())
-        || run.getAcceptedCheckpointKind() == null
-        || run.getAcceptedCheckpointKey() == null
-        || run.getAcceptedCheckpointDigest() == null
-        || run.getAcceptedCheckpointCompletedAt() == null
-        || !Objects.equals(run.getAcceptedCheckpointKind(), accepted.getCheckpointKind())
-        || !Objects.equals(run.getAcceptedCheckpointKey(), accepted.getCheckpointKey())
-        || !Objects.equals(run.getAcceptedCheckpointDigest(), accepted.getCheckpointDigest())
-        || !Objects.equals(
-            run.getAcceptedCheckpointCompletedAt(), accepted.getCheckpointCompletedAt())) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_ACCEPTANCE_INVALID");
     }
   }
 
@@ -243,10 +219,7 @@ public class WorkspaceGenerationRecoveryService {
             failure);
       }
     }
-    attempts.findByStateOrderByCreatedAtAsc(WorkspaceGenerationState.ACCEPTED).stream()
-        .map(WorkspaceGenerationAttempt::getRunId)
-        .distinct()
-        .forEach(this::reconcileAcceptedTask);
+    terminalReconciler.reconcileAllKnownTerminalRuns();
     telemetry.unresolved(attempts.findByStateInOrderByCreatedAtAsc(UNRESOLVED).size());
   }
 
@@ -275,6 +248,28 @@ public class WorkspaceGenerationRecoveryService {
           "ROLLBACK",
           "CLAIMED",
           WorkspaceGenerationState.ROLLING_BACK.name());
+      if (preDispatch(stale.getState())) {
+        int resolved =
+            transactions.execute(
+                ignored ->
+                    attempts.markPreDispatchRolledBack(
+                        row.getId(),
+                        recoveryLease.ownerToken(),
+                        WorkspaceGenerationState.ROLLING_BACK,
+                        WorkspaceGenerationState.ROLLED_BACK,
+                        Instant.now()));
+        requireCas(resolved, "WORKSPACE_GENERATION_PRE_DISPATCH_RECOVERY_FAILED");
+        rolledBack = true;
+        telemetry.recovery(
+            row.getRunId(),
+            row.getTaskId(),
+            row.getId(),
+            "PRE_DISPATCH",
+            "SUCCEEDED",
+            WorkspaceGenerationState.ROLLED_BACK.name());
+        terminalReconciler.reconcileRolledBack(require(row.getId()));
+        return;
+      }
       CorrectionWorkspaceTransaction.Checkpoint checkpoint = readCheckpoint(row, recoveryLease);
       recoveryLease.assertOwned();
       CorrectionWorkspaceTransaction.DiffEvidence rejected =
@@ -354,22 +349,15 @@ public class WorkspaceGenerationRecoveryService {
     } finally {
       recoveryLease.close();
     }
-    if (rolledBack) taskTransitions.publish(stale.getId());
+    if (rolledBack) {
+      terminalReconciler.reconcileRolledBack(require(stale.getId()));
+    }
   }
 
-  /** Closes ACCEPTED -> task COMPLETE crash window from immutable DB acceptance proof. */
-  private void reconcileAcceptedTask(String runId) {
-    PipelineRun run =
-        runs.findById(runId)
-            .orElseThrow(() -> new IllegalStateException("WORKSPACE_GENERATION_RUN_MISSING"));
-    if (run.getAcceptedGenerationAttemptId() == null) return;
-    WorkspaceGenerationAttempt accepted =
-        attempts
-            .findById(run.getAcceptedGenerationAttemptId())
-            .orElseThrow(
-                () -> new IllegalStateException("WORKSPACE_GENERATION_ACCEPTANCE_MISSING"));
-    assertExactAcceptedAttempt(runId, run.getAcceptedWorkspaceGeneration(), run, accepted);
-    taskStatuses.persist(runId, accepted.getTaskId(), "COMPLETE", null, null, null);
+  private static boolean preDispatch(WorkspaceGenerationState state) {
+    return state == WorkspaceGenerationState.ADMITTED
+        || state == WorkspaceGenerationState.OPERATION_CLAIMED
+        || state == WorkspaceGenerationState.AUTHORITY_ACQUIRED;
   }
 
   private CorrectionWorkspaceTransaction.Checkpoint readCheckpoint(

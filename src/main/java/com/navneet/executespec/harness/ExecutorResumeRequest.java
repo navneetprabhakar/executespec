@@ -15,13 +15,15 @@ public class ExecutorResumeRequest {
   private final String approvedModel;
   private final RunContinuationDecision approvedAction;
   private final String approvedProposalDigest;
+  private final boolean mayReopenTerminalRun;
 
   ExecutorResumeRequest(
       String targetTaskId,
       String approvedProvider,
       String approvedModel,
       RunContinuationDecision approvedAction,
-      String approvedProposalDigest) {
+      String approvedProposalDigest,
+      boolean mayReopenTerminalRun) {
     boolean hasProvider = approvedProvider != null && !approvedProvider.isBlank();
     boolean hasModel = approvedModel != null && !approvedModel.isBlank();
     if (hasProvider != hasModel) {
@@ -42,6 +44,7 @@ public class ExecutorResumeRequest {
     this.approvedAction = approvedAction;
     this.approvedProposalDigest =
         approvedProposalDigest == null ? null : approvedProposalDigest.trim().toLowerCase();
+    this.mayReopenTerminalRun = mayReopenTerminalRun;
   }
 
   public String targetTaskId() {
@@ -64,6 +67,10 @@ public class ExecutorResumeRequest {
     return approvedProposalDigest;
   }
 
+  public boolean mayReopenTerminalRun() {
+    return mayReopenTerminalRun;
+  }
+
   boolean hasApprovedRoute() {
     return approvedProvider != null;
   }
@@ -78,6 +85,11 @@ public class ExecutorResumeRequest {
             ? targetTaskId.substring(prefix.length())
             : targetTaskId;
     return normalizedTarget.equals(logicalTaskId);
+  }
+
+  boolean targets(String runId, String logicalTaskId) {
+    if (targetTaskId == null || logicalTaskId == null) return false;
+    return shortTargetTaskId(runId).equals(logicalTaskId);
   }
 
   String shortTargetTaskId(String runId) {
