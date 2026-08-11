@@ -261,7 +261,7 @@ for i in $(seq 1 20); do
 done
 
 EXPECTED_PROCESS="$(printf '%s\n' "EXECUTESPEC_RELEASE_SOURCE_SHA=$SHA" "EXECUTESPEC_RELEASE_ARTIFACT_SHA256=$JAR_SHA256" "EXECUTESPEC_RELEASE_ATTEMPT_ID=$DEPLOY_ATTEMPT_ID" | sort)"
-OBSERVED_PROCESS="$("${SSH_BASE[@]}" --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo tr '\\0' '\\n' < /proc/\$PID/environ | grep '^EXECUTESPEC_RELEASE_' | sort" | tr -d '\r')"
+OBSERVED_PROCESS="$("${SSH_BASE[@]}" --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo cat /proc/\$PID/environ | tr '\\0' '\\n' | grep '^EXECUTESPEC_RELEASE_' | sort" | tr -d '\r')"
 [ "$OBSERVED_PROCESS" = "$EXPECTED_PROCESS" ] || {
   echo "Healthy JVM does not carry the exact release tuple" >&2; exit 9; }
 

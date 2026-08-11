@@ -617,7 +617,7 @@ jobs:
             --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
-            --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo tr '\\0' '\\n' < /proc/\$PID/environ | grep '^EXECUTESPEC_RELEASE_' | sort" \
+            --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo cat /proc/\$PID/environ | tr '\\0' '\\n' | grep '^EXECUTESPEC_RELEASE_' | sort" \
             | tr -d '\r')
           if [ "$OBSERVED" != "$EXPECTED" ]; then
             echo "::error::Healthy JVM release tuple mismatch."
