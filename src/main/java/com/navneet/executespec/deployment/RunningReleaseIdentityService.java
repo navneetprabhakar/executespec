@@ -1,9 +1,5 @@
 package com.navneet.executespec.deployment;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -13,45 +9,48 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Reads the immutable deployment-host marker used by the deploy workflow's RUNNING_SHA gate. */
+/** Attests the release tuple captured by this JVM at startup. */
 @Service
 public class RunningReleaseIdentityService {
 
-  static final String AUTHORITY = "DEPLOYMENT_HOST:/opt/app/RUNNING_SHA";
-  private static final Path CANONICAL_RUNNING_SHA = Path.of("/opt/app/RUNNING_SHA");
+  static final String AUTHORITY = "PROCESS_STARTUP_ENVIRONMENT";
   private static final Pattern COMMIT_SHA = Pattern.compile("[a-f0-9]{40}");
+  private static final Pattern ARTIFACT_SHA256 = Pattern.compile("[a-f0-9]{64}");
+  private static final Pattern ATTEMPT_ID = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
 
-  private final Path runningShaFile;
-  private final String authority;
+  private final String runningSha;
+  private final String artifactSha256;
+  private final String deploymentAttemptId;
 
   public RunningReleaseIdentityService(
-      @Value("${executespec.release.running-sha-file:/opt/app/RUNNING_SHA}")
-          String runningShaFile) {
-    this.runningShaFile = Path.of(runningShaFile).toAbsolutePath().normalize();
-    this.authority =
-        this.runningShaFile.equals(CANONICAL_RUNNING_SHA)
-            ? AUTHORITY
-            : "CONFIGURED_FILE:" + this.runningShaFile;
+      @Value("${EXECUTESPEC_RELEASE_SOURCE_SHA:}") String runningSha,
+      @Value("${EXECUTESPEC_RELEASE_ARTIFACT_SHA256:}") String artifactSha256,
+      @Value("${EXECUTESPEC_RELEASE_ATTEMPT_ID:}") String deploymentAttemptId) {
+    this.runningSha = normalize(runningSha);
+    this.artifactSha256 = normalize(artifactSha256);
+    this.deploymentAttemptId = deploymentAttemptId == null ? "" : deploymentAttemptId.trim();
   }
 
   public ReleaseIdentity read() {
-    final String sha;
-    try {
-      sha =
-          Files.readString(runningShaFile, StandardCharsets.US_ASCII)
-              .trim()
-              .toLowerCase(Locale.ROOT);
-    } catch (IOException unavailable) {
-      throw new ResponseStatusException(
-          HttpStatus.SERVICE_UNAVAILABLE, "RUNNING_RELEASE_IDENTITY_UNAVAILABLE", unavailable);
-    }
-    if (!COMMIT_SHA.matcher(sha).matches()) {
+    if (!COMMIT_SHA.matcher(runningSha).matches()
+        || !ARTIFACT_SHA256.matcher(artifactSha256).matches()
+        || !ATTEMPT_ID.matcher(deploymentAttemptId).matches()) {
       throw new ResponseStatusException(
           HttpStatus.SERVICE_UNAVAILABLE, "RUNNING_RELEASE_IDENTITY_INVALID");
     }
-    return new ReleaseIdentity(1, sha, authority, Instant.now());
+    return new ReleaseIdentity(
+        2, runningSha, artifactSha256, deploymentAttemptId, AUTHORITY, Instant.now());
+  }
+
+  private static String normalize(String value) {
+    return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
   }
 
   public record ReleaseIdentity(
-      int schemaVersion, String runningSha, String authority, Instant readAt) {}
+      int schemaVersion,
+      String runningSha,
+      String artifactSha256,
+      String deploymentAttemptId,
+      String authority,
+      Instant readAt) {}
 }

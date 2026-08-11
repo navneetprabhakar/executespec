@@ -641,6 +641,8 @@ class BuildTaskGenerationCoordinatorTest {
         0,
         0,
         "{}",
+        "TEST",
+        "TEST",
         started,
         started.plusSeconds(1));
   }

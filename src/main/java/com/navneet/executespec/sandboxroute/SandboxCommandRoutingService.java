@@ -169,6 +169,11 @@ public class SandboxCommandRoutingService {
         reason);
   }
 
+  /** Immutable image identity included in higher-level executable-proof receipts. */
+  public String runtimeImageIdentity() {
+    return properties.getImage();
+  }
+
   public record Readiness(
       boolean enabled,
       boolean lifecycleEnabled,

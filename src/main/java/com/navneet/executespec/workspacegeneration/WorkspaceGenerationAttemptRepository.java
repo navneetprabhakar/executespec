@@ -23,6 +23,10 @@ public interface WorkspaceGenerationAttemptRepository
 
   List<WorkspaceGenerationAttempt> findByStateOrderByCreatedAtAsc(WorkspaceGenerationState state);
 
+  List<WorkspaceGenerationAttempt> findByTaskTransitionStateOrderByUpdatedAtAsc(String state);
+
+  boolean existsByRunIdAndTaskTransitionState(String runId, String state);
+
   @Query(
       "SELECT COALESCE(MAX(a.attemptNumber), 0) FROM WorkspaceGenerationAttempt a "
           + "WHERE a.runId = :runId AND a.taskId = :taskId")
@@ -192,9 +196,10 @@ public interface WorkspaceGenerationAttemptRepository
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :rolledBack, "
-          + "a.resolvedAt = :now, a.updatedAt = :now "
+          + "a.resolvedAt = :now, a.taskTransitionKind = 'MARK_PARTIAL', "
+          + "a.taskTransitionState = 'PENDING', a.updatedAt = :now "
           + "WHERE a.id = :id AND a.workspaceLeaseToken = :token "
-          + "AND a.state = :rollingBack")
+          + "AND a.state = :rollingBack AND a.recoveryLeaseToken IS NULL")
   int markRolledBack(
       @Param("id") UUID id,
       @Param("token") UUID token,
@@ -209,7 +214,7 @@ public interface WorkspaceGenerationAttemptRepository
           + "a.recoveryFailureReason = COALESCE(a.recoveryFailureReason, :reason), "
           + "a.recoveryFailureAt = COALESCE(a.recoveryFailureAt, :now), a.updatedAt = :now "
           + "WHERE a.id = :id AND a.workspaceLeaseToken = :token "
-          + "AND a.state = :rollingBack")
+          + "AND a.state = :rollingBack AND a.recoveryLeaseToken IS NULL")
   int markRollbackFailed(
       @Param("id") UUID id,
       @Param("token") UUID workspaceToken,
@@ -222,7 +227,8 @@ public interface WorkspaceGenerationAttemptRepository
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :rolledBack, "
-          + "a.resolvedAt = :now, a.updatedAt = :now "
+          + "a.resolvedAt = :now, a.taskTransitionKind = 'REOPEN_PENDING', "
+          + "a.taskTransitionState = 'PENDING', a.updatedAt = :now "
           + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "
           + "AND a.state = :rollingBack")
   int markRecoveredRolledBack(
@@ -247,6 +253,27 @@ public interface WorkspaceGenerationAttemptRepository
       @Param("reason") String reason,
       @Param("rollingBack") WorkspaceGenerationState rollingBack,
       @Param("recoveryFailed") WorkspaceGenerationState recoveryFailed,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.taskTransitionState = 'COMPLETED', "
+          + "a.taskTransitionCompletedAt = :now, a.updatedAt = :now "
+          + "WHERE a.id = :id AND a.taskTransitionKind = :kind "
+          + "AND a.taskTransitionState = 'PENDING'")
+  int completeTaskTransition(
+      @Param("id") UUID id, @Param("kind") String kind, @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.taskTransitionFailureReason = :reason, "
+          + "a.taskTransitionFailureAt = :now, a.updatedAt = :now "
+          + "WHERE a.id = :id AND a.taskTransitionKind = :kind "
+          + "AND a.taskTransitionState = 'PENDING'")
+  int recordTaskTransitionFailure(
+      @Param("id") UUID id,
+      @Param("kind") String kind,
+      @Param("reason") String reason,
       @Param("now") Instant now);
 
   @Query(

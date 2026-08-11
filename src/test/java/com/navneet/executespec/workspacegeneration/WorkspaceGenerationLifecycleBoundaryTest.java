@@ -24,6 +24,7 @@ import com.navneet.executespec.state.repository.PipelineRunMutationRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -124,6 +125,14 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             eq(WorkspaceGenerationState.RECOVERY_FAILED),
             any(Instant.class));
     verify(lease).close();
+    ArgumentCaptor<TransactionDefinition> definitions =
+        ArgumentCaptor.forClass(TransactionDefinition.class);
+    verify(transactions, times(2)).getTransaction(definitions.capture());
+    assertThat(definitions.getAllValues())
+        .allSatisfy(
+            definition ->
+                assertThat(definition.getPropagationBehavior())
+                    .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW));
   }
 
   @Test

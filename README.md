@@ -168,7 +168,7 @@ Generated project explanations can ground narrowly scoped behavior in digest-val
 exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
 treated as authority.
 
-The current deployment candidate advances the migration source head to V374. V354 adds
+The current deployment candidate advances the migration source head to V382. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -207,8 +207,10 @@ cross-node checkpoint storage, and local-hands BUILD remains blocked until the c
 the same generation protocol.
 V375 preserves original rejection and rejected-diff evidence separately from the first recovery
 failure, so crash recovery cannot rewrite causality. Ignored dependency/cache roots are purged at
-task entry and before acceptance (plus rollback/recovery): a task may install derived dependencies
-for deterministic verification, but those bytes never cross a task or node boundary. Run detail
+task entry and before acceptance (plus rollback/recovery). V380 durably couples rollback to replayable `MARK_PARTIAL` or
+`REOPEN_PENDING` task-row publication; downstream admission remains closed until its independent
+receipt commits. A task may install derived dependencies for deterministic verification, but those
+bytes never cross a task or node boundary. Run detail
 exposes a bounded, patch-free generation-attempt ledger and the Evidence view highlights rejected
 or unresolved attempts using stable codes and immutable digests.
 V376 adds the default-off `build.shared-code-change-loop.enabled` rollout control. When enabled,
@@ -226,6 +228,12 @@ and the latest deterministic failure is pinned outside any generated history-com
 Hidden endpoint assertions are omitted from both the worker directive and customer API. Typed
 `WORKSPACE_GENERATION` SSE, metrics, and Evidence UI facts keep candidate, per-check verification,
 rollback, and accepted frontier separate.
+Acceptance checks carry an explicit proof strength. A task contract that requires
+`RUNTIME_CONTRACT` cannot be satisfied by a green build or generic test count. The qualified
+Python HTTP adapter runs an immutable hidden CRUD/runtime contract inside a content-addressed,
+non-root, network-none container using only its pinned offline FastAPI dependency kit. Unsupported
+greenfield HTTP stacks fail before provider spend; malformed OpenAPI, undeclared statuses,
+schema-invalid responses, crashes, non-persistent mutations, and route aliases fail closed.
 Route changes enter a fresh physical generation/LLM attempt before replacement dispatch. Customer
 BUILD ZIP export holds publication authority through file traversal and binds the archive to the
 accepted frontier with `X-ExecuteSpec-Workspace-Generation`; a lease loss aborts and removes the
@@ -345,7 +353,7 @@ egress is required before the four runtime flags can be enabled.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL/pgvector (local container in the current single-VM deployment; managed Cloud SQL remains supported), Flyway migrations head V374 | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/` |
+| Database            | PostgreSQL/pgvector (local container in the current single-VM deployment; managed Cloud SQL remains supported), Flyway migrations head V382 | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/` |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -357,7 +365,7 @@ egress is required before the four runtime flags can be enabled.
 | Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reads `/opt/app/RUNNING_SHA` back from the target host and fails on any target-SHA mismatch before health verification. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reconciles an atomic source/artifact/attempt host tuple, verifies the healthy JVM's startup tuple, then generation-CAS-publishes `CURRENT_SHA`. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 | Cloud               | GCP us-east4 — private 4-vCPU/8-GiB GCE VM, local PostgreSQL + Redis, Cloud NAT, and Cloudflare Tunnel at `app.executespec.ai`; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`infra/SINGLE_VM.md`](infra/SINGLE_VM.md), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
 Browser session hydration is fail-visible: protected routes retain a valid session across a
@@ -484,8 +492,9 @@ provider call, flag mutation, or deployment. `--execute` additionally requires
 `BUILD_QUAL_AUTHORIZATION_ID`, credentials, the exact candidate SHA, reviewed controls, and a
 read-only pre-submit proof that `build.shared-code-change-loop.enabled=true`; that proof is repeated
 immediately before each paid submission. It also compares the candidate SHA with the SUPER_ADMIN
-no-store `GET /api/admin/release-identity` response, whose authority is the deploy workflow's
-`/opt/app/RUNNING_SHA`; missing, malformed or mismatched identity aborts before run creation.
+no-store `GET /api/admin/release-identity` response, whose authority is the serving JVM's
+startup-captured source SHA, artifact SHA-256 and deployment-attempt tuple; missing, malformed or
+mismatched identity aborts before run creation.
 Accepted artifacts persist that attested SHA, canonical authority and live-read timestamp;
 candidate results are rejected unless the attested SHA equals the frozen candidate release and the accepted attempt
 also contains an observed failure-first result and frozen acceptance checks. The harness never

@@ -23,6 +23,19 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /root/.cache /root/.npm
 
+# Runtime-contract dependencies are downloaded at image-build time and installed per acceptance
+# attempt from this immutable offline wheelhouse. Runtime containers retain --network none; a
+# generated requirements file is validation input, never a pip command or an egress authority.
+COPY python-http-runtime.lock /opt/executespec/runtime/python-http-runtime.lock
+RUN mkdir -p /opt/executespec/runtime/wheels \
+    && pip3 download --only-binary=:all: --no-cache-dir \
+      --dest /opt/executespec/runtime/wheels \
+      --requirement /opt/executespec/runtime/python-http-runtime.lock \
+    && find /opt/executespec/runtime/wheels -type f -exec chmod 0444 {} + \
+    && chmod 0444 /opt/executespec/runtime/python-http-runtime.lock
+COPY python-http-acceptance.sh /opt/executespec/runtime/python-http-acceptance.sh
+RUN chmod 0555 /opt/executespec/runtime/python-http-acceptance.sh
+
 # CONTAINER_STRICT_V1 overrides the user with 65532:65532 and mounts /tmp as a bounded tmpfs.
 ENV HOME=/tmp
 WORKDIR /workspace

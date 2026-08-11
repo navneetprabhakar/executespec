@@ -165,6 +165,7 @@ public class RunWorkspaceAuthorityService {
                  SET lease_expires_at = NOW() + (? * INTERVAL '1 millisecond'),
                      heartbeat_at = NOW(), updated_at = NOW()
                WHERE run_id = ? AND owner_token = ? AND authority_type = ?
+                 AND lease_expires_at >= NOW()
               """,
               LEASE_TTL.toMillis(),
               lease.runId(),
@@ -179,18 +180,22 @@ public class RunWorkspaceAuthorityService {
   }
 
   public void assertOwned(Lease lease) {
-    Integer count =
-        jdbc.queryForObject(
+    int renewed =
+        jdbc.update(
             """
-            SELECT COUNT(*) FROM run_workspace_authority
+            UPDATE run_workspace_authority
+               SET lease_expires_at = NOW() + (? * INTERVAL '1 millisecond'),
+                   heartbeat_at = NOW(), updated_at = NOW()
              WHERE run_id = ? AND owner_token = ? AND authority_type = ?
                AND lease_expires_at >= NOW()
             """,
-            Integer.class,
+            LEASE_TTL.toMillis(),
             lease.runId(),
             lease.ownerToken(),
             lease.authority().name());
-    if (lease.lost || count == null || count != 1) {
+    if (lease.lost || renewed != 1) {
+      lease.lost = true;
+      localLeases.remove(lease.ownerToken());
       throw new IllegalStateException("RUN_WORKSPACE_AUTHORITY_LOST");
     }
   }

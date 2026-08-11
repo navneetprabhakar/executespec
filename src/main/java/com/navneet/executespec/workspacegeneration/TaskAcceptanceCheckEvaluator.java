@@ -17,7 +17,7 @@ final class TaskAcceptanceCheckEvaluator {
       boolean buildPassed,
       boolean testsExecuted,
       boolean testsPassed,
-      boolean endpointExpectationsPassed,
+      boolean runtimeEndpointContractPassed,
       boolean bootstrapArtifactsMatch) {
     List<Result> results = new ArrayList<>();
     boolean mutationPresent = changedFiles != null && !changedFiles.isEmpty();
@@ -46,11 +46,11 @@ final class TaskAcceptanceCheckEvaluator {
             case "BUILD_PASSED" -> result(check, buildPassed, "exact frozen build passed");
             case "TESTS_PASSED" ->
                 testResult(check, contract.testRequirement(), testsExecuted, testsPassed);
-            case "ENDPOINT_CONTRACT" ->
+            case "RUNTIME_ENDPOINT_CONTRACT" ->
                 result(
                     check,
-                    endpointExpectationsPassed,
-                    "every frozen HTTP method/path is declared by the admitted OpenAPI contract");
+                    runtimeEndpointContractPassed,
+                    "every frozen HTTP method/path passed against the running application");
             default ->
                 new Result(
                     check.kind(),
@@ -74,16 +74,6 @@ final class TaskAcceptanceCheckEvaluator {
               selectorsFrozen
                   ? "all selectors are bound into the frozen command"
                   : "a required selector is not bound into the frozen command"));
-    }
-    if (!contract.endpointExpectations().isEmpty()
-        && results.stream().noneMatch(result -> "ENDPOINT_CONTRACT".equals(result.kind()))) {
-      results.add(
-          new Result(
-              "ENDPOINT_EXPECTATIONS",
-              "openapi",
-              true,
-              endpointExpectationsPassed ? Status.PASSED : Status.FAILED,
-              "frozen endpoint expectations require an admitted OpenAPI declaration"));
     }
     Status overall =
         results.stream().anyMatch(result -> result.status() == Status.FAILED)

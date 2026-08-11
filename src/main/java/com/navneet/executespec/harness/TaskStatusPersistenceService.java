@@ -145,14 +145,26 @@ public class TaskStatusPersistenceService {
       backoff = @Backoff(delay = 100, multiplier = 2.0))
   public boolean reopenForContinuation(
       String runId, String taskIdShort, Integer expectedRecoveryAttempt) {
+    return reopenForWorkspaceRecovery(runId, taskIdShort, expectedRecoveryAttempt)
+        == Result.UPDATED;
+  }
+
+  /** Typed variant used by the workspace-generation transition outbox. */
+  @Transactional
+  @Retryable(
+      retryFor = DataAccessException.class,
+      maxAttempts = 3,
+      backoff = @Backoff(delay = 100, multiplier = 2.0))
+  public Result reopenForWorkspaceRecovery(
+      String runId, String taskIdShort, Integer expectedRecoveryAttempt) {
     if (runId == null || runId.length() < 8 || taskIdShort == null) {
-      return false;
+      return Result.ROW_NOT_FOUND;
     }
     String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
     var existing = taskRepo.findByIdForUpdate(key);
     if (existing.isEmpty()) {
       log.warn("reopenForContinuation: row not found id={}", key);
-      return false;
+      return Result.ROW_NOT_FOUND;
     }
     var task = existing.get();
     if (expectedRecoveryAttempt != null
@@ -163,7 +175,7 @@ public class TaskStatusPersistenceService {
           key,
           expectedRecoveryAttempt,
           task.getStatus());
-      return false;
+      return Result.STALE_RECOVERY_ATTEMPT;
     }
     if (!isContinuationReopenSource(task.getStatus())) {
       log.warn(
@@ -171,7 +183,7 @@ public class TaskStatusPersistenceService {
               + " authority)",
           key,
           task.getStatus());
-      return false;
+      return Result.TERMINAL_OVERWRITE;
     }
     Instant now = Instant.now();
     task.setStatus("PENDING");
@@ -180,7 +192,65 @@ public class TaskStatusPersistenceService {
     task.setLastActivityAt(now);
     taskRepo.saveAndFlush(task);
     log.info("reopenForContinuation: reopened id={} for selected handoff rerun", key);
-    return true;
+    return Result.UPDATED;
+  }
+
+  /**
+   * Publishes a rollback outbox transition only against the exact task status and recovery
+   * generation snapshotted when rollback became terminal. Replaying after the task commit but
+   * before outbox acknowledgement is idempotent; any other intervening task transition is fenced.
+   */
+  @Transactional
+  @Retryable(
+      retryFor = DataAccessException.class,
+      maxAttempts = 3,
+      backoff = @Backoff(delay = 100, multiplier = 2.0))
+  public Result publishWorkspaceGenerationTransition(
+      String runId,
+      String taskIdShort,
+      String targetStatus,
+      String expectedStatus,
+      Integer expectedRecoveryAttempt,
+      String failureReason) {
+    if (runId == null
+        || runId.length() < 8
+        || taskIdShort == null
+        || targetStatus == null
+        || expectedStatus == null) return Result.ROW_NOT_FOUND;
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
+    var existing = taskRepo.findByIdForUpdate(key);
+    if (existing.isEmpty()) return Result.ROW_NOT_FOUND;
+    var task = existing.get();
+    int expectedRecovery = expectedRecoveryAttempt == null ? 0 : expectedRecoveryAttempt;
+    if (!SequentialExecutor.recoveryAttemptMatches(expectedRecovery, task.getRecoveryAttempt())) {
+      return Result.STALE_RECOVERY_ATTEMPT;
+    }
+    if (targetStatus.equals(task.getStatus())) {
+      return Result.UPDATED;
+    }
+    if (!expectedStatus.equals(task.getStatus())) {
+      return Result.TERMINAL_OVERWRITE;
+    }
+
+    Instant now = Instant.now();
+    task.setStatus(targetStatus);
+    task.setLastActivityAt(now);
+    if ("PENDING".equals(targetStatus)) {
+      task.setCompletedAt(null);
+      task.setDurationMs(null);
+    } else if ("PARTIAL".equals(targetStatus)) {
+      if (task.getCompletedAt() == null) task.setCompletedAt(now);
+      if (task.getStartedAt() != null && task.getDurationMs() == null) {
+        task.setDurationMs(Duration.between(task.getStartedAt(), now).toMillis());
+      }
+      if (failureReason != null && !failureReason.isBlank()) {
+        task.setLastLlmFailure(truncate(failureReason, 4000, "… [truncated]"));
+      }
+    } else {
+      return Result.ROW_NOT_FOUND;
+    }
+    taskRepo.saveAndFlush(task);
+    return Result.UPDATED;
   }
 
   /**

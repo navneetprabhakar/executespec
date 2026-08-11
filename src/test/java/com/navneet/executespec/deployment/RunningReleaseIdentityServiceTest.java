@@ -3,38 +3,30 @@ package com.navneet.executespec.deployment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class RunningReleaseIdentityServiceTest {
 
-  @TempDir Path temp;
-
   @Test
-  void readsAndNormalizesTheExactDeploymentHostMarker() throws Exception {
-    Path marker = temp.resolve("RUNNING_SHA");
-    Files.writeString(marker, "A".repeat(40) + "\n");
+  void returnsTheExactStartupCapturedReleaseTuple() {
+    var identity =
+        new RunningReleaseIdentityService("A".repeat(40) + "\n", "B".repeat(64), "12345-2").read();
 
-    var identity = new RunningReleaseIdentityService(marker.toString()).read();
-
-    assertThat(identity.schemaVersion()).isOne();
+    assertThat(identity.schemaVersion()).isEqualTo(2);
     assertThat(identity.runningSha()).isEqualTo("a".repeat(40));
-    assertThat(identity.authority()).isEqualTo("CONFIGURED_FILE:" + marker.toAbsolutePath());
+    assertThat(identity.artifactSha256()).isEqualTo("b".repeat(64));
+    assertThat(identity.deploymentAttemptId()).isEqualTo("12345-2");
+    assertThat(identity.authority()).isEqualTo(RunningReleaseIdentityService.AUTHORITY);
     assertThat(identity.readAt()).isNotNull();
   }
 
   @Test
-  void missingOrMalformedMarkerFailsClosed() throws Exception {
-    assertUnavailable(new RunningReleaseIdentityService(temp.resolve("missing").toString()));
-
-    Path malformed = temp.resolve("RUNNING_SHA");
-    Files.writeString(malformed, "dev\n");
-    assertUnavailable(new RunningReleaseIdentityService(malformed.toString()));
+  void anyMissingOrMalformedTupleFieldFailsClosed() {
+    assertUnavailable(new RunningReleaseIdentityService("", "b".repeat(64), "1-1"));
+    assertUnavailable(new RunningReleaseIdentityService("a".repeat(40), "bad", "1-1"));
+    assertUnavailable(new RunningReleaseIdentityService("a".repeat(40), "b".repeat(64), "bad id"));
   }
 
   private static void assertUnavailable(RunningReleaseIdentityService service) {

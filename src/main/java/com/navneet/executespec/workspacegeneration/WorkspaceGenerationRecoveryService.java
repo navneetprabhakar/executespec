@@ -23,6 +23,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
@@ -50,6 +51,7 @@ public class WorkspaceGenerationRecoveryService {
   private final ObjectMapper objectMapper;
   private final PlatformTransactionManager transactionManager;
   private final TaskStatusPersistenceService taskStatuses;
+  private final WorkspaceGenerationTaskTransitionService taskTransitions;
   private final GcsWorkspaceStore gcsStore;
   private final WorkspaceGenerationArchiveService generationArchives;
   private final PipelineRunRepository runs;
@@ -74,6 +76,9 @@ public class WorkspaceGenerationRecoveryService {
           "DENIED_UNRESOLVED",
           boundary);
       throw new IllegalStateException("WORKSPACE_GENERATION_UNRESOLVED");
+    }
+    if (attempts.existsByRunIdAndTaskTransitionState(runId, "PENDING")) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_TASK_TRANSITION_PENDING");
     }
   }
 
@@ -246,8 +251,9 @@ public class WorkspaceGenerationRecoveryService {
   }
 
   void recover(WorkspaceGenerationAttempt stale, Lease recoveryLease) {
-    TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+    TransactionTemplate transactions = independentTransactions();
     boolean recoveryClaimed = false;
+    boolean rolledBack = false;
     try {
       int claimed =
           transactions.execute(
@@ -303,7 +309,7 @@ public class WorkspaceGenerationRecoveryService {
                       WorkspaceGenerationState.ROLLED_BACK,
                       Instant.now()));
       requireCas(resolved, "WORKSPACE_GENERATION_RECOVERY_RESOLVE_FAILED");
-      taskStatuses.reopenForContinuation(row.getRunId(), row.getTaskId(), null);
+      rolledBack = true;
       log.warn(
           "Recovered unresolved workspace generation run={} task={} attempt={}",
           row.getRunId(),
@@ -348,6 +354,7 @@ public class WorkspaceGenerationRecoveryService {
     } finally {
       recoveryLease.close();
     }
+    if (rolledBack) taskTransitions.publish(stale.getId());
   }
 
   /** Closes ACCEPTED -> task COMPLETE crash window from immutable DB acceptance proof. */
@@ -563,6 +570,12 @@ public class WorkspaceGenerationRecoveryService {
 
   private static void requireCas(Integer value, String code) {
     if (value == null || value != 1) throw new IllegalStateException(code);
+  }
+
+  private TransactionTemplate independentTransactions() {
+    TransactionTemplate transactions = new TransactionTemplate(transactionManager);
+    transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    return transactions;
   }
 
   private static String bounded(String value) {
