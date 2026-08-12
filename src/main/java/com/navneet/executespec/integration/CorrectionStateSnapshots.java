@@ -1,5 +1,7 @@
 package com.navneet.executespec.integration;
 
+import java.time.Instant;
+
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 
@@ -59,8 +61,8 @@ final class CorrectionStateSnapshots {
     report.setScoreZeroCauseJson(null);
   }
 
-  static AutomaticCorrectionLifecycle.TaskState snapshotTask(AgentTask task) {
-    return new AutomaticCorrectionLifecycle.TaskState(
+  static TaskState snapshotTask(AgentTask task) {
+    return new TaskState(
         task.getStatus(),
         task.getStartedAt(),
         task.getCompletedAt(),
@@ -88,7 +90,7 @@ final class CorrectionStateSnapshots {
         task.getContinuationDecisionJson());
   }
 
-  static void restoreTaskEvidence(AgentTask task, AutomaticCorrectionLifecycle.TaskState state) {
+  static void restoreTaskEvidence(AgentTask task, TaskState state) {
     task.setAssignedModel(state.assignedModel());
     task.setLastLlmFailure(state.lastLlmFailure());
     task.setLastActivityAt(state.lastActivityAt());
@@ -111,4 +113,31 @@ final class CorrectionStateSnapshots {
     task.setGoalDonenessJson(state.goalDonenessJson());
     task.setContinuationDecisionJson(state.continuationDecisionJson());
   }
+
+  record TaskState(
+      String status,
+      Instant startedAt,
+      Instant completedAt,
+      Long durationMs,
+      String assignedModel,
+      String lastLlmFailure,
+      Instant lastActivityAt,
+      Instant stuckDetectedAt,
+      Integer recoveryAttempt,
+      String workerReportJson,
+      String completionNotes,
+      String provider,
+      String model,
+      String effectiveProvider,
+      String effectiveModel,
+      String effectiveRouteAttribution,
+      String routingTier,
+      String routingTaskCategory,
+      String routingSource,
+      String currentProvider,
+      String currentModel,
+      Boolean readmeUpdated,
+      String failureDiagnosticJson,
+      String goalDonenessJson,
+      String continuationDecisionJson) {}
 }

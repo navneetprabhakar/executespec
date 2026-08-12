@@ -163,6 +163,26 @@ final class RunTerminalOutcomeDefinitions {
         1);
   }
 
+  static Definition workspaceGenerationFailure(boolean recoveryFailed) {
+    return new Definition(
+        Category.PLATFORM_FAILURE,
+        recoveryFailed
+            ? "Workspace recovery could not be proven"
+            : "Generated change did not pass the BUILD boundary",
+        recoveryFailed
+            ? "Generated changes were rejected, but ExecuteSpec could not prove that the workspace"
+                + " was restored. Publication was blocked."
+            : "The generated change did not cross the required BUILD acceptance boundary. No"
+                + " unverified generation was accepted or published.",
+        true,
+        "CONTACT_SUPPORT",
+        "Retry after the BUILD trust-boundary issue is corrected; contact support with the support"
+            + " code if it repeats.",
+        null,
+        AutomationDisposition.FAILED,
+        1);
+  }
+
   record Definition(
       Category category,
       String title,

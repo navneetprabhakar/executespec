@@ -51,8 +51,15 @@ final class WorkerCorrectionToolFence {
     RunWorkspaceAuthorityService.assertCorrectionToolDispatch(context.runId());
   }
 
+  static void assertAttemptAdmission(WorkerTaskRequest request) {
+    if (request.changeMode() == CodeChangeMode.BUILD) {
+      RunWorkspaceAuthorityService.assertWorkspaceGenerationToolDispatch(request.context().runId());
+    }
+  }
+
   static String guardDispatch(
       WorkerTaskRequest request, RunCostTracker costTracker, WorkerDispatchMode mode) {
+    assertAttemptAdmission(request);
     assertDispatch(request.context());
     return WorkerLiveBudgetGuard.guard(
         request, costTracker, request.workerStartedAtEpochMs(), mode);

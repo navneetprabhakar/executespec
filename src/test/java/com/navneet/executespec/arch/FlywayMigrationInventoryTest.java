@@ -80,9 +80,11 @@ class FlywayMigrationInventoryTest {
     // prevents a restored workspace from being resolved while its task row remains stale. V381
     // database-fences rollback evidence and resolution against the exact current workspace owner.
     // V382 preserves resolved-attempt immutability while permitting only the V380 task-transition
-    // receipt state machine, bringing the exact inventory to 368.
-    assertThat(migrations).hasSize(368);
-    assertThat(migrations.getLast().version()).isEqualTo("382");
+    // receipt state machine, bringing the exact inventory to 368. V383 atomically binds BUILD
+    // admission, the physical LLM operation, workspace authority, and terminal convergence,
+    // bringing the exact inventory to 369.
+    assertThat(migrations).hasSize(369);
+    assertThat(migrations.getLast().version()).isEqualTo("383");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

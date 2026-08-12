@@ -25,6 +25,7 @@ import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationInitialFailureRecorder;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTaskTransitionService;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 
 import org.springframework.stereotype.Service;
@@ -49,6 +50,8 @@ public class BuildTaskGenerationCoordinator {
   private final FeatureFlagService featureFlags;
   private final BuildTaskUsageEvidence usageEvidence;
   private final WorkspaceGenerationTelemetry telemetry;
+  private final WorkspaceGenerationTaskTransitionService taskTransitions;
+  private final BuildContinuationAdmissionService admissions;
   private final ThreadLocal<Boolean> acceptancePending = new ThreadLocal<>();
   private final ThreadLocal<ExecutionContext> activeTaskContext = new ThreadLocal<>();
   private final ThreadLocal<TaskAcceptanceContract> activeContract = new ThreadLocal<>();
@@ -68,7 +71,9 @@ public class BuildTaskGenerationCoordinator {
       GreenfieldBaselineService greenfieldBaselines,
       FeatureFlagService featureFlags,
       BuildTaskUsageEvidence usageEvidence,
-      WorkspaceGenerationTelemetry telemetry) {
+      WorkspaceGenerationTelemetry telemetry,
+      WorkspaceGenerationTaskTransitionService taskTransitions,
+      BuildContinuationAdmissionService admissions) {
     this.generations = generations;
     this.executionEvidence = executionEvidence;
     this.initialFailures = initialFailures;
@@ -81,6 +86,8 @@ public class BuildTaskGenerationCoordinator {
     this.featureFlags = featureFlags;
     this.usageEvidence = usageEvidence;
     this.telemetry = telemetry;
+    this.taskTransitions = taskTransitions;
+    this.admissions = admissions;
   }
 
   public TaskOutcome execute(
@@ -90,22 +97,56 @@ public class BuildTaskGenerationCoordinator {
       ExecutionRequest request,
       Supplier<TaskOutcome> dispatch,
       TaskStatusSink taskStatus) {
-    return execute(
-        taskIndex, task, plan, request, request.provider(), request.model(), dispatch, taskStatus);
+    return executeAttempt(
+        taskIndex,
+        task,
+        plan,
+        request,
+        request.provider(),
+        request.model(),
+        false,
+        null,
+        false,
+        dispatch,
+        taskStatus);
   }
 
-  /**
-   * Starts one physical BUILD generation attempt on the exact requested route. Continuation callers
-   * use this overload so a provider/model change is persisted before any replacement model or
-   * mutating tool is dispatched.
-   */
-  public TaskOutcome execute(
+  /** Starts one physical BUILD continuation on the exact requested route. */
+  public TaskOutcome executeContinuation(
       int taskIndex,
       PlannedTask task,
       Plan plan,
       ExecutionRequest request,
       String requestedProvider,
       String requestedModel,
+      Integer expectedRecoveryAttempt,
+      boolean authorizedTerminal,
+      Supplier<TaskOutcome> dispatch,
+      TaskStatusSink taskStatus) {
+    return executeAttempt(
+        taskIndex,
+        task,
+        plan,
+        request,
+        requestedProvider,
+        requestedModel,
+        true,
+        expectedRecoveryAttempt,
+        authorizedTerminal,
+        dispatch,
+        taskStatus);
+  }
+
+  private TaskOutcome executeAttempt(
+      int taskIndex,
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest request,
+      String requestedProvider,
+      String requestedModel,
+      boolean continuation,
+      Integer expectedRecoveryAttempt,
+      boolean authorizedTerminal,
       Supplier<TaskOutcome> dispatch,
       TaskStatusSink taskStatus) {
     requireServerOwnedWorkspace(request.localHandsMode());
@@ -125,64 +166,92 @@ public class BuildTaskGenerationCoordinator {
             ? contracts.resolveFailureFirst(
                 task, plan, taskIndex, request.runContext().workspaceRoot(), baseline)
             : contracts.resolve(task, taskIndex);
+    String authorityDigest =
+        contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary());
+    String contractJson = sharedLoopEnabled ? contracts.canonicalContract(contract) : null;
+    String initialFailureJson =
+        sharedLoopEnabled ? contracts.canonicalInitialFailureEvidence(baseline) : null;
+    if (continuation) {
+      generations.assertContinuationReady(runId, request.runContext().workspaceRoot());
+    }
+    BuildContinuationAdmissionService.ClaimedAdmission claimedAdmission =
+        admissions.admitAndClaim(
+            new BuildContinuationAdmissionService.AttemptRequest(
+                runId,
+                task.id(),
+                taskIndex,
+                request.runContext().workspaceRoot(),
+                authorityDigest,
+                contract.digest(),
+                contractJson,
+                initialFailureJson,
+                requestedProvider,
+                requestedModel,
+                expectedRecoveryAttempt,
+                continuation
+                    ? (authorizedTerminal
+                        ? BuildContinuationAdmissionService.AdmissionKind.AUTHORIZED_TERMINAL
+                        : BuildContinuationAdmissionService.AdmissionKind.AUTOMATIC_CONTINUATION)
+                    : BuildContinuationAdmissionService.AdmissionKind.INITIAL),
+            request.runContext());
+    BuildContinuationAdmissionService.Admission admission = claimedAdmission.admission();
+    if (!admission.admitted()) {
+      throw new IllegalStateException("BUILD_ATTEMPT_ADMISSION_REFUSED:" + admission.refusal());
+    }
+    if (continuation) {
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PENDING"));
+    }
     com.navneet.executespec.cost.RunCostTracker.Snapshot usageBefore =
         usageEvidence.snapshot(runId, task.id());
-    WorkspaceGenerationLifecycle.Prepared prepared =
-        sharedLoopEnabled
-            ? generations.prepareBuild(
-                runId,
-                task.id(),
-                taskIndex,
-                request.runContext().workspaceRoot(),
-                contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary()),
-                contract.digest(),
-                contracts.canonicalContract(contract),
-                contracts.canonicalInitialFailureEvidence(baseline),
-                requestedProvider,
-                requestedModel)
-            : generations.prepareBuild(
-                runId,
-                task.id(),
-                taskIndex,
-                request.runContext().workspaceRoot(),
-                contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary()),
-                contract.digest(),
-                null,
-                null,
-                null,
-                null);
-    telemetry.state(
-        runId,
-        task.id(),
-        prepared,
-        "PREPARED",
-        contract,
-        requestedProvider,
-        requestedModel,
-        null,
-        null);
-    generations.markMutating(prepared);
-    telemetry.state(
-        runId,
-        task.id(),
-        prepared,
-        "MUTATING",
-        contract,
-        requestedProvider,
-        requestedModel,
-        null,
-        null);
     boolean acceptStarted = false;
     boolean rollbackStarted = false;
     boolean operationClosed = false;
-    RunLlmOperationLifecycleService.PhaseLease operation = null;
+    RunLlmOperationLifecycleService.PhaseLease operation = claimedAdmission.operation();
+    LlmExecutionOperationCoordinator.LeaseIdentity identity = claimedAdmission.identity();
+    WorkspaceGenerationLifecycle.Prepared prepared;
     try {
-      operation =
-          operations.claimBuildTask(
-              request.runContext(), runId, task.id(), taskIndex, contract.digest());
-      LlmExecutionOperationCoordinator.LeaseIdentity identity = operations.identity(operation);
-      generations.bindLlmAttempt(
-          prepared, identity.operationId(), identity.attempt(), identity.leaseToken());
+      prepared =
+          generations.prepareBuild(
+              admission.attemptId(),
+              request.runContext().workspaceRoot(),
+              identity.operationId(),
+              identity.attempt(),
+              identity.leaseToken());
+    } catch (RuntimeException preparationFailure) {
+      try {
+        operations.failBuildTask(operation, "BUILD_TASK_PREPARATION_FAILED");
+      } catch (RuntimeException operationFailure) {
+        preparationFailure.addSuppressed(operationFailure);
+      }
+      try {
+        generations.recoverRunOrThrow(runId);
+      } catch (RuntimeException recoveryFailure) {
+        preparationFailure.addSuppressed(recoveryFailure);
+      }
+      throw preparationFailure;
+    }
+    try {
+      telemetry.state(
+          runId,
+          task.id(),
+          prepared,
+          "PREPARED",
+          contract,
+          requestedProvider,
+          requestedModel,
+          null,
+          null);
+      generations.markMutating(prepared);
+      telemetry.state(
+          runId,
+          task.id(),
+          prepared,
+          "MUTATING",
+          contract,
+          requestedProvider,
+          requestedModel,
+          null,
+          null);
       activeTaskContext.set(operation.context());
       activeContract.set(contract);
       if (baseline != null) activeBaseline.set(baseline);
@@ -191,7 +260,7 @@ public class BuildTaskGenerationCoordinator {
       TaskOutcome outcome =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
               prepared.lease(),
-              () -> generations.assertDispatch(prepared),
+              () -> generations.assertMutationDispatch(prepared),
               () -> {
                 if (baseline != null) {
                   greenfieldBaselines.materialize(request.runContext().workspaceRoot(), baseline);
@@ -265,7 +334,7 @@ public class BuildTaskGenerationCoordinator {
       WorkspaceGenerationLifecycle.Verification verification =
           RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
               prepared.lease(),
-              () -> generations.assertDispatch(prepared),
+              () -> generations.assertVerificationDispatch(prepared),
               () -> verifier.verify(request.runContext().child(task.id()), contract, changedFiles));
       generations.recordVerification(prepared, verification);
       if (sharedLoopContract(contract)) {
@@ -302,9 +371,10 @@ public class BuildTaskGenerationCoordinator {
             candidate,
             "TASK_VERIFICATION_REJECTED",
             reason);
-        taskStatus.persist("PARTIAL", reason);
+        requireTaskStatus(taskStatus.persist("PARTIAL", reason), "PARTIAL");
+        taskTransitions.publish(prepared.attemptId());
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
-        operations.fail(operation, "BUILD_TASK_VERIFICATION_REJECTED");
+        operations.failBuildTask(operation, "BUILD_TASK_VERIFICATION_REJECTED");
         operationClosed = true;
         return BuildTaskAcceptanceOutcomes.rejected(outcome, reason);
       }
@@ -332,7 +402,7 @@ public class BuildTaskGenerationCoordinator {
           firstNonBlank(outcome.dispatchedModel(), requestedModel),
           candidate,
           "PASSED");
-      taskStatus.persist("COMPLETE", null);
+      requireTaskStatus(taskStatus.persist("COMPLETE", null), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       operations.complete(operation);
       operationClosed = true;
@@ -366,7 +436,8 @@ public class BuildTaskGenerationCoordinator {
       }
       if (operation != null && !operationClosed) {
         try {
-          operations.fail(operation, "BUILD_TASK_GENERATION_FAILED");
+          if (acceptStarted) operations.complete(operation);
+          else operations.failBuildTask(operation, "BUILD_TASK_GENERATION_FAILED");
         } catch (RuntimeException operationFailure) {
           failure.addSuppressed(operationFailure);
         }
@@ -374,16 +445,13 @@ public class BuildTaskGenerationCoordinator {
       throw failure;
     } finally {
       clearThreadState();
+      generations.release(prepared);
     }
   }
 
-  public ExecutionContext activeContextOr(ExecutionContext fallback) {
-    ExecutionContext active = activeTaskContext.get();
-    return active == null ? fallback : active;
-  }
-
   public ExecutionContext childContext(ExecutionContext fallback, String taskId) {
-    return activeContextOr(fallback).child(taskId);
+    ExecutionContext active = activeTaskContext.get();
+    return (active == null ? fallback : active).child(taskId);
   }
 
   public String pendingStatus(String terminalStatus) {
@@ -449,17 +517,9 @@ succeeds. Planner text cannot replace or weaken these checks.
     return systemPrompt + acceptanceSystemDirective();
   }
 
-  boolean isolatesRouteChanges() {
-    return failureFirstActive();
-  }
-
   boolean workerControlEnabled(String flag, boolean configured) {
-    return failureFirstActive() || configured;
-  }
-
-  public boolean failureFirstActive() {
     TaskAcceptanceContract contract = activeContract.get();
-    return contract != null && contract.schemaVersion() >= 2;
+    return (contract != null && contract.schemaVersion() >= 2) || configured;
   }
 
   public static boolean acceptanceFailed(TaskOutcome outcome) {
@@ -525,6 +585,14 @@ succeeds. Planner text cannot replace or weaken these checks.
 
   @FunctionalInterface
   public interface TaskStatusSink {
-    void persist(String status, String reason);
+    TaskStatusPersistenceService.Result persist(String status, String reason);
+  }
+
+  private static void requireTaskStatus(
+      TaskStatusPersistenceService.Result result, String expectedStatus) {
+    if (result != TaskStatusPersistenceService.Result.UPDATED) {
+      throw new IllegalStateException(
+          "BUILD_TASK_STATUS_RECONCILIATION_FAILED:" + expectedStatus + ":" + result);
+    }
   }
 }

@@ -1,7 +1,6 @@
 package com.navneet.executespec.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -13,7 +12,9 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.state.entity.AgentTask;
+import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.framework.ProxyFactory;
@@ -114,9 +115,7 @@ class TaskStatusPersistenceServiceTest {
   }
 
   @Test
-  void reopenForContinuationResetsFailedTaskUnderLock() {
-    // RR-266 — a FAILED primary attempt whose recovery generation still matches is reopened to
-    // PENDING with completion timing cleared, so a selected model/provider handoff rerun can run.
+  void rollbackReopenTransitionResetsPartialTaskUnderLock() {
     AgentTaskRepository repository = mock(AgentTaskRepository.class);
     AgentTask task =
         AgentTask.builder()
@@ -136,10 +135,12 @@ class TaskStatusPersistenceServiceTest {
               return Optional.of(task);
             });
 
-    boolean reopened =
-        transactionalProxy(repository).reopenForContinuation(task.getRunId(), "T1", 2);
+    TaskStatusPersistenceService.Result result =
+        transactionalProxy(repository)
+            .publishWorkspaceGenerationTransition(
+                task.getRunId(), "T1", "PENDING", "PARTIAL", 2, null);
 
-    assertTrue(reopened, "matching FAILED/PARTIAL row must be reopened");
+    assertEquals(TaskStatusPersistenceService.Result.UPDATED, result);
     assertTrue(transactionActiveAtLock.get(), "reopen must acquire the lock in a transaction");
     assertEquals("PENDING", task.getStatus());
     org.junit.jupiter.api.Assertions.assertNull(task.getCompletedAt());
@@ -148,10 +149,23 @@ class TaskStatusPersistenceServiceTest {
   }
 
   @Test
-  void reopenForContinuationRefusesCancelledTask() {
-    // RR-266 — a task a concurrent cancellation moved to CANCELLED must NOT be reopened into a paid
-    // rerun: the caller has no authority and the cancellation must stand. (A soft COMPLETE, by
-    // contrast, is an escalatable primary outcome and IS reopenable — see reopenForContinuation.)
+  void cancelledRunBlocksRollbackReopenTransition() {
+    AgentTaskRepository tasks = mock(AgentTaskRepository.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    String runId = "12345678-aaaa-bbbb-cccc-123456789012";
+    PipelineRun cancelled = PipelineRun.builder().runId(runId).status("CANCELLED").build();
+    when(runs.findByIdForTaskContinuation(runId)).thenReturn(Optional.of(cancelled));
+    TaskStatusPersistenceService service = new TaskStatusPersistenceService(tasks, null, runs);
+
+    TaskStatusPersistenceService.Result result =
+        service.publishWorkspaceGenerationTransition(runId, "T1", "PENDING", "PARTIAL", 0, null);
+
+    assertEquals(TaskStatusPersistenceService.Result.CANCELLED_WINS, result);
+    org.mockito.Mockito.verifyNoInteractions(tasks);
+  }
+
+  @Test
+  void rollbackReopenTransitionRefusesCancelledTask() {
     AgentTaskRepository repository = mock(AgentTaskRepository.class);
     AgentTask task =
         AgentTask.builder()
@@ -162,34 +176,13 @@ class TaskStatusPersistenceServiceTest {
             .build();
     when(repository.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(task));
 
-    boolean reopened =
-        transactionalProxy(repository).reopenForContinuation(task.getRunId(), "T1", 2);
+    TaskStatusPersistenceService.Result result =
+        transactionalProxy(repository)
+            .publishWorkspaceGenerationTransition(
+                task.getRunId(), "T1", "PENDING", "PARTIAL", 2, null);
 
-    assertFalse(reopened, "a CANCELLED task must not be reopened");
+    assertEquals(TaskStatusPersistenceService.Result.CANCELLED_WINS, result);
     assertEquals("CANCELLED", task.getStatus());
-    verify(repository, org.mockito.Mockito.never())
-        .saveAndFlush(org.mockito.ArgumentMatchers.any());
-  }
-
-  @Test
-  void reopenForContinuationFencesStaleRecoveryGeneration() {
-    // RR-266 — a rolling-restart takeover bumped recovery_attempt; the stale executor's reopen must
-    // be fenced so it cannot revive a task another JVM now owns.
-    AgentTaskRepository repository = mock(AgentTaskRepository.class);
-    AgentTask task =
-        AgentTask.builder()
-            .taskId("12345678_T1")
-            .runId("12345678-aaaa-bbbb-cccc-123456789012")
-            .status("FAILED")
-            .recoveryAttempt(5)
-            .build();
-    when(repository.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(task));
-
-    boolean reopened =
-        transactionalProxy(repository).reopenForContinuation(task.getRunId(), "T1", 3);
-
-    assertFalse(reopened, "stale recovery generation must be fenced");
-    assertEquals("FAILED", task.getStatus());
     verify(repository, org.mockito.Mockito.never())
         .saveAndFlush(org.mockito.ArgumentMatchers.any());
   }

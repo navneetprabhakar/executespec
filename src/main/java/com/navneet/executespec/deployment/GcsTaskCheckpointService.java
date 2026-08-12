@@ -3,46 +3,20 @@ package com.navneet.executespec.deployment;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
-import com.navneet.executespec.state.StateStore;
-import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationArchiveService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RL-2026-05-041 (audit risk #2 — mid-run durability). Checkpoints a run's workspace to GCS at task
- * boundaries so mid-run work survives a node loss (Cloud Run scale-down, MIG auto-heal, container
- * rebuild). Before this, GCS upload fired only on a terminal event ({@code
- * WorkspaceGcsUploadListener}); a node dying mid-run meant the local workspace vanished and the run
- * could only fail {@code WORKSPACE_GONE} — losing work the customer had already paid for at the
- * plan gate.
- *
- * <p>Design (reuses existing infra, no schema change):
- *
- * <ul>
- *   <li>After each terminal task status, async-export the workspace and upload it to GCS under the
- *       run's key (latest-checkpoint-wins — overwrites the same object).
- *   <li>Set {@link PipelineRun#getGcsWorkspaceKey()} (but NOT {@code gcsArchivedAt} — the local
- *       copy still exists). {@code WorkspaceRestoreService.ensureWorkspaceAvailable} then restores
- *       from this key when a resume finds the local workspace gone (see {@code
- *       RunOrchestrator.resumeAfterCrash}).
- *   <li>No-op when GCS is unconfigured (local dev) — guarded by {@link
- *       GcsWorkspaceStore#isConfigured()} so we never pay the zip cost for nothing. Gated by {@code
- *       durability.task-checkpoint.enabled}.
- * </ul>
- *
- * <p>Async + fully self-swallowing: a checkpoint failure must never disrupt the pipeline.
+ * Creates the exact durable checkpoint receipt required before a BUILD generation can be accepted.
  */
 @Service
 @RequiredArgsConstructor
@@ -53,35 +27,12 @@ public class GcsTaskCheckpointService {
   public record CheckpointReceipt(
       String kind, String key, String generation, String artifactDigest, Instant completedAt) {}
 
-  private final WorkspaceExportService exportService;
   private final WorkspaceGenerationArchiveService generationArchives;
   private final GcsWorkspaceStore gcsStore;
-  private final StateStore stateStore;
   private final Environment environment;
-
-  /**
-   * Per-run checkpoint chain. Checkpoint uploads overwrite one GCS object, so concurrent
-   * fire-and-forget exports can otherwise complete out of order and leave an older workspace as the
-   * latest restore candidate. The chain is deliberately local-process only; the database/GCS lease
-   * still fences cross-JVM recovery, while this prevents the common same-JVM async reorder.
-   */
-  private final ConcurrentHashMap<String, CompletableFuture<Void>> checkpointChains =
-      new ConcurrentHashMap<>();
 
   @Value("${durability.task-checkpoint.enabled:true}")
   private boolean enabled;
-
-  /**
-   * Checkpoint the workspace after a task boundary. Fire-and-forget; safe to call on every terminal
-   * task status. No-op when disabled or GCS is unconfigured.
-   */
-  @Async
-  public void checkpointAfterTask(String runId, String taskIdShort) {
-    if (!enabled || runId == null) return;
-    if (!gcsStore.isConfigured()) return; // local dev / GCS off — nothing to do, skip the zip
-
-    enqueueCheckpoint(runId, taskIdShort);
-  }
 
   /**
    * Strict checkpoint boundary for V374 workspace-generation acceptance. Unlike the legacy async
@@ -163,58 +114,6 @@ public class GcsTaskCheckpointService {
       return java.net.InetAddress.getLocalHost().getHostName().replaceAll("[^A-Za-z0-9._-]", "_");
     } catch (Exception unavailable) {
       return "unknown-host";
-    }
-  }
-
-  private void enqueueCheckpoint(String runId, String taskIdShort) {
-    for (; ; ) {
-      CompletableFuture<Void> previous = checkpointChains.get(runId);
-      CompletableFuture<Void> next =
-          (previous == null ? CompletableFuture.completedFuture(null) : previous)
-              .handle((ignored, failure) -> null)
-              .thenRun(() -> performCheckpoint(runId, taskIdShort));
-      boolean installed =
-          previous == null
-              ? checkpointChains.putIfAbsent(runId, next) == null
-              : checkpointChains.replace(runId, previous, next);
-      if (installed) {
-        next.whenComplete((ignored, failure) -> checkpointChains.remove(runId, next));
-        return;
-      }
-    }
-  }
-
-  private void performCheckpoint(String runId, String taskIdShort) {
-    Path zipPath = null;
-    try {
-      zipPath = exportService.exportWorkspace(runId);
-      String key = gcsStore.uploadZip(runId, zipPath);
-      if (key == null) return; // upload skipped (race with config) — nothing persisted
-      PipelineRun run = stateStore.findRun(runId).orElse(null);
-      if (run != null) {
-        // Latest checkpoint key; leave gcsArchivedAt null — the local copy is still authoritative.
-        run.setGcsWorkspaceKey(key);
-        stateStore.save(run);
-      }
-      log.info(
-          "[GcsTaskCheckpoint] run={} task={} workspace checkpointed to GCS {}",
-          runId,
-          taskIdShort,
-          key);
-    } catch (Exception e) {
-      log.warn(
-          "[GcsTaskCheckpoint] run={} task={} checkpoint failed (non-fatal): {}",
-          runId,
-          taskIdShort,
-          e.getMessage());
-    } finally {
-      if (zipPath != null) {
-        try {
-          Files.deleteIfExists(zipPath);
-        } catch (Exception ignore) {
-          // temp zip cleanup is best-effort
-        }
-      }
     }
   }
 }

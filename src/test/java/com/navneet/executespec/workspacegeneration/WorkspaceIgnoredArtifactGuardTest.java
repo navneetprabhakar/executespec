@@ -83,6 +83,29 @@ class WorkspaceIgnoredArtifactGuardTest {
     assertThat(hiddenSibling).doesNotExist();
   }
 
+  @Test
+  void cleansDirectoryCollapsedByGitWhenOnlyItsChildrenMatchAnIgnoreRule() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "*.pyc\n", StandardCharsets.UTF_8);
+    Files.writeString(workspace.resolve("source.py"), "print('ok')\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+
+    CorrectionWorkspaceTransaction transactions = new CorrectionWorkspaceTransaction();
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint = transactions.begin(workspace);
+    WorkspaceIgnoredArtifactGuard guard = new WorkspaceIgnoredArtifactGuard(new ObjectMapper());
+    WorkspaceIgnoredArtifactGuard.Baseline baseline = guard.prepare(checkpoint, () -> {});
+
+    Path cache = Files.createDirectories(workspace.resolve(".executespec/bootstrap/__pycache__"));
+    Files.writeString(cache.resolve("test_acceptance.cpython-313.pyc"), "bytecode");
+
+    assertThat(guard.cleanAttemptArtifacts(checkpoint, baseline.json(), () -> {}))
+        .anyMatch(path -> path.endsWith(":.executespec"));
+    assertThat(cache).doesNotExist();
+  }
+
   private String git(String... args) throws Exception {
     return git(workspace, args);
   }

@@ -63,7 +63,6 @@ class SequentialExecutorInitialRoutingTest {
             featureFlags,
             mock(ContextStore.class),
             mock(RunCostTracker.class),
-            mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
             availableProviders,
             mock(GoalContinuationAdvisor.class),
             null);

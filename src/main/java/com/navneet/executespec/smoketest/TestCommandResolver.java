@@ -109,10 +109,10 @@ public class TestCommandResolver {
               : exists(workspaceRoot, "venv/bin/python") ? "venv/bin/python" : "python3";
       return Optional.of(
           new TestCommand(
-              python + " -m pytest -q .executespec/bootstrap/test_acceptance.py",
+              python + " -m pytest -q",
               600,
               Framework.PYTEST,
-              "executespec-bootstrap-pytest"));
+              "executespec-bootstrap-plus-workspace-pytest"));
     }
 
     if (exists(workspaceRoot, "pom.xml")) {

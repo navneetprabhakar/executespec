@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -140,8 +141,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             authorities,
             new ObjectMapper(),
             mock(PlatformTransactionManager.class),
-            mock(TaskStatusPersistenceService.class),
-            mock(WorkspaceGenerationTaskTransitionService.class),
+            mock(WorkspaceGenerationTerminalReconciler.class),
             gcs,
             archives,
             runs,
@@ -207,8 +207,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             authorities,
             new ObjectMapper(),
             transactionManager(),
-            mock(TaskStatusPersistenceService.class),
-            mock(WorkspaceGenerationTaskTransitionService.class),
+            mock(WorkspaceGenerationTerminalReconciler.class),
             gcs,
             archives,
             runs,
@@ -267,8 +266,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             authorities,
             new ObjectMapper(),
             transactionManager(),
-            mock(TaskStatusPersistenceService.class),
-            mock(WorkspaceGenerationTaskTransitionService.class),
+            mock(WorkspaceGenerationTerminalReconciler.class),
             gcs,
             mock(WorkspaceGenerationArchiveService.class),
             runs,
@@ -288,6 +286,11 @@ class WorkspaceGenerationRecoveryServiceTest {
   @Test
   void everyCrashWindowRestoresTrackedUntrackedStagedAndIgnoredMultiRepoState() throws Exception {
     for (WorkspaceGenerationState crashState : WorkspaceGenerationRecoveryService.UNRESOLVED) {
+      if (List.of(
+              WorkspaceGenerationState.ADMITTED,
+              WorkspaceGenerationState.OPERATION_CLAIMED,
+              WorkspaceGenerationState.AUTHORITY_ACQUIRED)
+          .contains(crashState)) continue;
       String runId = "kill-" + crashState.name().toLowerCase();
       Path root = Files.createDirectories(temp.resolve("kill-windows").resolve(runId)).toRealPath();
       Path nested = Files.createDirectories(root.resolve("repos/api")).toRealPath();
@@ -406,6 +409,83 @@ class WorkspaceGenerationRecoveryServiceTest {
   }
 
   @Test
+  void preDispatchCrashWindowsResolveWithoutTouchingWorkspaceBytes() {
+    for (WorkspaceGenerationState crashState :
+        List.of(
+            WorkspaceGenerationState.ADMITTED,
+            WorkspaceGenerationState.OPERATION_CLAIMED,
+            WorkspaceGenerationState.AUTHORITY_ACQUIRED)) {
+      UUID attemptId = UUID.randomUUID();
+      UUID recoveryToken = UUID.randomUUID();
+      String runId = "predispatch-" + crashState.name().toLowerCase();
+      WorkspaceGenerationAttempt stale =
+          WorkspaceGenerationAttempt.builder()
+              .id(attemptId)
+              .runId(runId)
+              .taskId("T1")
+              .state(crashState)
+              .build();
+      WorkspaceGenerationAttempt claimed =
+          WorkspaceGenerationAttempt.builder()
+              .id(attemptId)
+              .runId(runId)
+              .taskId("T1")
+              .state(WorkspaceGenerationState.ROLLING_BACK)
+              .recoveryLeaseToken(recoveryToken)
+              .build();
+      WorkspaceGenerationAttempt resolved =
+          WorkspaceGenerationAttempt.builder()
+              .id(attemptId)
+              .runId(runId)
+              .taskId("T1")
+              .state(WorkspaceGenerationState.ROLLED_BACK)
+              .build();
+      WorkspaceGenerationAttemptRepository attempts =
+          mock(WorkspaceGenerationAttemptRepository.class);
+      when(attempts.claimRecovery(
+              eq(attemptId),
+              eq(crashState),
+              eq(WorkspaceGenerationState.ROLLING_BACK),
+              eq(recoveryToken),
+              any()))
+          .thenReturn(1);
+      when(attempts.findById(attemptId)).thenReturn(Optional.of(claimed), Optional.of(resolved));
+      when(attempts.markPreDispatchRolledBack(
+              eq(attemptId),
+              eq(recoveryToken),
+              eq(WorkspaceGenerationState.ROLLING_BACK),
+              eq(WorkspaceGenerationState.ROLLED_BACK),
+              any()))
+          .thenReturn(1);
+      CorrectionWorkspaceTransaction workspaces = mock(CorrectionWorkspaceTransaction.class);
+      WorkspaceGenerationTerminalReconciler terminal =
+          mock(WorkspaceGenerationTerminalReconciler.class);
+      RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+      when(lease.ownerToken()).thenReturn(recoveryToken);
+      WorkspaceGenerationRecoveryService recovery =
+          new WorkspaceGenerationRecoveryService(
+              attempts,
+              workspaces,
+              mock(RunWorkspaceAuthorityService.class),
+              new ObjectMapper(),
+              transactionManager(),
+              terminal,
+              mock(GcsWorkspaceStore.class),
+              mock(WorkspaceGenerationArchiveService.class),
+              mock(PipelineRunRepository.class),
+              mock(WorkspaceIgnoredArtifactGuard.class),
+              new AgentProperties(),
+              mock(WorkspaceGenerationTelemetry.class));
+
+      recovery.recover(stale, lease);
+
+      verifyNoInteractions(workspaces);
+      verify(terminal).reconcileRolledBack(resolved);
+      verify(lease).close();
+    }
+  }
+
+  @Test
   void recoveryClaimLoserCannotWriteFalseRecoveryFailureEvidence() {
     UUID attemptId = UUID.randomUUID();
     UUID recoveryToken = UUID.randomUUID();
@@ -462,8 +542,7 @@ class WorkspaceGenerationRecoveryServiceTest {
         mock(RunWorkspaceAuthorityService.class),
         new ObjectMapper(),
         transactionManager,
-        taskStatuses,
-        mock(WorkspaceGenerationTaskTransitionService.class),
+        mock(WorkspaceGenerationTerminalReconciler.class),
         mock(GcsWorkspaceStore.class),
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
         mock(PipelineRunRepository.class),
@@ -481,8 +560,7 @@ class WorkspaceGenerationRecoveryServiceTest {
         mock(RunWorkspaceAuthorityService.class),
         new ObjectMapper(),
         transactionManager(),
-        mock(TaskStatusPersistenceService.class),
-        mock(WorkspaceGenerationTaskTransitionService.class),
+        mock(WorkspaceGenerationTerminalReconciler.class),
         mock(GcsWorkspaceStore.class),
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
         runs,

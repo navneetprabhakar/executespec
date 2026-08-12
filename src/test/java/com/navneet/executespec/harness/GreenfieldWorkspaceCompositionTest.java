@@ -121,7 +121,8 @@ class GreenfieldWorkspaceCompositionTest {
             .probeInitial(new ExecutionContext("run-fastapi", "T1", root), contract);
 
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:python");
-    assertThat(contract.testCommand().source()).isEqualTo("executespec-bootstrap-pytest");
+    assertThat(contract.testCommand().source())
+        .isEqualTo("executespec-bootstrap-plus-workspace-pytest");
     assertThat(initial.observed()).isTrue();
     assertThat(initial.code()).isEqualTo("REQUIRED_PATH_MISSING");
 

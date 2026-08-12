@@ -34,7 +34,6 @@ import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.execution.service.GoalContinuationAdvisor;
 import com.navneet.executespec.execution.service.GoalContinuationPolicy;
 import com.navneet.executespec.execution.service.GoalDonenessEvaluator;
-import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.report.RunChangeEvidenceService;
 import com.navneet.executespec.router.AgentTier;
@@ -345,10 +344,6 @@ to boot — skip it for those.""";
   /** Proxied transaction boundary for locked task-status transitions. */
   private final TaskStatusPersistenceService taskStatusPersistenceService;
 
-  // RL-2026-05-041 (audit #2) — mid-run durability: GCS checkpoint at each task boundary.
-  private final com.navneet.executespec.deployment.GcsTaskCheckpointService
-      gcsTaskCheckpointService;
-
   private final com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver;
 
   /** Optional in source-compatible test constructors; Spring supplies the routing seam. */
@@ -390,7 +385,6 @@ to boot — skip it for those.""";
       com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
-      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService) {
@@ -409,7 +403,6 @@ to boot — skip it for those.""";
         contextStore,
         costTracker,
         null,
-        gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         repoOrientationService);
@@ -429,7 +422,6 @@ to boot — skip it for those.""";
       com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
-      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
@@ -449,7 +441,6 @@ to boot — skip it for those.""";
         contextStore,
         costTracker,
         null,
-        gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         repoOrientationService);
@@ -472,7 +463,6 @@ to boot — skip it for those.""";
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
       TaskStatusPersistenceService taskStatusPersistenceService,
-      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
@@ -497,7 +487,6 @@ to boot — skip it for those.""";
         contextStore,
         costTracker,
         taskStatusPersistenceService,
-        gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         repoOrientationService);
@@ -513,6 +502,8 @@ to boot — skip it for those.""";
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepDownsPerTask =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, AtomicInteger> continuationSameProviderRetriesPerTask =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Boolean> continuationConfirmationRequiredByRun =
       new ConcurrentHashMap<>();
@@ -817,10 +808,6 @@ to boot — skip it for those.""";
           abortedByExecutionPolicy = true;
           break;
         }
-
-        if (buildTaskGenerations == null) {
-          gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
-        }
       }
 
       ExecutionResult result =
@@ -934,16 +921,35 @@ to boot — skip it for those.""";
           throwIfCancellationRequested(runId, task.id());
           return outcome;
         };
-    if (buildTaskGenerations == null
-        || RunWorkspaceAuthorityService.currentCorrectionToolLease() != null) {
-      TaskOutcome outcome = dispatch.get();
-      return resume == null
-          ? maybeActOnContinuation(task, plan, req, isFinalTask, outcome)
-          : outcome;
+    if (buildTaskGenerations == null) {
+      throw new IllegalStateException("BUILD_ATTEMPT_SUPERVISOR_REQUIRED");
     }
     BuildTaskGenerationCoordinator.TaskStatusSink taskStatus =
-        (status, reason) -> persistTaskStatus(runId, task.id(), status, reason);
-    var outcome = buildTaskGenerations.execute(taskIndex, task, plan, req, dispatch, taskStatus);
+        (status, reason) ->
+            BuildTaskStatusWriter.persist(
+                taskStatusPersistenceService,
+                taskRepo,
+                costTracker,
+                taskRecoveryAttemptByTask,
+                runId,
+                task.id(),
+                status,
+                reason);
+    boolean supervisedContinuation = resume != null && resume.targets(runId, task.id());
+    TaskOutcome outcome =
+        supervisedContinuation
+            ? buildTaskGenerations.executeContinuation(
+                taskIndex,
+                task,
+                plan,
+                req,
+                approvedRoute == null ? req.provider() : approvedRoute.provider(),
+                approvedRoute == null ? req.model() : approvedRoute.model(),
+                taskRecoveryAttempt(runId, task.id()),
+                resume.mayReopenTerminalRun(),
+                dispatch,
+                taskStatus)
+            : buildTaskGenerations.execute(taskIndex, task, plan, req, dispatch, taskStatus);
     if (resume != null) return outcome;
     return maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
   }
@@ -1032,7 +1038,7 @@ to boot — skip it for those.""";
   /** Resume target and optional exact approved continuation route. */
   public static final class ResumeRequest extends ExecutorResumeRequest {
     public ResumeRequest(String targetTaskId) {
-      this(targetTaskId, null, null, null, null);
+      super(targetTaskId, null, null, null, null, false);
     }
 
     public ResumeRequest(
@@ -1041,7 +1047,29 @@ to boot — skip it for those.""";
         String approvedModel,
         RunContinuationDecision approvedAction,
         String approvedProposalDigest) {
-      super(targetTaskId, approvedProvider, approvedModel, approvedAction, approvedProposalDigest);
+      super(
+          targetTaskId,
+          approvedProvider,
+          approvedModel,
+          approvedAction,
+          approvedProposalDigest,
+          false);
+    }
+
+    public ResumeRequest(
+        String targetTaskId,
+        String approvedProvider,
+        String approvedModel,
+        RunContinuationDecision approvedAction,
+        String approvedProposalDigest,
+        boolean mayReopenTerminalRun) {
+      super(
+          targetTaskId,
+          approvedProvider,
+          approvedModel,
+          approvedAction,
+          approvedProposalDigest,
+          mayReopenTerminalRun);
     }
   }
 
@@ -1118,9 +1146,12 @@ to boot — skip it for those.""";
       isResumeTarget = true;
     }
 
-    if (isTerminal) {
+    // An explicitly targeted retry/continuation must reach the BUILD supervisor, which owns the
+    // transactional terminal-task reopen. Untargeted crash recovery still skips terminal rows.
+    if (isTerminal && !isResumeTarget) {
       return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted, null);
     }
+    if (isTerminal) return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     if (!isResumeTarget) {
       return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     }
@@ -1219,6 +1250,13 @@ to boot — skip it for those.""";
       return outcome;
     }
     GoalContinuationPolicyDecision decision = outcome.continuationDecision();
+    if (BuildContinuationOutcomes.sameProviderRetryRequired(decision, outcome)) {
+      ModelProviderScore sameRoute = BuildContinuationOutcomes.sameRouteScore(task, outcome);
+      GoalContinuationPolicyDecision retryDecision =
+          BuildContinuationOutcomes.sameRouteDecision(sameRoute);
+      return executeContinuationAction(
+          task, plan, req, isFinalTask, outcome, retryDecision, sameRoute, true);
+    }
     if (!actionableContinuationDecision(decision)) {
       return outcome;
     }
@@ -1285,18 +1323,6 @@ to boot — skip it for those.""";
     appendContinuationActionHistory(
         runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
-    // Clear the primary attempt's terminal marker before executeOne() publishes WORKING; otherwise
-    // persistTaskStatus() rejects the rerun's WORKING/COMPLETE writes as a "terminal overwrite".
-    // RR-266: a false return means a concurrent cancellation or a rolling-restart takeover owns the
-    // terminal state, so this (possibly stale) executor keeps the primary outcome — no rerun.
-    if (!prepareTaskForContinuation(runId, task.id())) {
-      log.warn(
-          "SequentialExecutor continuation run={} task={} — reopen fenced; keeping primary outcome",
-          runId,
-          task.id());
-      return outcome;
-    }
-
     // A different provider/model gets the current workspace plus a compact deterministic dossier,
     // never the previous model's full transcript. Replaying that transcript across models grows
     // every subsequent prompt and anchors the replacement model to the failed reasoning path.
@@ -1317,41 +1343,36 @@ to boot — skip it for those.""";
           return new ProviderModelOverride(
               candidate.provider(), candidate.model(), decision.decision(), recoveryNote);
         };
-    TaskOutcome rerunOutcome;
-    if (buildTaskGenerations != null && buildTaskGenerations.isolatesRouteChanges()) {
-      rerunOutcome =
-          buildTaskGenerations.execute(
-              plan.tasks().indexOf(task),
-              task,
-              plan,
-              req,
-              candidate.provider(),
-              candidate.model(),
-              () -> executeOne(task, plan, req, isFinalTask, null, routeOverride.get()),
-              (status, statusReason) -> persistTaskStatus(runId, task.id(), status, statusReason));
-    } else {
-      rerunOutcome = executeOne(task, plan, req, isFinalTask, null, routeOverride.get());
+    if (buildTaskGenerations == null) {
+      throw new IllegalStateException("BUILD_ATTEMPT_SUPERVISOR_REQUIRED_FOR_CONTINUATION");
     }
-    return mergeContinuationAttempt(outcome, rerunOutcome, decision, candidate);
+    TaskOutcome rerunOutcome =
+        buildTaskGenerations.executeContinuation(
+            plan.tasks().indexOf(task),
+            task,
+            plan,
+            req,
+            candidate.provider(),
+            candidate.model(),
+            taskRecoveryAttempt(runId, task.id()),
+            false,
+            () -> executeOne(task, plan, req, isFinalTask, null, routeOverride.get()),
+            (status, statusReason) ->
+                BuildTaskStatusWriter.persist(
+                    taskStatusPersistenceService,
+                    taskRepo,
+                    costTracker,
+                    taskRecoveryAttemptByTask,
+                    runId,
+                    task.id(),
+                    status,
+                    statusReason));
+    return BuildContinuationOutcomes.merge(outcome, rerunOutcome, decision, candidate);
   }
 
-  /**
-   * RR-266: reopen a terminal task for a selected continuation rerun via the atomic, row-locked
-   * compare-and-set in {@link TaskStatusPersistenceService#reopenForContinuation} (inline-
-   * constructed when the injected bean is absent, mirroring {@link #persistTaskStatus}). Returns
-   * {@code true} only when this executor won the reopen; otherwise it has no authority to rerun.
-   */
-  private boolean prepareTaskForContinuation(String runId, String taskIdShort) {
-    if (taskRepo == null || runId == null || runId.length() < 8 || taskIdShort == null) {
-      return false;
-    }
-    String key = runId.substring(0, 8) + "_" + taskIdShort;
-    TaskStatusPersistenceService persistence =
-        taskStatusPersistenceService != null
-            ? taskStatusPersistenceService
-            : new TaskStatusPersistenceService(taskRepo, costTracker);
-    return persistence.reopenForContinuation(
-        runId, taskIdShort, taskRecoveryAttemptByTask.get(key));
+  private Integer taskRecoveryAttempt(String runId, String taskIdShort) {
+    if (runId == null || runId.length() < 8 || taskIdShort == null) return null;
+    return taskRecoveryAttemptByTask.get(runId.substring(0, 8) + "_" + taskIdShort);
   }
 
   private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
@@ -1399,7 +1420,13 @@ to boot — skip it for those.""";
               continuationTaskKey(runId, taskId),
               "maxModelStepDowns",
               maxModelStepDowns());
-      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+      case CONTINUE_SAME_MODEL_PROVIDER ->
+          reserveLimit(
+              continuationSameProviderRetriesPerTask,
+              continuationTaskKey(runId, taskId),
+              "maxSameProviderRetries",
+              maxContinuationReruns());
+      case STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
           new ContinuationActionLimit("notActionable", 0, 0, false);
     };
   }
@@ -1639,36 +1666,6 @@ to boot — skip it for those.""";
 
   private record ContinuationActionLimit(
       String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
-
-  private static TaskOutcome mergeContinuationAttempt(
-      TaskOutcome initial,
-      TaskOutcome rerun,
-      GoalContinuationPolicyDecision decision,
-      ModelProviderScore candidate) {
-    if (rerun == null) {
-      return initial;
-    }
-    return TaskOutcome.builder()
-        .taskId(rerun.taskId())
-        .taskTitle(rerun.taskTitle())
-        .status(rerun.status())
-        .workerOutcome(rerun.workerOutcome())
-        .retryAttempted(rerun.retryAttempted())
-        .retryWorkerOutcome(rerun.retryWorkerOutcome())
-        .smokeTestPassed(rerun.smokeTestPassed())
-        .smokeTestExitCode(rerun.smokeTestExitCode())
-        .smokeTestOutput(rerun.smokeTestOutput())
-        .totalLatencyMs(initial.totalLatencyMs() + rerun.totalLatencyMs())
-        .toolCallsDispatched(initial.toolCallsDispatched() + rerun.toolCallsDispatched())
-        .dispatchedProvider(rerun.dispatchedProvider())
-        .dispatchedModel(rerun.dispatchedModel())
-        .goalDonenessDecision(rerun.goalDonenessDecision())
-        .continuationDecision(rerun.continuationDecision())
-        .continuationAction(decision == null ? null : decision.decision())
-        .continuationActionProvider(candidate == null ? null : candidate.provider())
-        .continuationActionModel(candidate == null ? null : candidate.model())
-        .build();
-  }
 
   private TaskOutcome executeOne(
       PlannedTask task, Plan plan, ExecutionRequest req, boolean isFinalTask) {
@@ -2767,7 +2764,8 @@ to boot — skip it for those.""";
             cfg.provider,
             cfg.model,
             providerBehaviorPoor(primary, reason));
-    if (approvalBlockedContinuationProposal(continuationDecision)) {
+    continuationDecision = BuildContinuationOutcomes.requireSmokeRetry(continuationDecision);
+    if (BuildContinuationOutcomes.approvalBlocked(continuationDecision)) {
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
@@ -2775,10 +2773,20 @@ to boot — skip it for those.""";
           task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
     }
     if (!actionableContinuationDecision(continuationDecision)) {
+      if (buildTaskGenerations != null) {
+        emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+        return preRetryContinuationOutcome(
+            task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+      }
       return null;
     }
     ModelProviderScore candidate = continuationDecision.selectedCandidate().orElse(null);
     if (candidate == null || sameProviderModel(candidate, cfg.provider, cfg.model)) {
+      if (buildTaskGenerations != null) {
+        emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+        return preRetryContinuationOutcome(
+            task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+      }
       return null;
     }
     if (!continuationActionCapacityAvailable(runId, task.id(), continuationDecision.decision())) {
@@ -2788,40 +2796,11 @@ to boot — skip it for those.""";
     TaskOutcome preRetryOutcome =
         preRetryContinuationOutcome(
             task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
-    if (buildTaskGenerations != null && buildTaskGenerations.isolatesRouteChanges()) {
+    if (buildTaskGenerations != null) {
       return preRetryOutcome;
     }
     return executeContinuationAction(
         task, plan, req, isFinalTask, preRetryOutcome, continuationDecision, candidate, false);
-  }
-
-  private static boolean approvalBlockedContinuationProposal(
-      GoalContinuationPolicyDecision decision) {
-    return decision != null
-        && decision.decision() == RunContinuationDecision.STOP_BLOCKED
-        && decision.selectedCandidate().isPresent()
-        && approvalEligibleBlockedReason(decision);
-  }
-
-  private static boolean approvalEligibleBlockedReason(GoalContinuationPolicyDecision decision) {
-    Map<String, Object> policy = decision.policy();
-    Object blockedReason = policy == null ? null : policy.get("blockedAutomaticContinuationReason");
-    if ("ROUTE_PINNED".equals(String.valueOf(blockedReason))) {
-      return false;
-    }
-    if ("BENCHMARK_PRIOR_REQUIRED".equals(String.valueOf(blockedReason))
-        || "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED".equals(String.valueOf(blockedReason))) {
-      return true;
-    }
-    ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
-    if (candidate == null || policy == null) {
-      return false;
-    }
-    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
-        && !candidate.benchmarkQualityPriorAvailable()) {
-      return true;
-    }
-    return Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"));
   }
 
   private static TaskOutcome preRetryContinuationOutcome(
@@ -4289,6 +4268,9 @@ to boot — skip it for those.""";
                 "persistTaskStatus: fenced terminal overwrite id={} incomingStatus={}",
                 key,
                 status);
+        case CANCELLED_WINS ->
+            log.info(
+                "persistTaskStatus: cancellation retained id={} incomingStatus={}", key, status);
       }
     } catch (Exception e) {
       log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);

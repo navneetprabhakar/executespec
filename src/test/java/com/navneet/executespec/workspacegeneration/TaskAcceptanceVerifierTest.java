@@ -147,6 +147,30 @@ class TaskAcceptanceVerifierTest {
   }
 
   @Test
+  void schemaV2RejectsPassingBootstrapTestsWhenCandidateShipsNoRepositoryTest() throws Exception {
+    ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
+    Files.createDirectories(workspace.resolve("src/main"));
+    Files.writeString(workspace.resolve("src/main/App.java"), "class App {}\n");
+    TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
+    when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
+    TestExecutionSummary summary =
+        TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
+    when(testRunner.runTestsDetailed("run-1", workspace))
+        .thenReturn(Optional.of(new DetailedResult(summary, "2 passed", command.command(), 0)));
+
+    var result =
+        verifier.verify(
+            v2Context,
+            requiredCandidateTestContract(),
+            List.of("src/main/App.java", ".executespec/bootstrap/test_acceptance.py"));
+
+    assertThat(result.outcome()).isEqualTo("FAILED");
+    assertThat(result.evidenceJson())
+        .contains("\"candidateTestsPresent\":false")
+        .contains("\"kind\":\"CANDIDATE_TEST_EVIDENCE\"");
+  }
+
+  @Test
   void schemaV2RejectsCommandDriftEvenWhenTheDriftedBuildPasses() throws Exception {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     Files.createDirectories(workspace.resolve("src/main"));
@@ -403,6 +427,38 @@ class TaskAcceptanceVerifierTest {
 
   private static TaskAcceptanceContract endpointContract() {
     return endpointContract("GET /health");
+  }
+
+  private static TaskAcceptanceContract requiredCandidateTestContract() {
+    TaskAcceptanceContract base = failureFirstContract();
+    return new TaskAcceptanceContract(
+        base.schemaVersion(),
+        base.taskId(),
+        base.taskIndex(),
+        base.verificationPolicy(),
+        base.buildRequirement(),
+        base.testRequirement(),
+        base.declaredTouchPaths(),
+        base.runtimeSurface(),
+        base.baselineKind(),
+        base.buildCommand(),
+        base.testCommand(),
+        base.requiredPaths(),
+        base.requiredTestSelectors(),
+        base.endpointExpectations(),
+        true,
+        base.allowedRepositoryScopes(),
+        base.prefixChecks(),
+        List.of(
+            new TaskAcceptanceContract.AcceptanceCheck("REPOSITORY_SCOPE", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck(
+                "REQUIRED_PATHS_PRESENT", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck(
+                "CANDIDATE_TEST_EVIDENCE", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck("TESTS_PASSED", "candidate", false)),
+        "e".repeat(64));
   }
 
   private static TaskAcceptanceContract endpointContract(String endpoint) {

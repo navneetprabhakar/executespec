@@ -118,6 +118,11 @@ public class TaskAcceptanceContractResolver {
             "BOOTSTRAP_ARTIFACT_INTEGRITY", ".executespec/bootstrap", true));
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false));
+    if ("REQUIRED".equals(testRequirement)) {
+      finalChecks.add(
+          new TaskAcceptanceContract.AcceptanceCheck(
+              "CANDIDATE_TEST_EVIDENCE", "candidate", false));
+    }
     finalChecks.add(new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false));
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck(
@@ -260,9 +265,9 @@ public class TaskAcceptanceContractResolver {
         case PYTHON ->
             Optional.of(
                 command(
-                    "python3 -m pytest -q .executespec/bootstrap/test_acceptance.py",
+                    "python3 -m pytest -q",
                     600,
-                    "executespec-bootstrap-pytest",
+                    "executespec-bootstrap-plus-workspace-pytest",
                     "PYTEST"));
         case NODE_JAVASCRIPT ->
             Optional.of(
@@ -379,9 +384,9 @@ public class TaskAcceptanceContractResolver {
       case PYTHON ->
           Optional.of(
               command(
-                  "python3 -m pytest -q .executespec/bootstrap/test_acceptance.py",
+                  "python3 -m pytest -q",
                   600,
-                  "executespec-bootstrap-pytest",
+                  "executespec-bootstrap-plus-workspace-pytest",
                   "PYTEST"));
       case NODE_JAVASCRIPT ->
           Optional.of(

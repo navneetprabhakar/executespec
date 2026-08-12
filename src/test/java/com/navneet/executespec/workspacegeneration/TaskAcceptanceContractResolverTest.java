@@ -100,8 +100,7 @@ class TaskAcceptanceContractResolverTest {
     assertThat(contract.baselineKind()).isEqualTo("PYTHON");
     assertThat(contract.buildCommand().command()).isEqualTo("python3 -m compileall -q .");
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:python");
-    assertThat(contract.testCommand().command())
-        .isEqualTo("python3 -m pytest -q .executespec/bootstrap/test_acceptance.py");
+    assertThat(contract.testCommand().command()).isEqualTo("python3 -m pytest -q");
     assertThat(contract.requiredPaths()).containsExactly("src/app.py", "tests/test_app.py");
     assertThat(contract.prefixChecks())
         .extracting(TaskAcceptanceContract.AcceptanceCheck::kind)
@@ -113,6 +112,7 @@ class TaskAcceptanceContractResolverTest {
             "REQUIRED_PATHS_PRESENT",
             "BOOTSTRAP_ARTIFACT_INTEGRITY",
             "MEANINGFUL_DIFF",
+            "CANDIDATE_TEST_EVIDENCE",
             "BUILD_PASSED",
             "TESTS_PASSED");
     assertThat(contract.digest()).isEqualTo(reordered.digest()).matches("[0-9a-f]{64}");
@@ -183,7 +183,7 @@ class TaskAcceptanceContractResolverTest {
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:changed-multi-root");
     assertThat(contract.testCommand().command())
         .isEqualTo(
-            "(cd repos/api && python3 -m pytest -q .executespec/bootstrap/test_acceptance.py)"
+            "(cd repos/api && python3 -m pytest -q)"
                 + " && (cd repos/web && node --test"
                 + " .executespec/bootstrap/test_acceptance.mjs)");
     assertThat(contract.testCommand().framework()).isEqualTo("MULTI");
