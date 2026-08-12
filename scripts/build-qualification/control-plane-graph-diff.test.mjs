@@ -28,7 +28,10 @@ const hashes = {
 test("unrelated source changes do not require a control-plane review", () => {
   const base = { nodes: [node("ui", "frontend/src/App.tsx")], edges: [] };
   const candidate = {
-    nodes: [node("ui", "frontend/src/App.tsx"), node("ui2", "frontend/src/New.tsx")],
+    nodes: [
+      node("ui", "frontend/src/App.tsx"),
+      node("ui2", "frontend/src/New.tsx"),
+    ],
     edges: [edge("ui", "ui2", "calls", "frontend/src/App.tsx")],
   };
 
@@ -44,7 +47,10 @@ test("unrelated source changes do not require a control-plane review", () => {
 test("a generation authority edge change requires exact review", () => {
   const path =
     "src/main/java/com/navneet/executespec/workspacegeneration/WorkspaceGenerationLifecycle.java";
-  const base = { nodes: [node("lifecycle", path), node("store", path)], edges: [] };
+  const base = {
+    nodes: [node("lifecycle", path), node("store", path)],
+    edges: [],
+  };
   const candidate = {
     nodes: base.nodes,
     edges: [edge("lifecycle", "store", "calls", path)],
@@ -68,9 +74,13 @@ test("a generation authority edge change requires exact review", () => {
 });
 
 test("a removed SQL trigger edge is schema-sensitive", () => {
-  const path = "src/main/resources/db/migration/V399__persist_generation_operation_intents.sql";
+  const path =
+    "src/main/resources/db/migration/V399__persist_generation_operation_intents.sql";
   const base = {
-    nodes: [node("migration", path), node("trigger", path, "build_run_terminal_fence")],
+    nodes: [
+      node("migration", path),
+      node("trigger", path, "build_run_terminal_fence"),
+    ],
     edges: [edge("migration", "trigger", "triggers", path)],
   };
   const candidate = { nodes: [node("migration", path)], edges: [] };
@@ -84,7 +94,8 @@ test("a removed SQL trigger edge is schema-sensitive", () => {
 });
 
 test("stale identity and incomplete area coverage fail closed", () => {
-  const path = "src/main/java/com/navneet/executespec/sandbox/RunSandboxStore.java";
+  const path =
+    "src/main/java/com/navneet/executespec/sandbox/RunSandboxStore.java";
   const diff = compareControlPlaneGraphs(
     { nodes: [], edges: [] },
     { nodes: [node("sandbox", path)], edges: [] },
@@ -102,7 +113,12 @@ test("stale identity and incomplete area coverage fail closed", () => {
 
 test("Graphify edge schema cannot silently degrade to an empty graph", () => {
   assert.throws(
-    () => compareControlPlaneGraphs({ nodes: [] }, { nodes: [], edges: [] }, hashes),
+    () =>
+      compareControlPlaneGraphs(
+        { nodes: [] },
+        { nodes: [], edges: [] },
+        hashes,
+      ),
     /GRAPH_EDGE_COLLECTION_MISSING/,
   );
   assert.throws(
@@ -114,6 +130,37 @@ test("Graphify edge schema cannot silently degrade to an empty graph", () => {
       ),
     /GRAPH_EDGE_COLLECTIONS_CONFLICT/,
   );
+});
+
+test("absolute extraction roots do not create semantic edge changes", () => {
+  const path =
+    "src/main/java/com/navneet/executespec/workspacegeneration/WorkspaceGenerationLifecycle.java";
+  const pathId =
+    "src_main_java_com_navneet_executespec_workspacegeneration_workspacegenerationlifecycle_java";
+  const secondPath =
+    "src/main/java/com/navneet/executespec/workspacegeneration/WorkspaceGenerationStore.java";
+  const secondPathId =
+    "src_main_java_com_navneet_executespec_workspacegeneration_workspacegenerationstore_java";
+  const nodes = [node("lifecycle", path), node("store", secondPath)];
+  const extracted = (root) => ({
+    nodes,
+    edges: [
+      edge(`${root}_${pathId}`, `${root}_store`, "calls", path),
+      edge(`${root}_${secondPathId}`, `${root}_lifecycle`, "calls", secondPath),
+    ],
+  });
+
+  const diff = compareControlPlaneGraphs(
+    extracted("private_tmp_deployed_base"),
+    extracted("home_runner_work_candidate"),
+    hashes,
+  );
+
+  assert.equal(diff.reviewRequired, false);
+  assert.equal(diff.changedNodeCount, 0);
+  assert.equal(diff.changedEdgeCount, 0);
+  assert.equal(diff.baseExtractionPrefixCount, 1);
+  assert.equal(diff.candidateExtractionPrefixCount, 1);
 });
 
 function approvedReview(diff) {
