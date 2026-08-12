@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
+import com.navneet.executespec.repo.GitProcessAuth;
 import com.navneet.executespec.tool.GitTool;
 import com.navneet.executespec.tool.GitToolResult;
 
@@ -51,9 +52,26 @@ class PublicationRealGitPartialEffectPostgresTest {
       throws Exception {
     Path workspaceRoot = temp.resolve("workspace");
     String runId = "real-git-publication-run";
+    ProviderRemotes providerRemotes = ProviderRemotes.fromEnvironment();
     Path remotes = Files.createDirectories(temp.resolve("remotes"));
-    RepoFixture first = repository(workspaceRoot, runId, remotes, "repo-one");
-    RepoFixture second = repository(workspaceRoot, runId, remotes, "repo-two");
+    RepoFixture first =
+        repository(
+            workspaceRoot,
+            runId,
+            remotes,
+            "repo-one",
+            providerRemotes == null ? null : providerRemotes.firstRemote(),
+            providerRemotes == null ? null : providerRemotes.branchPrefix() + "-repo-one",
+            providerRemotes == null ? null : providerRemotes.pat());
+    RepoFixture second =
+        repository(
+            workspaceRoot,
+            runId,
+            remotes,
+            "repo-two",
+            providerRemotes == null ? null : providerRemotes.secondRemote(),
+            providerRemotes == null ? null : providerRemotes.branchPrefix() + "-repo-two",
+            providerRemotes == null ? null : providerRemotes.pat());
 
     DriverManagerDataSource dataSource = dataSource();
     JdbcTemplate bootstrapJdbc = new JdbcTemplate(dataSource);
@@ -177,7 +195,7 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
                     runId,
                     first.subPath(),
                     first.remoteUrl(),
-                    "",
+                    first.pat(),
                     firstPrepared.publicationBranch(),
                     firstPrepared.commitId(),
                     null));
@@ -186,7 +204,7 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
     assertThat(remoteBranch(first)).isNotEqualTo(first.unboundCommit());
     assertThat(publicationState(jdbc, first.id())).isEqualTo("PUBLISHED");
 
-    Process killed =
+    ProcessBuilder killedBuilder =
         new ProcessBuilder(
                 javaBinary(),
                 "-cp",
@@ -204,8 +222,11 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
                 evidenceDigest,
                 generation,
                 ownerToken.toString())
-            .redirectErrorStream(true)
-            .start();
+            .redirectErrorStream(true);
+    if (second.pat() != null) {
+      killedBuilder.environment().put("ES_R17_GITHUB_PAT", second.pat());
+    }
+    Process killed = killedBuilder.start();
     assertThat(killed.waitFor(30, TimeUnit.SECONDS)).isTrue();
     String killedOutput =
         new String(killed.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -233,14 +254,30 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
     assertThat(replayedRemoteEffect).isFalse();
     assertThat(remoteBranch(second)).isEqualTo(second.preparedCommit());
     assertThat(publicationState(jdbc, first.id())).isEqualTo("PUBLISHED");
+    if (providerRemotes != null) {
+      System.out.printf(
+          "R17_PROVIDER_REF remote=%s branch=%s sha=%s state=PUBLISHED%n",
+          first.identity(), first.branch(), first.preparedCommit());
+      System.out.printf(
+          "R17_PROVIDER_REF remote=%s branch=%s sha=%s state=INDETERMINATE%n",
+          second.identity(), second.branch(), second.preparedCommit());
+    }
   }
 
-  private RepoFixture repository(Path workspaceRoot, String runId, Path remotes, String name)
+  private RepoFixture repository(
+      Path workspaceRoot,
+      String runId,
+      Path remotes,
+      String name,
+      String providerRemote,
+      String providerBranch,
+      String providerPat)
       throws Exception {
     String subPath = "repos/" + name;
     Path worktree = Files.createDirectories(workspaceRoot.resolve(runId).resolve(subPath));
-    Path bare = remotes.resolve(name + ".git");
-    git(temp, "init", "--bare", bare.toString());
+    boolean providerMode = providerRemote != null;
+    Path bare = providerMode ? null : remotes.resolve(name + ".git");
+    if (!providerMode) git(temp, "init", "--bare", bare.toString());
     git(temp, "init", "-b", "main", worktree.toString());
     git(worktree, "config", "user.name", "ExecuteSpec Qualification");
     git(worktree, "config", "user.email", "qualification@executespec.ai");
@@ -248,7 +285,9 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
     git(worktree, "add", "artifact.txt");
     git(worktree, "commit", "-m", "base");
     String parent = git(worktree, "rev-parse", "HEAD");
-    git(worktree, "push", bare.toUri().toString(), "HEAD:refs/heads/main");
+    if (!providerMode) {
+      git(worktree, "push", bare.toUri().toString(), "HEAD:refs/heads/main");
+    }
     Files.writeString(worktree.resolve("artifact.txt"), "prepared " + name + "\n");
     git(worktree, "add", "artifact.txt");
     git(worktree, "commit", "-m", "prepared " + name);
@@ -259,19 +298,31 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
     git(worktree, "commit", "-m", "unbound " + name);
     String unbound = git(worktree, "rev-parse", "HEAD");
     git(worktree, "reset", "--hard", parent);
-    String rewriteBase = remotes.toUri().toString();
-    git(
-        worktree,
-        "config",
-        "url." + rewriteBase + ".insteadOf",
-        "https://github.com/qualification/");
+    String remoteUrl =
+        providerMode ? providerRemote : "https://github.com/qualification/" + name + ".git";
+    String identity =
+        providerMode
+            ? PublicationTargetResolver.canonicalRemoteIdentity("GITHUB:expected", remoteUrl)
+            : "GITHUB:qualification/" + name;
+    String branch = providerMode ? providerBranch : "executespec/qualification";
+    if (!providerMode) {
+      String rewriteBase = remotes.toUri().toString();
+      git(
+          worktree,
+          "config",
+          "url." + rewriteBase + ".insteadOf",
+          "https://github.com/qualification/");
+    }
     return new RepoFixture(
         UUID.randomUUID(),
         name,
         subPath,
-        "GITHUB:qualification/" + name,
-        "https://github.com/qualification/" + name + ".git",
+        identity,
+        remoteUrl,
         bare,
+        worktree,
+        branch,
+        providerPat,
         parent,
         tree,
         prepared,
@@ -286,12 +337,13 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
             + "repository_identity,repository_identity_digest,relative_worktree_path,"
             + "publication_branch,provision_required,commit_message,commit_message_digest,"
             + "committed_at,parent_commit_id,tree_id,commit_id,has_changes,prepared_at) VALUES "
-            + "(?,?,'PREPARED',?,?,?,'executespec/qualification',FALSE,?,?,NOW(),?,?,?,TRUE,NOW())",
+            + "(?,?,'PREPARED',?,?,?,?,FALSE,?,?,NOW(),?,?,?,TRUE,NOW())",
         fixture.id(),
         preparationId,
         fixture.identity(),
         PublicationPreparationService.sha256(fixture.identity()),
         fixture.subPath(),
+        fixture.branch(),
         message,
         PublicationPreparationService.sha256(message),
         fixture.parentCommit(),
@@ -316,12 +368,30 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
   }
 
   private static String remoteBranch(RepoFixture fixture) throws Exception {
+    if (fixture.bare() == null) {
+      ProcessBuilder processBuilder =
+          GitProcessAuth.git(
+              fixture.pat(),
+              List.of(
+                  "-C",
+                  fixture.worktree().toString(),
+                  "ls-remote",
+                  fixture.remoteUrl(),
+                  "refs/heads/" + fixture.branch()));
+      processBuilder.redirectErrorStream(true);
+      Process process = processBuilder.start();
+      String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      assertThat(process.waitFor(30, TimeUnit.SECONDS)).isTrue();
+      assertThat(process.exitValue()).as(output).isZero();
+      assertThat(output).as("provider branch must exist").isNotBlank();
+      return output.split("\\s+", 2)[0];
+    }
     return git(
         fixture.bare(),
         "--git-dir",
         fixture.bare().toString(),
         "rev-parse",
-        "refs/heads/executespec/qualification");
+        "refs/heads/" + fixture.branch());
   }
 
   private static String runRecoveryProbe() throws Exception {
@@ -386,8 +456,34 @@ VALUES (?,?,'T1',0,1,'BUILD_TASK','ACCEPTED','/tmp/real-git-publication',repeat(
       String identity,
       String remoteUrl,
       Path bare,
+      Path worktree,
+      String branch,
+      String pat,
       String parentCommit,
       String tree,
       String preparedCommit,
       String unboundCommit) {}
+
+  private record ProviderRemotes(
+      String firstRemote, String secondRemote, String branchPrefix, String pat) {
+    private static ProviderRemotes fromEnvironment() {
+      String first = System.getenv("ES_R17_GITHUB_REMOTE_ONE");
+      String second = System.getenv("ES_R17_GITHUB_REMOTE_TWO");
+      String prefix = System.getenv("ES_R17_BRANCH_PREFIX");
+      String pat = System.getenv("ES_R17_GITHUB_PAT");
+      boolean any = hasText(first) || hasText(second) || hasText(prefix) || hasText(pat);
+      if (!any) return null;
+      if (!hasText(first) || !hasText(second) || !hasText(prefix) || !hasText(pat)) {
+        throw new IllegalStateException("R17_PROVIDER_CONFIGURATION_INCOMPLETE");
+      }
+      if (!prefix.matches("executespec/r17-[a-zA-Z0-9._/-]+") || prefix.contains("..")) {
+        throw new IllegalStateException("R17_PROVIDER_BRANCH_PREFIX_INVALID");
+      }
+      return new ProviderRemotes(first, second, prefix, pat);
+    }
+
+    private static boolean hasText(String value) {
+      return value != null && !value.isBlank();
+    }
+  }
 }

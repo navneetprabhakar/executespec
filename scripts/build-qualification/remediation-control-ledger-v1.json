@@ -252,10 +252,10 @@
       "authoritativeStore": "workspace_publication_preparation,workspace_publication_repository_receipt,workspace_publication_repository_provision,workspace_publication_attempt",
       "writer": "PublicationPreparationService,PublicationPreparationStore,PublicationExternalEffectStore,RepositoryProvisionDispatchService,PublicationDispatchService",
       "reconciler": "PublicationRecoveryService",
-      "fixture": "PublicationPreparationPostgresTest,PublicationRecoveryTakeoverProbe,PublicationPreparationServiceTest,PublicationPreparationArchitectureTest,NonExecutingGitTreeWriterTest,PublicationTargetResolverTest,RepositoryProvisionDispatchServiceTest,PublicationDispatchServiceTest,PublicationRealGitPartialEffectPostgresTest,PublicationRealGitCrashProbe,PENDING_DEPLOYED_GITHUB_OR_BITBUCKET_PARTIAL_MULTI_REPO_RECONCILIATION_MATRIX",
+      "fixture": "PublicationPreparationPostgresTest,PublicationRecoveryTakeoverProbe,PublicationPreparationServiceTest,PublicationPreparationArchitectureTest,NonExecutingGitTreeWriterTest,PublicationTargetResolverTest,RepositoryProvisionDispatchServiceTest,PublicationDispatchServiceTest,PublicationRealGitPartialEffectPostgresTest,PublicationRealGitCrashProbe,scripts/build-qualification/github-publication-recovery.sh;2026-08-13_GITHUB_TWO_REPETITIONS_EXACT_REF_SHA_AND_VERIFIED_CLEANUP",
       "owner": "STATE_MACHINE_OWNER",
       "reviewer": "DATABASE_CONCURRENCY_REVIEWER",
-      "status": "IN_PROGRESS"
+      "status": "COMPLETE_PROVIDER_GITHUB"
     }
   ],
   "evidence": [
