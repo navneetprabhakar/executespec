@@ -95,7 +95,7 @@ jobs:
           echo "GRAPHIFY_VERSION=$GRAPHIFY_VERSION" >> "$GITHUB_ENV"
           echo "GRAPHIFY_SQL_PARSER_VERSION=$GRAPHIFY_SQL_PARSER_VERSION" >> "$GITHUB_ENV"
           echo "GRAPHIFY_HCL_PARSER_VERSION=$GRAPHIFY_HCL_PARSER_VERSION" >> "$GITHUB_ENV"
-          jq '{nodes:(.nodes|length),edges:(.links|length),sqlFiles:([.nodes[]|select((.source_file//"")|endswith(".sql"))|.source_file]|unique|length),sqlNodes:([.nodes[]|select((.source_file//"")|endswith(".sql"))]|length),hclFiles:([.nodes[]|select((.source_file//"")|test("\\.(tf|tfvars)$"))|.source_file]|unique|length),hclNodes:([.nodes[]|select((.source_file//"")|test("\\.(tf|tfvars)$"))]|length)}' graphify-out/graph.json > graphify-out/release-counts.json
+          jq '(if (.edges|type) == "array" then .edges elif (.links|type) == "array" then .links else error("Graphify edge collection missing") end) as $edges | {nodes:(.nodes|length),edges:($edges|length),sqlFiles:([.nodes[]|select((.source_file//"")|endswith(".sql"))|.source_file]|unique|length),sqlNodes:([.nodes[]|select((.source_file//"")|endswith(".sql"))]|length),hclFiles:([.nodes[]|select((.source_file//"")|test("\\.(tf|tfvars)$"))|.source_file]|unique|length),hclNodes:([.nodes[]|select((.source_file//"")|test("\\.(tf|tfvars)$"))]|length)}' graphify-out/graph.json > graphify-out/release-counts.json
           echo "Control-plane graph SHA-256: `$GRAPH_SHA256`" >> "$GITHUB_STEP_SUMMARY"
 
       # ── Java setup ────────────────────────────────────────────────────────

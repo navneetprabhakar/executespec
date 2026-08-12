@@ -22,7 +22,9 @@ bundle for running source/JAR identity, complete Flyway/checksum history, full r
 definitions, persisted/process flag parity, protocol mode, sandbox configuration, and Graphify
 SQL/HCL provenance. The deploy workflow generates a code-only graph from the exact checkout with
 pinned Graphify 0.9.13 extras, retains it, stamps its hashes/parser versions into the host marker and
-JVM environment, and verifies the process tuple after health. The local contract is not deployed
+JVM environment, and verifies the process tuple after health. Graphify 0.9.13's canonical edge
+collection is `edges`; release counting and semantic diffing fail closed if neither `edges` nor the
+legacy `links` collection exists, or if both collections conflict. The local contract is not deployed
 evidence: R12 remains in progress until the authenticated endpoint and live container mount are
 captured from the exact deployed candidate.
 
