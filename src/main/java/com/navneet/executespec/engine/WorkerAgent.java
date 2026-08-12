@@ -294,7 +294,6 @@ public class WorkerAgent implements CodeChangeLoop {
    *   <li>{@code writeFile} — overwrites whole-file content. Re-issuing the same call is a no-op.
    *   <li>{@code editFile} — fails with a clear error envelope if the {@code old_string} is no
    *       longer present (because it was already replaced by the previous, possibly lost, run).
-   *       Worker self-corrects by reading the file and trying again or moving on.
    *   <li>{@code gitCommit} — denied for the worker entirely (see {@link
    *       ToolRegistry#WORKER_DENY_TOOLS}). Run-end commit is in {@code ScmPushService}.
    *   <li>{@code shell} — best-effort idempotent for build / test commands; mutating shell commands
@@ -309,6 +308,7 @@ public class WorkerAgent implements CodeChangeLoop {
   @Override
   public WorkerResult run(
       WorkerTaskRequest req, com.navneet.executespec.context.SavedContext resumeFrom) {
+    WorkerCorrectionToolFence.assertAttemptAdmission(req);
     long start = System.currentTimeMillis();
     WorkerTaskRequest effectiveRequest =
         WorkerTaskRequestControls.withRuntimeDefaults(

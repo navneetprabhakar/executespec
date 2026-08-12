@@ -74,6 +74,49 @@ class CorrectionValidationAdmission {
     return regenerated;
   }
 
+  /**
+   * Validation admission for the canonical BUILD supervisor. The workspace generation has already
+   * been accepted by that supervisor, so this path proves byte stability without opening a second
+   * correction checkpoint or workspace authority.
+   */
+  ValidationReport regenerateAndAssertAcceptedGeneration(
+      String runId,
+      ExecutionResult execution,
+      ReviewerResult review,
+      Plan plan,
+      Path workspace,
+      String reviewerWorkspaceGeneration) {
+    ValidationReport regenerated =
+        validationKickoff
+            .generateCorrectionValidationReport(
+                runId, execution, review, plan, reviewerWorkspaceGeneration)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "CORRECTION_VALIDATION_MISSING: correction validation did not persist"));
+    String currentGeneration = workspaceTransaction.captureGeneration(workspace);
+    if (!reviewerWorkspaceGeneration.equals(currentGeneration)
+        || !currentGeneration.equals(regenerated.getWorkspaceGeneration())) {
+      throw new IllegalStateException(
+          "CORRECTION_VALIDATION_GENERATION_MISMATCH: reviewer, validation and workspace"
+              + " generations differ");
+    }
+    if (!"COMPLETE".equalsIgnoreCase(regenerated.getStatus())) {
+      throw new IllegalStateException(
+          "CORRECTION_VALIDATION_INCOMPLETE: regenerated validation is not complete");
+    }
+    if (regenerated.getPipelineResult() == PipelineResult.FAILED) {
+      throw new IllegalStateException(
+          "CORRECTION_VALIDATION_FAILED: regenerated deterministic validation failed");
+    }
+    assertCorrectionTestsPersisted(regenerated);
+    deterministicHttpRequirementVerifier.assertSatisfied(plan, null, workspace);
+    if (brownfieldHttpContractGuard.hasBaseline(runId)) {
+      brownfieldHttpContractGuard.assertCompatible(runId);
+    }
+    return regenerated;
+  }
+
   private static void assertCorrectionTestsPersisted(ValidationReport report) {
     if (!Boolean.TRUE.equals(report.getTestExecutionVerified())
         || report.getTestsTotal() == null

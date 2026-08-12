@@ -102,4 +102,20 @@ class WorkerCorrectionToolFenceTest {
         });
     verify(lease, org.mockito.Mockito.atLeastOnce()).assertOwned();
   }
+
+  @Test
+  void buildAttemptAdmissionFailsBeforeProviderOrToolWorkWithoutGenerationFence() {
+    WorkerTaskRequest request =
+        WorkerTaskRequest.builder()
+            .provider("anthropic")
+            .model("sonnet")
+            .userPrompt("fix")
+            .context(new ExecutionContext("run-build", "T1", Path.of("/tmp/run-build")))
+            .changeMode(CodeChangeMode.BUILD)
+            .build();
+
+    assertThatThrownBy(() -> WorkerCorrectionToolFence.assertAttemptAdmission(request))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("WORKSPACE_GENERATION_TOOL_LEASE_REQUIRED");
+  }
 }

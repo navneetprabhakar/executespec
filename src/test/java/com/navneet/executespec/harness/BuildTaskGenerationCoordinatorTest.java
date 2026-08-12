@@ -1,6 +1,7 @@
 package com.navneet.executespec.harness;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -43,6 +44,7 @@ import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTaskTransitionService;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 import com.navneet.executespec.workspacegeneration.WorkspaceOrigin;
 
@@ -65,6 +67,8 @@ class BuildTaskGenerationCoordinatorTest {
   private FeatureFlagService featureFlags;
   private BuildTaskUsageEvidence usageEvidence;
   private WorkspaceGenerationTelemetry telemetry;
+  private WorkspaceGenerationTaskTransitionService taskTransitions;
+  private BuildContinuationAdmissionService admissions;
   private BuildTaskGenerationCoordinator coordinator;
   private PlannedTask task;
   private Plan plan;
@@ -101,6 +105,8 @@ class BuildTaskGenerationCoordinatorTest {
     when(usageEvidence.snapshot(anyString(), anyString())).thenReturn(zeroUsage);
     when(usageEvidence.delta(any(), anyString(), anyString())).thenReturn(zeroUsage);
     telemetry = mock(WorkspaceGenerationTelemetry.class);
+    taskTransitions = mock(WorkspaceGenerationTaskTransitionService.class);
+    admissions = mock(BuildContinuationAdmissionService.class);
     coordinator =
         new BuildTaskGenerationCoordinator(
             generations,
@@ -114,7 +120,9 @@ class BuildTaskGenerationCoordinatorTest {
             greenfieldBaselines,
             featureFlags,
             usageEvidence,
-            telemetry);
+            telemetry,
+            taskTransitions,
+            admissions);
 
     task = PlannedTask.builder().id("T1").title("Build API").description("Implement API").build();
     plan = Plan.builder().planTitle("Build").tasks(List.of(task)).build();
@@ -146,40 +154,23 @@ class BuildTaskGenerationCoordinatorTest {
         .thenReturn("a".repeat(64));
     when(contracts.canonicalContract(any())).thenReturn("{}");
     when(contracts.canonicalInitialFailureEvidence(any())).thenReturn("[]");
-    when(generations.prepareBuild(
-            eq("run-1"),
-            eq("T1"),
-            eq(0),
-            eq(workspace),
-            anyString(),
-            eq(contract.digest()),
-            isNull(),
-            isNull(),
-            isNull(),
-            isNull()))
-        .thenReturn(prepared);
-    when(generations.prepareBuild(
-            eq("run-1"),
-            eq("T1"),
-            eq(0),
-            eq(workspace),
-            anyString(),
-            anyString(),
-            anyString(),
-            anyString(),
-            anyString(),
-            anyString()))
-        .thenReturn(prepared);
-
     LlmExecutionOperationCoordinator.Lease delegate = operationLease();
     ExecutionContext operationContext = new ExecutionContext("run-1", "T1", workspace);
     operation =
         new RunLlmOperationLifecycleService.PhaseLease("build-task:T1", delegate, operationContext);
-    when(operations.claimBuildTask(base, "run-1", "T1", 0, contract.digest()))
-        .thenReturn(operation);
-    when(operations.identity(operation))
+    UUID admittedAttempt = prepared.attemptId();
+    LlmExecutionOperationCoordinator.LeaseIdentity identity =
+        new LlmExecutionOperationCoordinator.LeaseIdentity("llm-op-1", 1, UUID.randomUUID());
+    when(admissions.admitAndClaim(any(), eq(base)))
         .thenReturn(
-            new LlmExecutionOperationCoordinator.LeaseIdentity("llm-op-1", 1, UUID.randomUUID()));
+            claimedAdmission(admittedAttempt, 1, operation, identity, "PENDING", "WORKING"));
+    when(generations.prepareBuild(
+            eq(admittedAttempt),
+            eq(workspace),
+            eq(identity.operationId()),
+            eq(identity.attempt()),
+            eq(identity.leaseToken())))
+        .thenReturn(prepared);
   }
 
   @Test
@@ -200,8 +191,7 @@ class BuildTaskGenerationCoordinatorTest {
         .thenReturn(
             new GcsTaskCheckpointService.CheckpointReceipt(
                 "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64), Instant.now()));
-    BuildTaskGenerationCoordinator.TaskStatusSink status =
-        mock(BuildTaskGenerationCoordinator.TaskStatusSink.class);
+    BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
     AtomicBoolean dispatchWasFenced = new AtomicBoolean();
     TaskOutcome expected = successfulOutcome();
 
@@ -216,8 +206,6 @@ class BuildTaskGenerationCoordinatorTest {
               dispatchWasFenced.set(
                   RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease()
                       == prepared.lease());
-              assertThat(coordinator.activeContextOr(request.runContext()).taskId())
-                  .isEqualTo("T1");
               return expected;
             },
             status);
@@ -227,20 +215,9 @@ class BuildTaskGenerationCoordinatorTest {
     InOrder order = inOrder(generations, verifier, checkpoints, status, operations);
     order
         .verify(generations)
-        .prepareBuild(
-            anyString(),
-            anyString(),
-            anyInt(),
-            any(),
-            anyString(),
-            anyString(),
-            isNull(),
-            isNull(),
-            isNull(),
-            isNull());
+        .prepareBuild(any(UUID.class), any(), anyString(), anyInt(), any(UUID.class));
     order.verify(generations).markMutating(prepared);
-    order.verify(generations).bindLlmAttempt(eq(prepared), eq("llm-op-1"), eq(1), any(UUID.class));
-    order.verify(generations).assertDispatch(prepared);
+    order.verify(generations).assertMutationDispatch(prepared);
     order.verify(generations).beginVerification(prepared);
     order.verify(verifier).verify(any(), eq(contract), eq(List.of("0:src/App.java")));
     order.verify(generations).recordVerification(prepared, passing);
@@ -253,7 +230,8 @@ class BuildTaskGenerationCoordinatorTest {
     order.verify(generations).accept(prepared);
     order.verify(status).persist("COMPLETE", null);
     order.verify(operations).complete(operation);
-    verify(generations, org.mockito.Mockito.times(2)).assertDispatch(prepared);
+    verify(generations).assertMutationDispatch(prepared);
+    verify(generations).assertVerificationDispatch(prepared);
     verify(generations, never()).rollback(any(), anyString(), anyString());
     verify(telemetry, never()).verification(anyString(), anyString(), anyString(), any());
     verify(broadcaster, never())
@@ -266,18 +244,18 @@ class BuildTaskGenerationCoordinatorTest {
     when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
     when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/App.java"));
     when(verifier.verify(any(), eq(contract), any())).thenReturn(rejected);
-    BuildTaskGenerationCoordinator.TaskStatusSink status =
-        mock(BuildTaskGenerationCoordinator.TaskStatusSink.class);
+    BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
 
     TaskOutcome outcome =
         coordinator.execute(0, task, plan, request, this::successfulOutcome, status);
 
     assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
-    InOrder order = inOrder(generations, status, operations);
+    InOrder order = inOrder(generations, status, taskTransitions, operations);
     order.verify(generations).recordVerification(prepared, rejected);
     order.verify(generations).rollback(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
     order.verify(status).persist(eq("PARTIAL"), anyString());
-    order.verify(operations).fail(operation, "BUILD_TASK_VERIFICATION_REJECTED");
+    order.verify(taskTransitions).publish(prepared.attemptId());
+    order.verify(operations).failBuildTask(operation, "BUILD_TASK_VERIFICATION_REJECTED");
     verify(generations, never()).beginCheckpoint(any());
     verify(generations, never()).accept(any());
     verify(checkpoints, never()).checkpointGeneration(anyString(), anyString(), any());
@@ -285,9 +263,102 @@ class BuildTaskGenerationCoordinatorTest {
   }
 
   @Test
+  void telemetryFailureImmediatelyAfterPrepareRollsBackAndReleasesAuthority() {
+    org.mockito.Mockito.doThrow(new IllegalStateException("telemetry unavailable"))
+        .when(telemetry)
+        .state(
+            eq("run-1"),
+            eq("T1"),
+            eq(prepared),
+            eq("PREPARED"),
+            eq(contract),
+            eq("anthropic"),
+            eq("claude-sonnet"),
+            isNull(),
+            isNull());
+
+    assertThatThrownBy(
+            () ->
+                coordinator.execute(0, task, plan, request, this::successfulOutcome, statusSink()))
+        .hasMessage("telemetry unavailable");
+
+    verify(generations)
+        .rollback(eq(prepared), eq("TASK_GENERATION_EXCEPTION"), eq("telemetry unavailable"));
+    verify(generations).release(prepared);
+    verify(admissions).admitAndClaim(any(), eq(request.runContext()));
+  }
+
+  @Test
+  void rejectedAttemptThenContinuationUsesANewPhysicalCoordinatorAndLlmInvocation() {
+    RunWorkspaceAuthorityService.Lease secondLease = mock(RunWorkspaceAuthorityService.Lease.class);
+    WorkspaceGenerationLifecycle.Prepared secondPrepared =
+        new WorkspaceGenerationLifecycle.Prepared(
+            UUID.randomUUID(), checkpoint("6".repeat(40), "7".repeat(40)), secondLease);
+    RunLlmOperationLifecycleService.PhaseLease secondOperation =
+        new RunLlmOperationLifecycleService.PhaseLease(
+            "build-task:T1", operationLease(), new ExecutionContext("run-1", "T1", workspace));
+    LlmExecutionOperationCoordinator.LeaseIdentity firstIdentity =
+        new LlmExecutionOperationCoordinator.LeaseIdentity("llm-op-1", 1, UUID.randomUUID());
+    LlmExecutionOperationCoordinator.LeaseIdentity secondIdentity =
+        new LlmExecutionOperationCoordinator.LeaseIdentity("llm-op-2", 1, UUID.randomUUID());
+    when(admissions.admitAndClaim(any(), eq(request.runContext())))
+        .thenReturn(
+            claimedAdmission(
+                prepared.attemptId(), 1, operation, firstIdentity, "PENDING", "WORKING"),
+            claimedAdmission(
+                secondPrepared.attemptId(),
+                2,
+                secondOperation,
+                secondIdentity,
+                "PARTIAL",
+                "WORKING"));
+    when(generations.prepareBuild(
+            eq(prepared.attemptId()), eq(workspace), eq("llm-op-1"), eq(1), any(UUID.class)))
+        .thenReturn(prepared);
+    when(generations.prepareBuild(
+            eq(secondPrepared.attemptId()), eq(workspace), eq("llm-op-2"), eq(1), any(UUID.class)))
+        .thenReturn(secondPrepared);
+    WorkspaceGenerationLifecycle.Verification rejected = verification("FAILED", false, true, 0, 1);
+    WorkspaceGenerationLifecycle.Verification passing = verification("PASSED", true, true, 2, 0);
+    when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
+    when(generations.beginVerification(secondPrepared)).thenReturn("c".repeat(64));
+    when(generations.changedFiles(any())).thenReturn(List.of("0:src/App.java"));
+    when(verifier.verify(any(), eq(contract), any())).thenReturn(rejected, passing);
+    CorrectionWorkspaceTransaction.Checkpoint candidate =
+        checkpoint("8".repeat(40), "9".repeat(40));
+    when(generations.snapshotCandidate(secondPrepared)).thenReturn(candidate);
+    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+        .thenReturn(
+            new GcsTaskCheckpointService.CheckpointReceipt(
+                "GCS", "gs://bucket/continuation", "c".repeat(64), "d".repeat(64), Instant.now()));
+    BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
+
+    TaskOutcome first =
+        coordinator.execute(0, task, plan, request, this::successfulOutcome, status);
+    TaskOutcome continuation =
+        coordinator.executeContinuation(
+            0,
+            task,
+            plan,
+            request,
+            "openai",
+            "gpt-5.4",
+            null,
+            false,
+            this::successfulOutcome,
+            status);
+
+    assertThat(first.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
+    assertThat(continuation.status()).isEqualTo(TaskOutcome.Status.SUCCESS);
+    verify(admissions, org.mockito.Mockito.times(2)).admitAndClaim(any(), eq(request.runContext()));
+    verify(generations).accept(secondPrepared);
+    verify(generations).release(prepared);
+    verify(generations).release(secondPrepared);
+  }
+
+  @Test
   void workerFailureCannotOutrankPassingServerVerification() {
-    BuildTaskGenerationCoordinator.TaskStatusSink status =
-        mock(BuildTaskGenerationCoordinator.TaskStatusSink.class);
+    BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
     WorkspaceGenerationLifecycle.Verification passing = verification("PASSED", true, true, 2, 0);
     when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
     when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/App.java"));
@@ -407,12 +478,10 @@ class BuildTaskGenerationCoordinatorTest {
           assertThat(coordinator.activeInitialFailureSnapshot().failed()).isEqualTo(1);
           return successfulOutcome();
         },
-        mock(BuildTaskGenerationCoordinator.TaskStatusSink.class));
+        statusSink());
 
-    InOrder order = inOrder(generations, operations, greenfieldBaselines);
+    InOrder order = inOrder(generations, greenfieldBaselines);
     order.verify(generations).markMutating(prepared);
-    order.verify(operations).claimBuildTask(any(), anyString(), anyString(), anyInt(), anyString());
-    order.verify(generations).bindLlmAttempt(eq(prepared), anyString(), anyInt(), any(UUID.class));
     order.verify(greenfieldBaselines).materialize(workspace, baseline);
     verify(initialFailures).record(prepared, observedFailure);
     verify(executionEvidence)
@@ -459,30 +528,11 @@ class BuildTaskGenerationCoordinatorTest {
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->
-                coordinator.execute(
-                    0,
-                    task,
-                    plan,
-                    request,
-                    this::successfulOutcome,
-                    mock(BuildTaskGenerationCoordinator.TaskStatusSink.class)))
+                coordinator.execute(0, task, plan, request, this::successfulOutcome, statusSink()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("GREENFIELD_RUNTIME_UNSUPPORTED");
 
-    verify(generations, never())
-        .prepareBuild(
-            anyString(),
-            anyString(),
-            anyInt(),
-            any(),
-            anyString(),
-            anyString(),
-            isNull(),
-            isNull(),
-            isNull(),
-            isNull());
-    verify(operations, never())
-        .claimBuildTask(any(), anyString(), anyString(), anyInt(), anyString());
+    verify(admissions, never()).admitAndClaim(any(), any());
   }
 
   @Test
@@ -540,7 +590,7 @@ class BuildTaskGenerationCoordinatorTest {
                       dispatched.set(true);
                       return successfulOutcome();
                     },
-                    mock(BuildTaskGenerationCoordinator.TaskStatusSink.class)))
+                    statusSink()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("NO_INITIAL_FAILURE");
 
@@ -621,7 +671,7 @@ class BuildTaskGenerationCoordinatorTest {
                   .status(TaskOutcome.Status.WORKER_FAILED)
                   .build();
             },
-            mock(BuildTaskGenerationCoordinator.TaskStatusSink.class));
+            statusSink());
 
     assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
     verify(generations).rollback(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
@@ -647,6 +697,14 @@ class BuildTaskGenerationCoordinatorTest {
         started.plusSeconds(1));
   }
 
+  private BuildTaskGenerationCoordinator.TaskStatusSink statusSink() {
+    BuildTaskGenerationCoordinator.TaskStatusSink status =
+        mock(BuildTaskGenerationCoordinator.TaskStatusSink.class);
+    when(status.persist(anyString(), any()))
+        .thenReturn(TaskStatusPersistenceService.Result.UPDATED);
+    return status;
+  }
+
   private TaskOutcome successfulOutcome() {
     return TaskOutcome.builder()
         .taskId("T1")
@@ -654,6 +712,20 @@ class BuildTaskGenerationCoordinatorTest {
         .status(TaskOutcome.Status.SUCCESS)
         .smokeTestPassed(true)
         .build();
+  }
+
+  private BuildContinuationAdmissionService.ClaimedAdmission claimedAdmission(
+      UUID attemptId,
+      int attemptNumber,
+      RunLlmOperationLifecycleService.PhaseLease phaseLease,
+      LlmExecutionOperationCoordinator.LeaseIdentity identity,
+      String previousTaskStatus,
+      String previousRunStatus) {
+    return new BuildContinuationAdmissionService.ClaimedAdmission(
+        new BuildContinuationAdmissionService.Admission(
+            true, previousRunStatus, previousTaskStatus, null, attemptId, attemptNumber),
+        phaseLease,
+        identity);
   }
 
   private CorrectionWorkspaceTransaction.Checkpoint checkpoint(String head, String tree) {

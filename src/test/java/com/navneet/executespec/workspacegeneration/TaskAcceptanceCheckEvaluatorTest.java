@@ -23,11 +23,13 @@ class TaskAcceptanceCheckEvaluatorTest {
             true,
             true,
             true,
+            true,
             true);
     var escaped =
         TaskAcceptanceCheckEvaluator.evaluate(
             contract,
             List.of("repos/api/src/App.java", "repos/web/src/App.ts"),
+            true,
             true,
             true,
             true,
@@ -55,7 +57,7 @@ class TaskAcceptanceCheckEvaluatorTest {
 
     var result =
         TaskAcceptanceCheckEvaluator.evaluate(
-            contract, List.of("src/app.py"), true, true, true, true, true, true, false, true);
+            contract, List.of("src/app.py"), true, true, true, true, true, true, true, false, true);
 
     assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.UNAVAILABLE);
     assertThat(result.results())
@@ -93,9 +95,36 @@ class TaskAcceptanceCheckEvaluatorTest {
 
     var result =
         TaskAcceptanceCheckEvaluator.evaluate(
-            contract, List.of("src/app.py"), true, true, true, true, true, true, true, true);
+            contract, List.of("src/app.py"), true, true, true, true, true, true, true, true, true);
 
     assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.UNAVAILABLE);
+  }
+
+  @Test
+  void requiredCandidateTestsCannotBeSatisfiedByServerBootstrapTestsAlone() {
+    TaskAcceptanceContract contract = contract(List.of("."), List.of(), List.of());
+
+    var result =
+        TaskAcceptanceCheckEvaluator.evaluate(
+            contract,
+            List.of("main.py", ".executespec/bootstrap/test_acceptance.py"),
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            false,
+            true,
+            true);
+
+    assertThat(result.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.FAILED);
+    assertThat(result.results())
+        .anySatisfy(
+            check -> {
+              assertThat(check.kind()).isEqualTo("CANDIDATE_TEST_EVIDENCE");
+              assertThat(check.status()).isEqualTo(TaskAcceptanceCheckEvaluator.Status.FAILED);
+            });
   }
 
   private static TaskAcceptanceContract contract(
@@ -128,6 +157,8 @@ class TaskAcceptanceCheckEvaluatorTest {
             new TaskAcceptanceContract.AcceptanceCheck(
                 "REQUIRED_PATHS_PRESENT", "candidate", false),
             new TaskAcceptanceContract.AcceptanceCheck("MEANINGFUL_DIFF", "candidate", false),
+            new TaskAcceptanceContract.AcceptanceCheck(
+                "CANDIDATE_TEST_EVIDENCE", "candidate", false),
             new TaskAcceptanceContract.AcceptanceCheck("BUILD_PASSED", "candidate", false),
             new TaskAcceptanceContract.AcceptanceCheck("TESTS_PASSED", "candidate", false)),
         "a".repeat(64));

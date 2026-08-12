@@ -22,7 +22,10 @@ public interface PipelineRunRepository
   @Query("SELECT r FROM PipelineRun r WHERE r.runId = :runId")
   Optional<PipelineRun> findByIdForPlanGateOpen(@Param("runId") String runId);
 
-  // Atomic token counter updates (avoids read-modify-write race)
+  @Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT r FROM PipelineRun r WHERE r.runId = :runId")
+  Optional<PipelineRun> findByIdForTaskContinuation(@Param("runId") String runId);
+
   @Modifying
   @Transactional
   @Query(
@@ -44,10 +47,7 @@ public interface PipelineRunRepository
       @Param("out") int outputTokens,
       @Param("cost") double knownCostUsd);
 
-  /**
-   * Atomic status update that only touches status + currentGate — avoids overwriting concurrent
-   * field changes.
-   */
+  /** Atomically updates status and currentGate without overwriting other fields. */
   @Modifying
   @Transactional
   @Query("UPDATE PipelineRun r SET r.status = :status, r.currentGate = NULL WHERE r.runId = :runId")
@@ -283,8 +283,6 @@ public interface PipelineRunRepository
           + " r.startedAt >= :since")
   Long sumOutputTokensByOrgIdAndStartedAtAfter(
       @Param("orgId") String orgId, @Param("since") Instant since);
-
-  // Usage report queries (date-range + per-user/org)
 
   long countByCreatedByUserIdAndStartedAtBetween(String userId, Instant start, Instant end);
 

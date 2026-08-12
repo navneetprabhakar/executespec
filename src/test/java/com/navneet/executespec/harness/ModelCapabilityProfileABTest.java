@@ -144,7 +144,6 @@ class ModelCapabilityProfileABTest {
         flags,
         mock(ContextStore.class),
         mock(RunCostTracker.class),
-        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
         mock(com.navneet.executespec.router.AvailableProviderResolver.class),
         null,
         null);

@@ -101,6 +101,22 @@ public class RunWorkspaceAuthorityService {
     if (generationFence != null) generationFence.run();
   }
 
+  /**
+   * Fail-closed BUILD dispatch boundary; PATCH and bounded read-only agents use the permissive API.
+   */
+  public static void assertWorkspaceGenerationToolDispatch(String runId) {
+    Lease generation = GENERATION_TOOL_LEASE.get();
+    if (generation == null) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_TOOL_LEASE_REQUIRED");
+    }
+    assertToolLease(runId, generation, "WORKSPACE_GENERATION_TOOL_LEASE_RUN_MISMATCH");
+    Runnable generationFence = GENERATION_DISPATCH_FENCE.get();
+    if (generationFence == null) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_DISPATCH_FENCE_REQUIRED");
+    }
+    generationFence.run();
+  }
+
   public static Lease currentCorrectionToolLease() {
     return CORRECTION_TOOL_LEASE.get();
   }

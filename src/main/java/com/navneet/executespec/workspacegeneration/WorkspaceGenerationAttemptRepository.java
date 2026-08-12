@@ -25,6 +25,9 @@ public interface WorkspaceGenerationAttemptRepository
 
   List<WorkspaceGenerationAttempt> findByTaskTransitionStateOrderByUpdatedAtAsc(String state);
 
+  List<WorkspaceGenerationAttempt> findByRunIdAndTaskTransitionStateOrderByUpdatedAtAsc(
+      String runId, String state);
+
   boolean existsByRunIdAndTaskTransitionState(String runId, String state);
 
   @Query(
@@ -47,15 +50,59 @@ public interface WorkspaceGenerationAttemptRepository
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.llmOperationId = :operationId, "
           + "a.llmAttemptNumber = :attemptNumber, a.llmLeaseToken = :llmLeaseToken, "
-          + "a.updatedAt = :now WHERE a.id = :id AND a.workspaceLeaseToken = :workspaceToken "
-          + "AND a.state = :mutating AND a.llmOperationId IS NULL")
-  int bindLlmAttempt(
+          + "a.state = :claimed, a.updatedAt = :now WHERE a.id = :id "
+          + "AND a.state = :admitted AND a.llmOperationId IS NULL")
+  int claimOperation(
+      @Param("id") UUID id,
+      @Param("operationId") String operationId,
+      @Param("attemptNumber") int attemptNumber,
+      @Param("llmLeaseToken") UUID llmLeaseToken,
+      @Param("admitted") WorkspaceGenerationState admitted,
+      @Param("claimed") WorkspaceGenerationState claimed,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.workspaceLeaseToken = :workspaceToken, "
+          + "a.state = :authorityAcquired, a.updatedAt = :now WHERE a.id = :id "
+          + "AND a.state = :operationClaimed AND a.llmOperationId = :operationId "
+          + "AND a.llmAttemptNumber = :attemptNumber AND a.llmLeaseToken = :llmLeaseToken")
+  int acquireAuthority(
       @Param("id") UUID id,
       @Param("workspaceToken") UUID workspaceToken,
       @Param("operationId") String operationId,
       @Param("attemptNumber") int attemptNumber,
       @Param("llmLeaseToken") UUID llmLeaseToken,
-      @Param("mutating") WorkspaceGenerationState mutating,
+      @Param("operationClaimed") WorkspaceGenerationState operationClaimed,
+      @Param("authorityAcquired") WorkspaceGenerationState authorityAcquired,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.beforeGeneration = :beforeGeneration, "
+          + "a.repositoriesJson = :repositoriesJson, "
+          + "a.ignoredArtifactBaselineJson = :ignoredBaselineJson, "
+          + "a.ignoredArtifactBaselineDigest = :ignoredBaselineDigest, "
+          + "a.beforeCheckpointKind = :checkpointKind, "
+          + "a.beforeCheckpointKey = :checkpointKey, "
+          + "a.beforeCheckpointDigest = :checkpointDigest, "
+          + "a.beforeCheckpointCompletedAt = :checkpointCompletedAt, "
+          + "a.state = :prepared, a.updatedAt = :now WHERE a.id = :id "
+          + "AND a.workspaceLeaseToken = :workspaceToken "
+          + "AND a.state = :authorityAcquired")
+  int completePreparation(
+      @Param("id") UUID id,
+      @Param("workspaceToken") UUID workspaceToken,
+      @Param("beforeGeneration") String beforeGeneration,
+      @Param("repositoriesJson") String repositoriesJson,
+      @Param("ignoredBaselineJson") String ignoredBaselineJson,
+      @Param("ignoredBaselineDigest") String ignoredBaselineDigest,
+      @Param("checkpointKind") String checkpointKind,
+      @Param("checkpointKey") String checkpointKey,
+      @Param("checkpointDigest") String checkpointDigest,
+      @Param("checkpointCompletedAt") Instant checkpointCompletedAt,
+      @Param("authorityAcquired") WorkspaceGenerationState authorityAcquired,
+      @Param("prepared") WorkspaceGenerationState prepared,
       @Param("now") Instant now);
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -240,6 +287,22 @@ public interface WorkspaceGenerationAttemptRepository
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.state = :rolledBack, "
+          + "a.failureCode = 'PRE_DISPATCH_ATTEMPT_RECOVERED', "
+          + "a.failureReason = 'Recovered before provider or product mutation dispatch', "
+          + "a.resolvedAt = :now, a.taskTransitionKind = 'REOPEN_PENDING', "
+          + "a.taskTransitionState = 'PENDING', a.updatedAt = :now "
+          + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "
+          + "AND a.state = :rollingBack AND a.beforeGeneration IS NULL")
+  int markPreDispatchRolledBack(
+      @Param("id") UUID id,
+      @Param("token") UUID token,
+      @Param("rollingBack") WorkspaceGenerationState rollingBack,
+      @Param("rolledBack") WorkspaceGenerationState rolledBack,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :recoveryFailed, "
           + "a.recoveryFailureCode = COALESCE(a.recoveryFailureCode, :code), "
           + "a.recoveryFailureReason = COALESCE(a.recoveryFailureReason, :reason), "
@@ -286,7 +349,7 @@ public interface WorkspaceGenerationAttemptRepository
             JOIN llm_execution_operation o ON o.id = a.llm_operation_id
            WHERE a.id = :id
              AND a.workspace_lease_token = :workspaceToken
-             AND a.state = 'MUTATING'
+             AND a.state = :state
              AND p.status = 'WORKING'
              AND w.owner_token = a.workspace_lease_token
              AND w.authority_type = 'BUILD_GENERATION'
@@ -299,6 +362,8 @@ public interface WorkspaceGenerationAttemptRepository
              AND o.lease_expires_at >= NOW()
           """,
       nativeQuery = true)
-  int countCurrentDispatchAuthority(
-      @Param("id") UUID id, @Param("workspaceToken") UUID workspaceToken);
+  int countCurrentAuthority(
+      @Param("id") UUID id,
+      @Param("workspaceToken") UUID workspaceToken,
+      @Param("state") String state);
 }

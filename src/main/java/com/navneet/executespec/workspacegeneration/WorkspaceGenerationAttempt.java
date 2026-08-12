@@ -52,21 +52,21 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "workspace_root", nullable = false, columnDefinition = "TEXT")
   private String workspaceRoot;
 
-  @Column(name = "before_generation", nullable = false, length = 64)
+  @Column(name = "before_generation", length = 64)
   private String beforeGeneration;
 
   @Column(name = "candidate_generation", length = 64)
   private String candidateGeneration;
 
   @JdbcTypeCode(SqlTypes.JSON)
-  @Column(name = "repositories_json", nullable = false, columnDefinition = "jsonb")
+  @Column(name = "repositories_json", columnDefinition = "jsonb")
   private String repositoriesJson;
 
   @JdbcTypeCode(SqlTypes.JSON)
-  @Column(name = "ignored_artifact_baseline_json", nullable = false, columnDefinition = "jsonb")
+  @Column(name = "ignored_artifact_baseline_json", columnDefinition = "jsonb")
   private String ignoredArtifactBaselineJson;
 
-  @Column(name = "ignored_artifact_baseline_digest", nullable = false, length = 64)
+  @Column(name = "ignored_artifact_baseline_digest", length = 64)
   private String ignoredArtifactBaselineDigest;
 
   @Column(name = "authority_digest", nullable = false, length = 64)
@@ -129,7 +129,7 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "cost_usd", precision = 16, scale = 8)
   private java.math.BigDecimal costUsd;
 
-  @Column(name = "workspace_lease_token", nullable = false)
+  @Column(name = "workspace_lease_token")
   private UUID workspaceLeaseToken;
 
   @Column(name = "llm_operation_id", length = 64)
@@ -141,16 +141,16 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "llm_lease_token")
   private UUID llmLeaseToken;
 
-  @Column(name = "before_checkpoint_kind", nullable = false, length = 24)
+  @Column(name = "before_checkpoint_kind", length = 24)
   private String beforeCheckpointKind;
 
-  @Column(name = "before_checkpoint_key", nullable = false, columnDefinition = "TEXT")
+  @Column(name = "before_checkpoint_key", columnDefinition = "TEXT")
   private String beforeCheckpointKey;
 
-  @Column(name = "before_checkpoint_digest", nullable = false, length = 64)
+  @Column(name = "before_checkpoint_digest", length = 64)
   private String beforeCheckpointDigest;
 
-  @Column(name = "before_checkpoint_completed_at", nullable = false)
+  @Column(name = "before_checkpoint_completed_at")
   private Instant beforeCheckpointCompletedAt;
 
   @Column(name = "checkpoint_kind", length = 24)

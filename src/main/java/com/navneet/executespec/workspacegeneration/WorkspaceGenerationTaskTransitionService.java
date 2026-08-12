@@ -70,7 +70,18 @@ public class WorkspaceGenerationTaskTransitionService {
             attempt.getTaskTransitionExpectedStatus(),
             attempt.getTaskTransitionExpectedRecoveryAttempt(),
             attempt.getFailureReason());
-    if (result != Result.UPDATED) {
+    if (result == Result.CANCELLED_WINS) {
+      requireCas(
+          independentTransactions()
+              .execute(
+                  ignored ->
+                      attempts.recordTaskTransitionFailure(
+                          attemptId,
+                          attempt.getTaskTransitionKind(),
+                          "TASK_TRANSITION_SUPERSEDED_BY_CANCELLATION",
+                          Instant.now())),
+          "WORKSPACE_GENERATION_TASK_TRANSITION_CANCELLATION_RECEIPT_CAS_FAILED");
+    } else if (result != Result.UPDATED) {
       String reason = "TASK_TRANSITION_" + result.name();
       requireCas(
           independentTransactions()
