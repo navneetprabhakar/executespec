@@ -26,10 +26,10 @@ const hashes = {
 };
 
 test("unrelated source changes do not require a control-plane review", () => {
-  const base = { nodes: [node("ui", "frontend/src/App.tsx")], links: [] };
+  const base = { nodes: [node("ui", "frontend/src/App.tsx")], edges: [] };
   const candidate = {
     nodes: [node("ui", "frontend/src/App.tsx"), node("ui2", "frontend/src/New.tsx")],
-    links: [edge("ui", "ui2", "calls", "frontend/src/App.tsx")],
+    edges: [edge("ui", "ui2", "calls", "frontend/src/App.tsx")],
   };
 
   const diff = compareControlPlaneGraphs(base, candidate, hashes);
@@ -44,10 +44,10 @@ test("unrelated source changes do not require a control-plane review", () => {
 test("a generation authority edge change requires exact review", () => {
   const path =
     "src/main/java/com/navneet/executespec/workspacegeneration/WorkspaceGenerationLifecycle.java";
-  const base = { nodes: [node("lifecycle", path), node("store", path)], links: [] };
+  const base = { nodes: [node("lifecycle", path), node("store", path)], edges: [] };
   const candidate = {
     nodes: base.nodes,
-    links: [edge("lifecycle", "store", "calls", path)],
+    edges: [edge("lifecycle", "store", "calls", path)],
   };
 
   const diff = compareControlPlaneGraphs(base, candidate, hashes);
@@ -71,9 +71,9 @@ test("a removed SQL trigger edge is schema-sensitive", () => {
   const path = "src/main/resources/db/migration/V399__persist_generation_operation_intents.sql";
   const base = {
     nodes: [node("migration", path), node("trigger", path, "build_run_terminal_fence")],
-    links: [edge("migration", "trigger", "triggers", path)],
+    edges: [edge("migration", "trigger", "triggers", path)],
   };
-  const candidate = { nodes: [node("migration", path)], links: [] };
+  const candidate = { nodes: [node("migration", path)], edges: [] };
 
   const diff = compareControlPlaneGraphs(base, candidate, hashes);
 
@@ -86,8 +86,8 @@ test("a removed SQL trigger edge is schema-sensitive", () => {
 test("stale identity and incomplete area coverage fail closed", () => {
   const path = "src/main/java/com/navneet/executespec/sandbox/RunSandboxStore.java";
   const diff = compareControlPlaneGraphs(
-    { nodes: [], links: [] },
-    { nodes: [node("sandbox", path)], links: [] },
+    { nodes: [], edges: [] },
+    { nodes: [node("sandbox", path)], edges: [] },
     hashes,
   );
   const stale = { ...approvedReview(diff), diffSha256: "c".repeat(64) };
@@ -97,6 +97,22 @@ test("stale identity and incomplete area coverage fail closed", () => {
   assert.equal(
     validateReview(diff, incomplete).reason,
     "REVIEW_AREA_COVERAGE_INCOMPLETE",
+  );
+});
+
+test("Graphify edge schema cannot silently degrade to an empty graph", () => {
+  assert.throws(
+    () => compareControlPlaneGraphs({ nodes: [] }, { nodes: [], edges: [] }, hashes),
+    /GRAPH_EDGE_COLLECTION_MISSING/,
+  );
+  assert.throws(
+    () =>
+      compareControlPlaneGraphs(
+        { nodes: [], edges: [], links: [edge("a", "b", "calls", "x")] },
+        { nodes: [], edges: [] },
+        hashes,
+      ),
+    /GRAPH_EDGE_COLLECTIONS_CONFLICT/,
   );
 });
 

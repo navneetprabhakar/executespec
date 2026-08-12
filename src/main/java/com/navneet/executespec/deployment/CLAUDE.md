@@ -48,7 +48,9 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   atomic host marker and JVM environment, and verifies that process tuple after health. Use
   `scripts/build-qualification/capture-control-plane-release-attestation.sh` for exact deployed
   capture. `control-plane-graph-diff.mjs` separately compares the candidate with a Graphify extract
-  of the source SHA currently serving the target VM. Any control-plane node/edge change requires a
+  of the source SHA currently serving the target VM. Graphify 0.9.13 emits `edges`; the workflow and
+  diff tool accept that canonical collection, retain `links` only for legacy artifacts, and fail
+  closed on a missing or conflicting edge collection. Any control-plane node/edge change requires a
   receipt bound to the semantic base/candidate graph hashes plus exact diff digest, reviewer,
   timestamp, impacted areas, and rationale; raw graph hashes remain in the retained evidence. A
   missing/stale receipt fails before deployment and emits a retained template. This endpoint/config

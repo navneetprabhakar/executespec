@@ -32,11 +32,27 @@ const edgeKey = (edge) =>
     edge.source_file ?? "",
   ].join("\u001f");
 
+const graphEdges = (graph) => {
+  const hasEdges = Array.isArray(graph?.edges);
+  const hasLinks = Array.isArray(graph?.links);
+  if (hasEdges && hasLinks) {
+    const edges = graph.edges.map(edgeKey).sort();
+    const links = graph.links.map(edgeKey).sort();
+    if (JSON.stringify(edges) !== JSON.stringify(links)) {
+      throw new Error("GRAPH_EDGE_COLLECTIONS_CONFLICT");
+    }
+    return graph.edges;
+  }
+  if (hasEdges) return graph.edges;
+  if (hasLinks) return graph.links;
+  throw new Error("GRAPH_EDGE_COLLECTION_MISSING");
+};
+
 const semanticGraphHash = (graph) =>
   hash(
     JSON.stringify({
       nodes: (graph.nodes ?? []).map(nodeKey).sort(),
-      edges: (graph.links ?? []).map(edgeKey).sort(),
+      edges: graphEdges(graph).map(edgeKey).sort(),
     }),
   );
 
@@ -71,7 +87,7 @@ export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
     );
   const controlEdgeKeys = (graph) =>
     new Set(
-      (graph.links ?? [])
+      graphEdges(graph)
         .filter(
           (edge) =>
             controlIds.has(edge.source) ||
