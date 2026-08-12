@@ -24,9 +24,13 @@ SQL/HCL provenance. The deploy workflow generates a code-only graph from the exa
 pinned Graphify 0.9.13 extras, retains it, stamps its hashes/parser versions into the host marker and
 JVM environment, and verifies the process tuple after health. Graphify 0.9.13's canonical edge
 collection is `edges`; release counting and semantic diffing fail closed if neither `edges` nor the
-legacy `links` collection exists, or if both collections conflict. The local contract is not deployed
-evidence: R12 remains in progress until the authenticated endpoint and live container mount are
-captured from the exact deployed candidate.
+legacy `links` collection exists, or if both collections conflict. Graphify cross-file edge
+endpoints can embed the absolute extraction root; the diff canonicalizer infers that prefix only
+when the same exact prefix is bound to at least two distinct `source_file` identities, records the
+base/candidate prefix counts, and strips it before semantic hashing. A different worktree path alone
+must therefore produce zero semantic changes, while raw artifact hashes remain unmodified. The
+local contract is not deployed evidence: R12 remains in progress until the authenticated endpoint
+and live container mount are captured from the exact deployed candidate.
 
 **R10 terminal causality projection:** failed BUILD attempts now expose a typed, customer-safe
 `WorkspaceGenerationFailureProjection`. Only the newest attempt can refine a failed/partial run's

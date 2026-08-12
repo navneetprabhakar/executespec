@@ -4,40 +4,87 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-const CONTROL_PATH = /(?:^|\/)(?:\.github\/workflows\/deploy\.yml|scripts\/build-qualification\/|src\/main\/(?:java\/com\/navneet\/executespec\/(?:workspacegeneration|sandbox|sandboxroute|integration|harness|deployment|state|tool|recovery|report|config\/featureflag)\/|resources\/db\/migration\/V(?:37[4-9]|38\d|39\d|[4-9]\d\d)[^/]*\.sql$))/;
+const CONTROL_PATH =
+  /(?:^|\/)(?:\.github\/workflows\/deploy\.yml|scripts\/build-qualification\/|src\/main\/(?:java\/com\/navneet\/executespec\/(?:workspacegeneration|sandbox|sandboxroute|integration|harness|deployment|state|tool|recovery|report|config\/featureflag)\/|resources\/db\/migration\/V(?:37[4-9]|38\d|39\d|[4-9]\d\d)[^/]*\.sql$))/;
 
 const AREA_RULES = [
   ["SCHEMA", /\/db\/migration\/|\.sql$/],
   ["SANDBOX", /\/sandbox(?:route)?\/|sandbox/i],
-  ["PUBLICATION", /\/integration\/scm\/|publication|push|repository.provision/i],
+  [
+    "PUBLICATION",
+    /\/integration\/scm\/|publication|push|repository.provision/i,
+  ],
   ["GENERATION", /\/workspacegeneration\/|generation|acceptance|rollback/i],
   ["AUTHORITY", /authority|lease|fence|receipt|transition|protocol|state/i],
   ["DEPLOYMENT", /\/deployment\/|\.github\/workflows\/deploy\.yml/],
 ];
 
-const hash = (value) =>
-  createHash("sha256").update(value).digest("hex");
+const hash = (value) => createHash("sha256").update(value).digest("hex");
 
 const nodePath = (node) => node?.source_file ?? "";
 
-const nodeKey = (node) =>
-  [node.id ?? "", node.label ?? "", nodePath(node), node.file_type ?? ""].join("\u001f");
-
-const edgeKey = (edge) =>
+const nodeKey = (node, normalizeEndpoint = (value) => value) =>
   [
-    edge.source ?? "",
-    edge.target ?? "",
+    normalizeEndpoint(node.id ?? ""),
+    node.label ?? "",
+    nodePath(node),
+    node.file_type ?? "",
+  ].join("\u001f");
+
+const edgeKey = (edge, normalizeEndpoint = (value) => value) =>
+  [
+    normalizeEndpoint(edge.source ?? ""),
+    normalizeEndpoint(edge.target ?? ""),
     edge.relation ?? "",
     edge.confidence ?? "",
     edge.source_file ?? "",
   ].join("\u001f");
 
+const graphifyPathId = (value) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+const graphEndpointNormalization = (graph) => {
+  const prefixSources = new Map();
+  for (const edge of graphEdges(graph)) {
+    const sourceFileId = graphifyPathId(edge.source_file ?? "");
+    const source = edge.source ?? "";
+    if (
+      sourceFileId &&
+      source !== sourceFileId &&
+      source.endsWith(sourceFileId)
+    ) {
+      const prefix = source.slice(0, -sourceFileId.length);
+      if (prefix.endsWith("_")) {
+        const sources = prefixSources.get(prefix) ?? new Set();
+        sources.add(edge.source_file);
+        prefixSources.set(prefix, sources);
+      }
+    }
+  }
+  const prefixes = [...prefixSources.entries()]
+    .filter(([, sources]) => sources.size >= 2)
+    .map(([prefix]) => prefix)
+    .sort((left, right) => right.length - left.length);
+  return {
+    prefixCount: prefixes.length,
+    normalizeEndpoint: (endpoint) => {
+      const prefix = prefixes.find((candidate) =>
+        endpoint.startsWith(candidate),
+      );
+      return prefix ? endpoint.slice(prefix.length) : endpoint;
+    },
+  };
+};
+
 const graphEdges = (graph) => {
   const hasEdges = Array.isArray(graph?.edges);
   const hasLinks = Array.isArray(graph?.links);
   if (hasEdges && hasLinks) {
-    const edges = graph.edges.map(edgeKey).sort();
-    const links = graph.links.map(edgeKey).sort();
+    const edges = graph.edges.map((edge) => edgeKey(edge)).sort();
+    const links = graph.links.map((edge) => edgeKey(edge)).sort();
     if (JSON.stringify(edges) !== JSON.stringify(links)) {
       throw new Error("GRAPH_EDGE_COLLECTIONS_CONFLICT");
     }
@@ -49,12 +96,19 @@ const graphEdges = (graph) => {
 };
 
 const semanticGraphHash = (graph) =>
-  hash(
-    JSON.stringify({
-      nodes: (graph.nodes ?? []).map(nodeKey).sort(),
-      edges: graphEdges(graph).map(edgeKey).sort(),
-    }),
-  );
+  (() => {
+    const { normalizeEndpoint } = graphEndpointNormalization(graph);
+    return hash(
+      JSON.stringify({
+        nodes: (graph.nodes ?? [])
+          .map((node) => nodeKey(node, normalizeEndpoint))
+          .sort(),
+        edges: graphEdges(graph)
+          .map((edge) => edgeKey(edge, normalizeEndpoint))
+          .sort(),
+      }),
+    );
+  })();
 
 const sortedDifference = (left, right) =>
   [...left].filter((value) => !right.has(value)).sort();
@@ -70,6 +124,10 @@ const areasFor = (values) => {
 };
 
 export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
+  const baseNormalization = graphEndpointNormalization(base);
+  const candidateNormalization = graphEndpointNormalization(candidate);
+  const normalizeBaseEndpoint = baseNormalization.normalizeEndpoint;
+  const normalizeCandidateEndpoint = candidateNormalization.normalizeEndpoint;
   const baseNodes = new Map((base.nodes ?? []).map((node) => [node.id, node]));
   const candidateNodes = new Map(
     (candidate.nodes ?? []).map((node) => [node.id, node]),
@@ -79,13 +137,13 @@ export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
     if (CONTROL_PATH.test(nodePath(node))) controlIds.add(node.id);
   }
 
-  const controlNodeKeys = (nodes) =>
+  const controlNodeKeys = (nodes, normalizeEndpoint) =>
     new Set(
       [...nodes.values()]
         .filter((node) => controlIds.has(node.id))
-        .map(nodeKey),
+        .map((node) => nodeKey(node, normalizeEndpoint)),
     );
-  const controlEdgeKeys = (graph) =>
+  const controlEdgeKeys = (graph, normalizeEndpoint) =>
     new Set(
       graphEdges(graph)
         .filter(
@@ -94,19 +152,41 @@ export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
             controlIds.has(edge.target) ||
             CONTROL_PATH.test(edge.source_file ?? ""),
         )
-        .map(edgeKey),
+        .map((edge) => edgeKey(edge, normalizeEndpoint)),
     );
 
-  const baseControlNodes = controlNodeKeys(baseNodes);
-  const candidateControlNodes = controlNodeKeys(candidateNodes);
-  const baseControlEdges = controlEdgeKeys(base);
-  const candidateControlEdges = controlEdgeKeys(candidate);
+  const baseControlNodes = controlNodeKeys(baseNodes, normalizeBaseEndpoint);
+  const candidateControlNodes = controlNodeKeys(
+    candidateNodes,
+    normalizeCandidateEndpoint,
+  );
+  const baseControlEdges = controlEdgeKeys(base, normalizeBaseEndpoint);
+  const candidateControlEdges = controlEdgeKeys(
+    candidate,
+    normalizeCandidateEndpoint,
+  );
   const addedNodes = sortedDifference(candidateControlNodes, baseControlNodes);
-  const removedNodes = sortedDifference(baseControlNodes, candidateControlNodes);
+  const removedNodes = sortedDifference(
+    baseControlNodes,
+    candidateControlNodes,
+  );
   const addedEdges = sortedDifference(candidateControlEdges, baseControlEdges);
-  const removedEdges = sortedDifference(baseControlEdges, candidateControlEdges);
-  const changedValues = [...addedNodes, ...removedNodes, ...addedEdges, ...removedEdges];
-  const canonical = JSON.stringify({ addedNodes, removedNodes, addedEdges, removedEdges });
+  const removedEdges = sortedDifference(
+    baseControlEdges,
+    candidateControlEdges,
+  );
+  const changedValues = [
+    ...addedNodes,
+    ...removedNodes,
+    ...addedEdges,
+    ...removedEdges,
+  ];
+  const canonical = JSON.stringify({
+    addedNodes,
+    removedNodes,
+    addedEdges,
+    removedEdges,
+  });
 
   return {
     schemaVersion: 1,
@@ -114,6 +194,8 @@ export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
     candidateGraphSha256: rawHashes.candidateGraphSha256 ?? null,
     baseArtifactSha256: rawHashes.baseArtifactSha256 ?? null,
     candidateArtifactSha256: rawHashes.candidateArtifactSha256 ?? null,
+    baseExtractionPrefixCount: baseNormalization.prefixCount,
+    candidateExtractionPrefixCount: candidateNormalization.prefixCount,
     baseControlNodeCount: baseControlNodes.size,
     candidateControlNodeCount: candidateControlNodes.size,
     baseControlEdgeCount: baseControlEdges.size,
@@ -131,7 +213,8 @@ export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
 }
 
 export function validateReview(diff, review) {
-  if (!diff.reviewRequired) return { accepted: true, reason: "NO_CONTROL_PLANE_CHANGE" };
+  if (!diff.reviewRequired)
+    return { accepted: true, reason: "NO_CONTROL_PLANE_CHANGE" };
   if (!review || typeof review !== "object") {
     return { accepted: false, reason: "REVIEW_MISSING" };
   }
@@ -144,7 +227,10 @@ export function validateReview(diff, review) {
   if (review.decision !== "APPROVED") {
     return { accepted: false, reason: "REVIEW_NOT_APPROVED" };
   }
-  if (typeof review.reviewer !== "string" || review.reviewer.trim().length < 3) {
+  if (
+    typeof review.reviewer !== "string" ||
+    review.reviewer.trim().length < 3
+  ) {
     return { accepted: false, reason: "REVIEWER_MISSING" };
   }
   if (
@@ -195,7 +281,9 @@ async function main() {
   if (args.review) review = JSON.parse(await readFile(args.review, "utf8"));
   const result = validateReview(diff, review);
   const output = { ...diff, review: result };
-  await writeFile(args.output, `${JSON.stringify(output, null, 2)}\n`, { flag: "wx" });
+  await writeFile(args.output, `${JSON.stringify(output, null, 2)}\n`, {
+    flag: "wx",
+  });
 
   if (diff.reviewRequired && !result.accepted) {
     const template = {
@@ -207,17 +295,22 @@ async function main() {
       reviewer: "REPLACE_WITH_INDEPENDENT_REVIEWER",
       reviewedAt: "REPLACE_WITH_ISO_8601_TIMESTAMP",
       impactedAreas: diff.impactedAreas,
-      rationale: "REPLACE_WITH_AT_LEAST_30_CHARACTERS_OF_SPECIFIC_REVIEW_REASONING",
+      rationale:
+        "REPLACE_WITH_AT_LEAST_30_CHARACTERS_OF_SPECIFIC_REVIEW_REASONING",
     };
     await writeFile(
       `${args.output}.review-template.json`,
       `${JSON.stringify(template, null, 2)}\n`,
       { flag: "wx" },
     );
-    process.stderr.write(`control-plane graph review required: ${result.reason}\n`);
+    process.stderr.write(
+      `control-plane graph review required: ${result.reason}\n`,
+    );
     process.exitCode = 3;
   } else {
-    process.stdout.write(`control-plane graph diff accepted: ${result.reason}\n`);
+    process.stdout.write(
+      `control-plane graph diff accepted: ${result.reason}\n`,
+    );
   }
 }
 
