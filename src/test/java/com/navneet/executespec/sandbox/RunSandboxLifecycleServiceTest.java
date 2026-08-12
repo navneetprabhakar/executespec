@@ -34,7 +34,13 @@ class RunSandboxLifecycleServiceTest {
     store = mock(RunSandboxStore.class);
     dispatcher = mock(RunSandboxRuntimeDispatcher.class);
     flags = mock(FeatureFlagService.class);
-    lifecycle = new RunSandboxLifecycleService(store, dispatcher, flags, new SandboxProperties());
+    lifecycle =
+        new RunSandboxLifecycleService(
+            store,
+            dispatcher,
+            flags,
+            new SandboxProperties(),
+            mock(VerificationSandboxWorkspaceJanitor.class));
   }
 
   @Test
@@ -121,6 +127,7 @@ class RunSandboxLifecycleServiceTest {
         "org-1",
         "abc1234",
         "[]",
+        SandboxPurpose.RUN,
         SandboxState.READY,
         SandboxIsolationProfile.NOT_ENABLED,
         1,

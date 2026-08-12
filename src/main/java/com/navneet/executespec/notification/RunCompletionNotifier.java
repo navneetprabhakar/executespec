@@ -5,7 +5,7 @@ import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.harness.event.QuotaEvent;
 import com.navneet.executespec.notification.pref.NotificationPrefService;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome;
-import com.navneet.executespec.run.outcome.RunTerminalOutcomeContract;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeProjectionService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -35,6 +35,7 @@ public class RunCompletionNotifier {
   private final NotificationRepository notificationRepository;
   private final StateStore stateStore;
   private final NotificationPrefService prefService;
+  private final RunTerminalOutcomeProjectionService outcomeProjection;
 
   @Async
   @EventListener
@@ -42,7 +43,7 @@ public class RunCompletionNotifier {
     try {
       PipelineRun run = stateStore.findRun(event.runId()).orElse(null);
       if (run == null || run.getCreatedByUserId() == null) return;
-      RunTerminalOutcome outcome = RunTerminalOutcomeContract.project(run);
+      RunTerminalOutcome outcome = outcomeProjection.project(run);
       if (!prefService.shouldNotify(
           run.getCreatedByUserId(),
           RunNotificationPreferencePolicy.eventType(outcome, ActivityEventType.RUN_COMPLETED),
@@ -85,15 +86,7 @@ public class RunCompletionNotifier {
           run.getFailureReason() != null && !run.getFailureReason().isBlank()
               ? run.getFailureReason()
               : event.reason();
-      RunTerminalOutcome outcome =
-          RunTerminalOutcomeContract.project(
-              run.getRunId(),
-              run.getStatus(),
-              run.getStatusReason(),
-              fallbackFailureReason,
-              run.getActualCostUsd(),
-              run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
-              run.getScmPrUrl() != null ? run.getScmPrUrl() : run.getGithubPrUrl());
+      RunTerminalOutcome outcome = outcomeProjection.project(run, fallbackFailureReason);
       if (!prefService.shouldNotify(
           run.getCreatedByUserId(),
           RunNotificationPreferencePolicy.eventType(outcome, ActivityEventType.RUN_FAILED),

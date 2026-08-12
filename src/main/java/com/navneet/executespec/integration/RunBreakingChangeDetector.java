@@ -16,6 +16,7 @@ import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.reviewer.model.IssueCategory;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
 
@@ -49,7 +50,12 @@ public class RunBreakingChangeDetector {
    * penalising the score. Non-fatal; empty on any miss.
    */
   public List<ReviewIssue> detect(
-      String runId, String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
+      ExecutionContext context, String projectId, List<UUID> selectedRepoIds) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      throw new IllegalStateException("VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    String runId = context.runId();
+    Path workspaceRoot = context.workspaceRoot();
     if (selectedRepoIds == null || selectedRepoIds.isEmpty()) return List.of();
     var repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
     if (repos == null || repos.isEmpty()) return List.of();
@@ -83,7 +89,7 @@ public class RunBreakingChangeDetector {
       }
     }
     if (intended.isEmpty()) return List.of();
-    var report = planBreakingChangeReport.compose(projectId, intended);
+    var report = planBreakingChangeReport.compose(context, projectId, intended);
     var issues = toBreakingChangeIssues(report);
     if (!issues.isEmpty()) {
       log.info(

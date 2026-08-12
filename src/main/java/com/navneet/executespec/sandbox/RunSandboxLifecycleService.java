@@ -38,6 +38,7 @@ public class RunSandboxLifecycleService {
   private final RunSandboxRuntimeDispatcher dispatcher;
   private final FeatureFlagService featureFlags;
   private final SandboxProperties properties;
+  private final VerificationSandboxWorkspaceJanitor verificationWorkspaceJanitor;
 
   /**
    * Admits a sandbox. The isolation profile is resolved from the currently selected runtime and
@@ -59,6 +60,7 @@ public class RunSandboxLifecycleService {
             admission.orgId(),
             admission.sourceRevision(),
             admission.repositorySet(),
+            admission.purpose(),
             profile,
             spec.configDigest(),
             spec.networkPolicy(),
@@ -130,6 +132,11 @@ public class RunSandboxLifecycleService {
     return expired;
   }
 
+  /** Crash/restart-safe cleanup after the physical verification sandbox is terminal. */
+  public int cleanupVerificationWorkspaces() {
+    return verificationWorkspaceJanitor.sweep(properties.getReconcileBatchSize());
+  }
+
   /** Marks artifact retention. Never called as part of teardown: evidence outlives the runtime. */
   public boolean retain(UUID id, SandboxRetentionState retention, String artifactUri) {
     return store.markRetention(id, retention, artifactUri);
@@ -144,7 +151,34 @@ public class RunSandboxLifecycleService {
       String orgId,
       String sourceRevision,
       String repositorySet,
-      String idempotencyKey) {}
+      SandboxPurpose purpose,
+      String idempotencyKey) {
+
+    public SandboxAdmission(
+        String runId,
+        String projectId,
+        UUID sessionId,
+        String requestedByUserId,
+        String orgId,
+        String sourceRevision,
+        String repositorySet,
+        String idempotencyKey) {
+      this(
+          runId,
+          projectId,
+          sessionId,
+          requestedByUserId,
+          orgId,
+          sourceRevision,
+          repositorySet,
+          SandboxPurpose.RUN,
+          idempotencyKey);
+    }
+
+    public SandboxAdmission {
+      if (purpose == null) throw new IllegalArgumentException("sandbox purpose is required");
+    }
+  }
 
   /** Thrown when sandbox creation is requested while the lifecycle flag is off. */
   public static class SandboxLifecycleDisabledException extends RuntimeException {

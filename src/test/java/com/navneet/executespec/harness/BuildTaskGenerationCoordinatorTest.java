@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.GcsTaskCheckpointService;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationClaim;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
@@ -38,13 +37,15 @@ import com.navneet.executespec.integration.RunLlmOperationLifecycleService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.BuildProtocolVersion;
+import com.navneet.executespec.workspacegeneration.BuildProtocolVersionService;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselinePlan;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselineService;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationConvergenceService;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
-import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTaskTransitionService;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 import com.navneet.executespec.workspacegeneration.WorkspaceOrigin;
 
@@ -64,10 +65,10 @@ class BuildTaskGenerationCoordinatorTest {
   private GcsTaskCheckpointService checkpoints;
   private SseBroadcaster broadcaster;
   private GreenfieldBaselineService greenfieldBaselines;
-  private FeatureFlagService featureFlags;
+  private BuildProtocolVersionService protocolVersions;
   private BuildTaskUsageEvidence usageEvidence;
   private WorkspaceGenerationTelemetry telemetry;
-  private WorkspaceGenerationTaskTransitionService taskTransitions;
+  private WorkspaceGenerationConvergenceService convergence;
   private BuildContinuationAdmissionService admissions;
   private BuildTaskGenerationCoordinator coordinator;
   private PlannedTask task;
@@ -98,14 +99,15 @@ class BuildTaskGenerationCoordinatorTest {
     checkpoints = mock(GcsTaskCheckpointService.class);
     broadcaster = mock(SseBroadcaster.class);
     greenfieldBaselines = mock(GreenfieldBaselineService.class);
-    featureFlags = mock(FeatureFlagService.class);
+    protocolVersions = mock(BuildProtocolVersionService.class);
+    when(protocolVersions.requireExecutable("run-1")).thenReturn(BuildProtocolVersion.LEGACY_V1);
     usageEvidence = mock(BuildTaskUsageEvidence.class);
     com.navneet.executespec.cost.RunCostTracker.Snapshot zeroUsage =
         new com.navneet.executespec.cost.RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0, 0);
     when(usageEvidence.snapshot(anyString(), anyString())).thenReturn(zeroUsage);
     when(usageEvidence.delta(any(), anyString(), anyString())).thenReturn(zeroUsage);
     telemetry = mock(WorkspaceGenerationTelemetry.class);
-    taskTransitions = mock(WorkspaceGenerationTaskTransitionService.class);
+    convergence = mock(WorkspaceGenerationConvergenceService.class);
     admissions = mock(BuildContinuationAdmissionService.class);
     coordinator =
         new BuildTaskGenerationCoordinator(
@@ -118,11 +120,12 @@ class BuildTaskGenerationCoordinatorTest {
             checkpoints,
             broadcaster,
             greenfieldBaselines,
-            featureFlags,
+            protocolVersions,
             usageEvidence,
             telemetry,
-            taskTransitions,
-            admissions);
+            convergence,
+            admissions,
+            mock(com.navneet.executespec.workspacegeneration.BuildEnvironmentMaterializer.class));
 
     task = PlannedTask.builder().id("T1").title("Build API").description("Implement API").build();
     plan = Plan.builder().planTitle("Build").tasks(List.of(task)).build();
@@ -180,17 +183,28 @@ class BuildTaskGenerationCoordinatorTest {
     when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/App.java"));
     when(verifier.verify(any(), eq(contract), eq(List.of("0:src/App.java"))))
         .thenAnswer(
-            ignored -> {
-              RunWorkspaceAuthorityService.assertCorrectionToolDispatch("run-1");
+            invocation -> {
+              ((ExecutionContext) invocation.getArgument(0))
+                  .assertWorkspaceGenerationDispatch(
+                      com.navneet.executespec.workspacegeneration
+                          .WorkspaceGenerationDispatchAuthority.Phase.VERIFICATION);
               return passing;
             });
     CorrectionWorkspaceTransaction.Checkpoint candidate =
         checkpoint("3".repeat(40), "4".repeat(40));
     when(generations.snapshotCandidate(prepared)).thenReturn(candidate);
-    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+    when(generations.checkpointCandidate(prepared, "T1", candidate))
         .thenReturn(
             new GcsTaskCheckpointService.CheckpointReceipt(
-                "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64), Instant.now()));
+                "GCS",
+                "gs://bucket/candidate",
+                "b".repeat(64),
+                "d".repeat(64),
+                "17",
+                42L,
+                "crc",
+                "etag",
+                Instant.now()));
     BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
     AtomicBoolean dispatchWasFenced = new AtomicBoolean();
     TaskOutcome expected = successfulOutcome();
@@ -201,18 +215,22 @@ class BuildTaskGenerationCoordinatorTest {
             task,
             plan,
             request,
-            () -> {
-              RunWorkspaceAuthorityService.assertCorrectionToolDispatch("run-1");
+            active -> {
+              active.assertWorkspaceGenerationDispatch(
+                  com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority
+                      .Phase.MUTATION);
               dispatchWasFenced.set(
-                  RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease()
-                      == prepared.lease());
+                  active
+                      .workspaceGenerationDispatchAuthority()
+                      .attemptId()
+                      .equals(prepared.attemptId()));
               return expected;
             },
             status);
 
     assertThat(actual).isSameAs(expected);
     assertThat(dispatchWasFenced).isTrue();
-    InOrder order = inOrder(generations, verifier, checkpoints, status, operations);
+    InOrder order = inOrder(generations, verifier, checkpoints, convergence);
     order
         .verify(generations)
         .prepareBuild(any(UUID.class), any(), anyString(), anyInt(), any(UUID.class));
@@ -222,14 +240,21 @@ class BuildTaskGenerationCoordinatorTest {
     order.verify(verifier).verify(any(), eq(contract), eq(List.of("0:src/App.java")));
     order.verify(generations).recordVerification(prepared, passing);
     order.verify(generations).beginCheckpoint(prepared);
-    order.verify(checkpoints).checkpointGeneration("run-1", "T1", candidate);
+    order.verify(generations).checkpointCandidate(prepared, "T1", candidate);
     order
         .verify(generations)
         .completeCheckpoint(
-            prepared, "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64));
+            prepared,
+            "GCS",
+            "gs://bucket/candidate",
+            "b".repeat(64),
+            "d".repeat(64),
+            "17",
+            42L,
+            "crc",
+            "etag");
     order.verify(generations).accept(prepared);
-    order.verify(status).persist("COMPLETE", null);
-    order.verify(operations).complete(operation);
+    order.verify(convergence).reconcileTerminal(prepared);
     verify(generations).assertMutationDispatch(prepared);
     verify(generations).assertVerificationDispatch(prepared);
     verify(generations, never()).rollback(any(), anyString(), anyString());
@@ -247,19 +272,19 @@ class BuildTaskGenerationCoordinatorTest {
     BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
 
     TaskOutcome outcome =
-        coordinator.execute(0, task, plan, request, this::successfulOutcome, status);
+        coordinator.execute(0, task, plan, request, ignored -> successfulOutcome(), status);
 
     assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
-    InOrder order = inOrder(generations, status, taskTransitions, operations);
+    InOrder order = inOrder(generations, convergence);
     order.verify(generations).recordVerification(prepared, rejected);
-    order.verify(generations).rollback(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
-    order.verify(status).persist(eq("PARTIAL"), anyString());
-    order.verify(taskTransitions).publish(prepared.attemptId());
-    order.verify(operations).failBuildTask(operation, "BUILD_TASK_VERIFICATION_REJECTED");
+    order
+        .verify(convergence)
+        .convergeAfterFailure(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
     verify(generations, never()).beginCheckpoint(any());
     verify(generations, never()).accept(any());
     verify(checkpoints, never()).checkpointGeneration(anyString(), anyString(), any());
     verify(operations, never()).complete(any());
+    verify(operations, never()).failBuildTask(any(), anyString());
   }
 
   @Test
@@ -279,13 +304,55 @@ class BuildTaskGenerationCoordinatorTest {
 
     assertThatThrownBy(
             () ->
-                coordinator.execute(0, task, plan, request, this::successfulOutcome, statusSink()))
+                coordinator.execute(
+                    0, task, plan, request, ignored -> successfulOutcome(), statusSink()))
         .hasMessage("telemetry unavailable");
 
-    verify(generations)
-        .rollback(eq(prepared), eq("TASK_GENERATION_EXCEPTION"), eq("telemetry unavailable"));
+    verify(convergence)
+        .convergeAfterFailure(
+            eq(prepared), eq("TASK_GENERATION_EXCEPTION"), eq("telemetry unavailable"));
     verify(generations).release(prepared);
     verify(admissions).admitAndClaim(any(), eq(request.runContext()));
+  }
+
+  @Test
+  void frontierCasFailureConvergesFromDurableStateAndNeverInfersOperationSuccess() {
+    WorkspaceGenerationLifecycle.Verification passing = verification("PASSED", true, true, 2, 0);
+    when(generations.beginVerification(prepared)).thenReturn("b".repeat(64));
+    when(generations.changedFiles(prepared)).thenReturn(List.of("0:src/App.java"));
+    when(verifier.verify(any(), eq(contract), any())).thenReturn(passing);
+    CorrectionWorkspaceTransaction.Checkpoint candidate =
+        checkpoint("3".repeat(40), "4".repeat(40));
+    when(generations.snapshotCandidate(prepared)).thenReturn(candidate);
+    when(generations.checkpointCandidate(prepared, "T1", candidate))
+        .thenReturn(
+            new GcsTaskCheckpointService.CheckpointReceipt(
+                "GCS",
+                "gs://bucket/candidate",
+                "b".repeat(64),
+                "d".repeat(64),
+                "17",
+                42L,
+                "crc",
+                "etag",
+                Instant.now()));
+    org.mockito.Mockito.doThrow(
+            new IllegalStateException("WORKSPACE_GENERATION_FRONTIER_CAS_FAILED"))
+        .when(generations)
+        .accept(prepared);
+
+    assertThatThrownBy(
+            () ->
+                coordinator.execute(
+                    0, task, plan, request, ignored -> successfulOutcome(), statusSink()))
+        .hasMessage("WORKSPACE_GENERATION_FRONTIER_CAS_FAILED");
+
+    verify(convergence)
+        .convergeAfterFailure(
+            prepared, "TASK_GENERATION_EXCEPTION", "WORKSPACE_GENERATION_FRONTIER_CAS_FAILED");
+    verify(operations, never()).complete(any());
+    verify(operations, never()).failBuildTask(any(), anyString());
+    verify(generations).release(prepared);
   }
 
   @Test
@@ -327,14 +394,22 @@ class BuildTaskGenerationCoordinatorTest {
     CorrectionWorkspaceTransaction.Checkpoint candidate =
         checkpoint("8".repeat(40), "9".repeat(40));
     when(generations.snapshotCandidate(secondPrepared)).thenReturn(candidate);
-    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+    when(generations.checkpointCandidate(secondPrepared, "T1", candidate))
         .thenReturn(
             new GcsTaskCheckpointService.CheckpointReceipt(
-                "GCS", "gs://bucket/continuation", "c".repeat(64), "d".repeat(64), Instant.now()));
+                "GCS",
+                "gs://bucket/continuation",
+                "c".repeat(64),
+                "d".repeat(64),
+                "17",
+                42L,
+                "crc",
+                "etag",
+                Instant.now()));
     BuildTaskGenerationCoordinator.TaskStatusSink status = statusSink();
 
     TaskOutcome first =
-        coordinator.execute(0, task, plan, request, this::successfulOutcome, status);
+        coordinator.execute(0, task, plan, request, ignored -> successfulOutcome(), status);
     TaskOutcome continuation =
         coordinator.executeContinuation(
             0,
@@ -345,7 +420,7 @@ class BuildTaskGenerationCoordinatorTest {
             "gpt-5.4",
             null,
             false,
-            this::successfulOutcome,
+            ignored -> successfulOutcome(),
             status);
 
     assertThat(first.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
@@ -366,10 +441,18 @@ class BuildTaskGenerationCoordinatorTest {
     CorrectionWorkspaceTransaction.Checkpoint candidate =
         checkpoint("3".repeat(40), "4".repeat(40));
     when(generations.snapshotCandidate(prepared)).thenReturn(candidate);
-    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+    when(generations.checkpointCandidate(prepared, "T1", candidate))
         .thenReturn(
             new GcsTaskCheckpointService.CheckpointReceipt(
-                "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64), Instant.now()));
+                "GCS",
+                "gs://bucket/candidate",
+                "b".repeat(64),
+                "d".repeat(64),
+                "17",
+                42L,
+                "crc",
+                "etag",
+                Instant.now()));
     TaskOutcome failed =
         TaskOutcome.builder()
             .taskId("T1")
@@ -377,7 +460,7 @@ class BuildTaskGenerationCoordinatorTest {
             .status(TaskOutcome.Status.WORKER_FAILED)
             .build();
 
-    TaskOutcome outcome = coordinator.execute(0, task, plan, request, () -> failed, status);
+    TaskOutcome outcome = coordinator.execute(0, task, plan, request, ignored -> failed, status);
 
     assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.SUCCESS);
     assertThat(outcome.workerOutcome()).isSameAs(failed.workerOutcome());
@@ -385,7 +468,7 @@ class BuildTaskGenerationCoordinatorTest {
     verify(verifier).verify(any(), eq(contract), any());
     verify(generations).accept(prepared);
     verify(generations, never()).rollback(any(), anyString(), anyString());
-    verify(operations).complete(operation);
+    verify(convergence).reconcileTerminal(prepared);
   }
 
   @Test
@@ -402,7 +485,7 @@ class BuildTaskGenerationCoordinatorTest {
 
   @Test
   void enabledFailureFirstModeMaterializesBaselineInsideLeaseBeforeDispatch() {
-    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    enableSharedKernelProtocol();
     GreenfieldBaselinePlan baseline =
         new GreenfieldBaselinePlan(
             GreenfieldBaselinePlan.Kind.PYTHON,
@@ -439,11 +522,7 @@ class BuildTaskGenerationCoordinatorTest {
             "c".repeat(64));
     when(contracts.resolveFailureFirst(task, plan, 0, workspace, baseline)).thenReturn(contract);
     when(greenfieldBaselines.materialize(workspace, baseline))
-        .thenAnswer(
-            ignored -> {
-              RunWorkspaceAuthorityService.assertCorrectionToolDispatch("run-1");
-              return List.of("requirements.txt");
-            });
+        .thenReturn(List.of("requirements.txt"));
     TaskAcceptanceVerifier.InitialFailure observedFailure =
         new TaskAcceptanceVerifier.InitialFailure(
             "FAILURE_OBSERVED",
@@ -459,23 +538,34 @@ class BuildTaskGenerationCoordinatorTest {
     CorrectionWorkspaceTransaction.Checkpoint candidate =
         checkpoint("3".repeat(40), "4".repeat(40));
     when(generations.snapshotCandidate(prepared)).thenReturn(candidate);
-    when(checkpoints.checkpointGeneration("run-1", "T1", candidate))
+    when(generations.checkpointCandidate(prepared, "T1", candidate))
         .thenReturn(
             new GcsTaskCheckpointService.CheckpointReceipt(
-                "GCS", "gs://bucket/candidate", "b".repeat(64), "d".repeat(64), Instant.now()));
+                "GCS",
+                "gs://bucket/candidate",
+                "b".repeat(64),
+                "d".repeat(64),
+                "17",
+                42L,
+                "crc",
+                "etag",
+                Instant.now()));
 
     coordinator.execute(
         0,
         task,
         plan,
         request,
-        () -> {
-          assertThat(coordinator.acceptanceSystemDirective())
+        dispatchedContext -> {
+          assertThat(dispatchedContext.buildAcceptance().systemDirective())
               .contains("Contract digest: " + contract.digest())
               .contains("REQUIRED_PATH_MISSING: Required path assertions are red: [src/app.py]")
               .contains("python3 -m pytest -q")
               .doesNotContain("targets=");
-          assertThat(coordinator.activeInitialFailureSnapshot().failed()).isEqualTo(1);
+          assertThat(dispatchedContext.buildAcceptance().initialFailureSnapshot().failed())
+              .isEqualTo(1);
+          assertThat(dispatchedContext.buildAcceptance().sharedWorkerControls()).isTrue();
+          assertThat(dispatchedContext.buildAcceptance().acceptancePending()).isTrue();
           return successfulOutcome();
         },
         statusSink());
@@ -513,7 +603,7 @@ class BuildTaskGenerationCoordinatorTest {
 
   @Test
   void unsupportedGreenfieldFailsBeforeAttemptClaimOrDispatch() {
-    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    enableSharedKernelProtocol();
     GreenfieldBaselinePlan unsupported =
         new GreenfieldBaselinePlan(
             GreenfieldBaselinePlan.Kind.UNSUPPORTED,
@@ -528,7 +618,8 @@ class BuildTaskGenerationCoordinatorTest {
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () ->
-                coordinator.execute(0, task, plan, request, this::successfulOutcome, statusSink()))
+                coordinator.execute(
+                    0, task, plan, request, ignored -> successfulOutcome(), statusSink()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("GREENFIELD_RUNTIME_UNSUPPORTED");
 
@@ -537,7 +628,7 @@ class BuildTaskGenerationCoordinatorTest {
 
   @Test
   void noActuallyObservedFailureRollsBackBeforeProviderDispatch() {
-    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    enableSharedKernelProtocol();
     GreenfieldBaselinePlan baseline =
         new GreenfieldBaselinePlan(
             GreenfieldBaselinePlan.Kind.EXISTING,
@@ -586,7 +677,7 @@ class BuildTaskGenerationCoordinatorTest {
                     task,
                     plan,
                     request,
-                    () -> {
+                    ignored -> {
                       dispatched.set(true);
                       return successfulOutcome();
                     },
@@ -596,14 +687,14 @@ class BuildTaskGenerationCoordinatorTest {
 
     assertThat(dispatched).isFalse();
     verify(initialFailures).record(prepared, noFailure);
-    verify(generations).rollback(eq(prepared), eq("NO_INITIAL_FAILURE"), anyString());
+    verify(convergence).convergeAfterFailure(eq(prepared), eq("NO_INITIAL_FAILURE"), anyString());
     verify(executionEvidence, never())
         .record(any(), anyString(), anyString(), anyInt(), anyInt(), any());
   }
 
   @Test
   void hiddenInitialVerifierTargetsNeverEnterTheWorkerDirective() {
-    when(featureFlags.isEnabled(BuildTaskGenerationCoordinator.SHARED_LOOP_FLAG)).thenReturn(true);
+    enableSharedKernelProtocol();
     GreenfieldBaselinePlan baseline =
         new GreenfieldBaselinePlan(
             GreenfieldBaselinePlan.Kind.PYTHON,
@@ -661,8 +752,8 @@ class BuildTaskGenerationCoordinatorTest {
             task,
             plan,
             request,
-            () -> {
-              assertThat(coordinator.acceptanceSystemDirective())
+            dispatchedContext -> {
+              assertThat(dispatchedContext.buildAcceptance().systemDirective())
                   .contains("The admitted interface is not yet satisfied")
                   .doesNotContain("GET /operator-only");
               return TaskOutcome.builder()
@@ -674,7 +765,8 @@ class BuildTaskGenerationCoordinatorTest {
             statusSink());
 
     assertThat(outcome.status()).isEqualTo(TaskOutcome.Status.COMPLETED_WITH_WARNING);
-    verify(generations).rollback(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
+    verify(convergence)
+        .convergeAfterFailure(eq(prepared), eq("TASK_VERIFICATION_REJECTED"), anyString());
   }
 
   private WorkspaceGenerationLifecycle.Verification verification(
@@ -684,6 +776,9 @@ class BuildTaskGenerationCoordinatorTest {
         "BUILD_AND_TEST",
         "{\"build\":\"server-resolved\"}",
         outcome,
+        "PASSED".equals(outcome) ? null : "UNAVAILABLE".equals(outcome) ? "ENVIRONMENT" : "PRODUCT",
+        "UNAVAILABLE".equals(outcome) ? "TEST_ENVIRONMENT_UNAVAILABLE" : null,
+        "DISPOSABLE_EXACT_GENERATION",
         buildPassed,
         testsExecuted,
         passed,
@@ -703,6 +798,11 @@ class BuildTaskGenerationCoordinatorTest {
     when(status.persist(anyString(), any()))
         .thenReturn(TaskStatusPersistenceService.Result.UPDATED);
     return status;
+  }
+
+  private void enableSharedKernelProtocol() {
+    when(protocolVersions.requireExecutable("run-1"))
+        .thenReturn(BuildProtocolVersion.SHARED_KERNEL_V2);
   }
 
   private TaskOutcome successfulOutcome() {

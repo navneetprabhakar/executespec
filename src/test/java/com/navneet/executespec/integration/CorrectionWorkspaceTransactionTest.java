@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.workspacegeneration.WorkspaceIgnoredArtifactGuard;
@@ -81,7 +82,7 @@ class CorrectionWorkspaceTransactionTest {
     Files.createDirectories(root.resolve("scratch"));
     Files.writeString(root.resolve("scratch/rejected.bin"), "remove\n");
     transaction.rollback(checkpoint);
-    ignored.cleanAttemptArtifacts(checkpoint, baseline.json(), () -> {});
+    ignored.cleanAttemptArtifacts(checkpoint, baseline.json(), baseline.digest(), () -> {});
 
     assertThat(root.resolve("baseline-cache")).doesNotExist();
     assertThat(transaction.currentGeneration(checkpoint)).isEqualTo(checkpoint.generation());
@@ -187,6 +188,46 @@ class CorrectionWorkspaceTransactionTest {
     assertThat(gitOutput(repository, "diff", "--cached", "--name-only")).contains("tracked.txt");
     Files.writeString(repository.resolve("tracked.txt"), "post-checkpoint edit\n");
     assertThat(transaction.currentGeneration(checkpoint)).isNotEqualTo(checkpoint.generation());
+  }
+
+  @Test
+  void generationCaptureNeverExecutesRepositoryCleanFilter() throws Exception {
+    Path repository = repository("hostile-clean-filter");
+    Path marker = tempDir.resolve("clean-filter-executed");
+    Path filter = tempDir.resolve("hostile-clean-filter.sh");
+    Files.writeString(filter, "#!/bin/sh\ntouch '" + marker + "'\ncat\n");
+    Files.setPosixFilePermissions(filter, PosixFilePermissions.fromString("rwx------"));
+    Files.writeString(repository.resolve(".gitattributes"), "*.txt filter=hostile\n");
+    git(repository, "add", ".gitattributes");
+    git(repository, "commit", "-q", "-m", "hostile filter config");
+    git(repository, "config", "filter.hostile.clean", filter.toString());
+    Files.deleteIfExists(marker);
+    Files.writeString(repository.resolve("tracked.txt"), "changed without filter execution\n");
+
+    String generation = transaction.captureGeneration(repository);
+
+    assertThat(generation).hasSize(64);
+    assertThat(marker).doesNotExist();
+  }
+
+  @Test
+  void generationAndRollbackPreserveExecutableModeAndSafeSymlink() throws Exception {
+    Path repository = repository("mode-and-symlink");
+    Path executable = repository.resolve("run.sh");
+    Files.writeString(executable, "#!/bin/sh\necho ok\n");
+    Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwxr-xr-x"));
+    Path link = repository.resolve("run-link");
+    Files.createSymbolicLink(link, Path.of("run.sh"));
+    var checkpoint = transaction.begin(repository);
+
+    Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rw-r--r--"));
+    Files.delete(link);
+    transaction.rollback(checkpoint);
+
+    assertThat(Files.isExecutable(executable)).isTrue();
+    assertThat(Files.isSymbolicLink(link)).isTrue();
+    assertThat(Files.readSymbolicLink(link)).isEqualTo(Path.of("run.sh"));
+    assertThat(transaction.currentGeneration(checkpoint)).isEqualTo(checkpoint.generation());
   }
 
   @Test

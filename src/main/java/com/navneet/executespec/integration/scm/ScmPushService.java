@@ -226,6 +226,8 @@ public class ScmPushService {
   private final ArtifactPublicationGuard publicationGuard;
   private final BrownfieldHttpContractGuard brownfieldHttpContractGuard;
   private final PublicationAdmissionService publicationAdmissionService;
+  private final PublicationDispatchService publicationDispatchService;
+  private final RepositoryProvisionDispatchService repositoryProvisionDispatchService;
   // RL-2026-05-041 (audit #16) — enqueue orphan-branch cleanup when a push succeeds but PR fails.
   private final com.navneet.executespec.saga.SideEffectOutbox sideEffectOutbox;
   // RR-1668 — per-run cloned-branch SHA snapshots, used to pin --force-with-lease on the push.
@@ -363,7 +365,7 @@ public class ScmPushService {
     try (PublicationAdmissionService.Admission admission =
         publicationAdmissionService.assertEligible(run)) {
       admission.assertOwned();
-      return pushAdmitted(run, user);
+      return pushAdmitted(run, user, admission);
     } catch (PublicationAdmissionService.PublicationBlockedException ineligible) {
       log.warn(
           "[{}] SCM publication blocked by {}: {}",
@@ -404,7 +406,8 @@ public class ScmPushService {
     }
   }
 
-  private PushResult pushAdmitted(PipelineRun run, AppUser user) {
+  private PushResult pushAdmitted(
+      PipelineRun run, AppUser user, PublicationAdmissionService.Admission admission) {
     try {
       // Final fail-closed brownfield compatibility check. This runs before provider/credential
       // resolution and therefore before any branch, commit, push, or PR side effect.
@@ -448,9 +451,9 @@ public class ScmPushService {
     }
     if (ScmProvider.BITBUCKET.name().equals(decision.provider())) {
       hydrateBitbucketCredentials(run, user);
-      return pushToBitbucket(run);
+      return pushToBitbucket(run, admission);
     }
-    return pushToGitHubIfConfigured(run, user);
+    return pushToGitHubIfConfigured(run, user, admission);
   }
 
   private static String contractRetryGuidance(String code) {
@@ -599,7 +602,8 @@ public class ScmPushService {
     run.setBitbucketRepoSlug(user.getBitbucketRepoSlug());
   }
 
-  private PushResult pushToBitbucket(PipelineRun run) {
+  private PushResult pushToBitbucket(
+      PipelineRun run, PublicationAdmissionService.Admission admission) {
     String workspace = run.getBitbucketWorkspace();
     String repoSlug = run.getBitbucketRepoSlug();
     String username = run.getBitbucketUsername();
@@ -628,8 +632,33 @@ public class ScmPushService {
 
       publicationGuard.assertGitWorkspaceSafe(run.getRunId());
       blockingGate = "GIT_PUSH";
-      gitTool.pushToBranchBitbucket(
-          run.getRunId(), cloneUrl, username, appPassword, branchName, expectedRemoteSha);
+      GitToolResult bitbucketPush;
+      if (admission.prepared() != null) {
+        PublicationPreparationStore.PreparedRepository prepared =
+            preparedRepository(admission, ".", branchName);
+        bitbucketPush =
+            publicationDispatchService.push(
+                admission,
+                prepared,
+                cloneUrl,
+                expectedRemoteSha,
+                () ->
+                    gitTool.pushPreparedCommitBitbucket(
+                        run.getRunId(),
+                        ".",
+                        cloneUrl,
+                        appPassword,
+                        branchName,
+                        prepared.commitId(),
+                        expectedRemoteSha));
+      } else {
+        bitbucketPush =
+            gitTool.pushToBranchBitbucket(
+                run.getRunId(), cloneUrl, username, appPassword, branchName, expectedRemoteSha);
+      }
+      if (!bitbucketPush.isOk()) {
+        throw new IllegalStateException(bitbucketPush.value());
+      }
 
       String title =
           StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
@@ -729,7 +758,8 @@ public class ScmPushService {
     }
   }
 
-  private PushResult pushToGitHubIfConfigured(PipelineRun run, AppUser user) {
+  private PushResult pushToGitHubIfConfigured(
+      PipelineRun run, AppUser user, PublicationAdmissionService.Admission admission) {
     // Pilot v3.0 — multi-repo runs: push each cloned subdirectory as its own
     // branch + PR. Falls through to the single-repo path if no project repos
     // were selected.
@@ -739,7 +769,7 @@ public class ScmPushService {
         log.warn("Multi-repo push requires a PAT — skipping for run {}", run.getRunId());
         return PushResult.noConfiguration("GITHUB", "GitHub PAT is not configured");
       }
-      return pushMultiRepo(run, pat);
+      return pushMultiRepo(run, pat, admission);
     }
 
     RepoMode repoMode;
@@ -803,9 +833,40 @@ public class ScmPushService {
       // repository this invocation just created (and which is therefore empty). A NEW-mode run
       // pointed at a pre-existing repository falls through to the branch + PR path.
       boolean createdThisInvocation = false;
-      if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
+      PublicationPreparationStore.PreparedRepository provisionTarget =
+          admission.prepared() == null
+              ? null
+              : admission.prepared().repositories().stream()
+                  .filter(PublicationPreparationStore.PreparedRepository::provisionRequired)
+                  .findFirst()
+                  .orElse(null);
+      if (repoMode == RepoMode.NEW && provisionTarget != null) {
         blockingGate = "REPOSITORY_CREATION";
         log.info("Creating new GitHub repo for run {} (owner={})", run.getRunId(), owner);
+        remote =
+            repositoryProvisionDispatchService.provision(
+                admission,
+                provisionTarget,
+                "GITHUB",
+                () ->
+                    gitHubRepoService.createRepoExact(
+                        run.getUserRequest(),
+                        PublicationTargetResolver.newRepositoryName(run),
+                        "private",
+                        pat,
+                        owner));
+        createdThisInvocation = true;
+        if (remote != null) {
+          blockingGate = "REPOSITORY_PERSISTENCE";
+          PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
+          freshRun.setRepoUrl(remote);
+          stateStore.save(freshRun);
+          run.setRepoUrl(remote);
+          log.info("Provisioned GitHub repo: {}", remote);
+        }
+      } else if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
+        blockingGate = "REPOSITORY_CREATION";
+        log.info("Creating legacy GitHub repo for run {} (owner={})", run.getRunId(), owner);
         remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
         if (remote != null) {
           createdThisInvocation = true;
@@ -926,16 +987,42 @@ public class ScmPushService {
           }
         }
         blockingGate = "GIT_PUSH";
-        GitToolResult result =
+        String expectedRemoteSha =
             existingBranchTarget
-                ? gitTool.pushToExistingBranch(
-                    run.getRunId(), ".", remote, pat, branchName, runCommitMessage(run))
-                : gitTool.pushToBranch(
-                    run.getRunId(),
-                    remote,
-                    pat,
-                    branchName,
-                    expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName));
+                ? null
+                : expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+        GitToolResult result;
+        if (admission.prepared() != null) {
+          String preparedRemote = remote;
+          String preparedBranch = branchName;
+          PublicationPreparationStore.PreparedRepository prepared =
+              preparedRepository(admission, ".", preparedBranch);
+          if (!prepared.hasChanges() && !existingBranchTarget) {
+            return PushResult.noChanges("GITHUB", "No prepared Git changes", 1);
+          }
+          result =
+              publicationDispatchService.push(
+                  admission,
+                  prepared,
+                  preparedRemote,
+                  expectedRemoteSha,
+                  () ->
+                      gitTool.pushPreparedCommit(
+                          run.getRunId(),
+                          ".",
+                          preparedRemote,
+                          pat,
+                          preparedBranch,
+                          prepared.commitId(),
+                          expectedRemoteSha));
+        } else {
+          result =
+              existingBranchTarget
+                  ? gitTool.pushToExistingBranch(
+                      run.getRunId(), ".", remote, pat, branchName, runCommitMessage(run))
+                  : gitTool.pushToBranch(
+                      run.getRunId(), remote, pat, branchName, expectedRemoteSha);
+        }
         if (!result.isOk()) {
           log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
           return PushResult.failed(
@@ -1061,7 +1148,32 @@ public class ScmPushService {
         }
       } else {
         blockingGate = "GIT_PUSH";
-        GitToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
+        GitToolResult result;
+        if (admission.prepared() != null) {
+          String preparedRemote = remote;
+          PublicationPreparationStore.PreparedRepository prepared =
+              preparedRepository(admission, ".", "main");
+          if (!prepared.hasChanges()) {
+            return PushResult.noChanges("GITHUB", "No prepared Git changes", 1);
+          }
+          result =
+              publicationDispatchService.push(
+                  admission,
+                  prepared,
+                  preparedRemote,
+                  null,
+                  () ->
+                      gitTool.pushPreparedCommit(
+                          run.getRunId(),
+                          ".",
+                          preparedRemote,
+                          pat,
+                          "main",
+                          prepared.commitId(),
+                          null));
+        } else {
+          result = gitTool.pushToRemote(run.getRunId(), remote, pat);
+        }
         if (!result.isOk()) {
           log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
           return PushResult.failed(
@@ -1234,7 +1346,8 @@ public class ScmPushService {
    * workspace/<runId>/repos/<name>/} to its own branch + open a PR. Cross-links the PRs by patching
    * each body to reference the others. Failure of one repo does not abort the others.
    */
-  private PushResult pushMultiRepo(PipelineRun run, String pat) {
+  private PushResult pushMultiRepo(
+      PipelineRun run, String pat, PublicationAdmissionService.Admission admission) {
     Project project =
         run.getProjectId() != null
             ? projectRepository.findById(run.getProjectId()).orElse(null)
@@ -1383,18 +1496,47 @@ public class ScmPushService {
       // loop: repo B's already-created GitHub PR lost its durable record, the cross-link pass
       // never ran, and the caller saw an exception instead of a PushResult.
       try {
-        var pushResult =
+        String expectedRemoteSha =
             existingBranchTarget
-                ? gitTool.pushToExistingBranch(
-                    run.getRunId(), subPath, remote, pat, branchName, commitMsg)
-                : gitTool.commitAndPushSubdir(
-                    run.getRunId(),
-                    subPath,
-                    remote,
-                    pat,
-                    branchName,
-                    commitMsg,
-                    expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName));
+                ? null
+                : expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+        GitToolResult pushResult;
+        if (admission.prepared() != null) {
+          PublicationPreparationStore.PreparedRepository prepared =
+              preparedRepository(admission, subPath, branchName);
+          if (!prepared.hasChanges() && !existingBranchTarget) {
+            clean++;
+            continue;
+          }
+          pushResult =
+              publicationDispatchService.push(
+                  admission,
+                  prepared,
+                  remote,
+                  expectedRemoteSha,
+                  () ->
+                      gitTool.pushPreparedCommit(
+                          run.getRunId(),
+                          subPath,
+                          remote,
+                          pat,
+                          branchName,
+                          prepared.commitId(),
+                          expectedRemoteSha));
+        } else {
+          pushResult =
+              existingBranchTarget
+                  ? gitTool.pushToExistingBranch(
+                      run.getRunId(), subPath, remote, pat, branchName, commitMsg)
+                  : gitTool.commitAndPushSubdir(
+                      run.getRunId(),
+                      subPath,
+                      remote,
+                      pat,
+                      branchName,
+                      commitMsg,
+                      expectedRemoteSha);
+        }
         if (!pushResult.isOk()) {
           log.warn(
               "[{}] multi-repo push failed for {}: {}",
@@ -1735,6 +1877,24 @@ public class ScmPushService {
       log.warn("Failed to parse selected_repo_ids: {}", e.getMessage());
       return List.of();
     }
+  }
+
+  private static PublicationPreparationStore.PreparedRepository preparedRepository(
+      PublicationAdmissionService.Admission admission, String relativePath, String branch) {
+    if (admission == null || admission.prepared() == null) {
+      throw new IllegalStateException("PUBLICATION_PREPARATION_ADMISSION_MISSING");
+    }
+    List<PublicationPreparationStore.PreparedRepository> matches =
+        admission.prepared().repositories().stream()
+            .filter(
+                repository ->
+                    repository.relativeWorktreePath().equals(relativePath)
+                        && repository.publicationBranch().equals(branch))
+            .toList();
+    if (matches.size() != 1) {
+      throw new IllegalStateException("PUBLICATION_PREPARED_REPOSITORY_IDENTITY_MISMATCH");
+    }
+    return matches.getFirst();
   }
 
   private static String lastPathSegment(String fullName) {

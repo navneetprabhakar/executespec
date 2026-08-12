@@ -13,6 +13,7 @@ import com.navneet.executespec.standards.enforcement.lint.LintAdapter;
 import com.navneet.executespec.standards.enforcement.lint.LintResult;
 import com.navneet.executespec.standards.enforcement.lint.LintViolation;
 import com.navneet.executespec.standards.model.Standard;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
 
@@ -78,6 +79,39 @@ public class StandardsRunner {
       List<String> repoFilePaths,
       List<Path> sourceFiles,
       boolean inventoryComplete) {
+    return runInternal(
+        runId, null, effective, repoRoot, repoFilePaths, sourceFiles, inventoryComplete);
+  }
+
+  /** Exact-generation BUILD entrypoint for deterministic enforcement. */
+  public RunReport run(
+      ExecutionContext context,
+      List<EffectiveStandardsResolver.Effective> effective,
+      Path repoRoot,
+      List<String> repoFilePaths,
+      List<Path> sourceFiles,
+      boolean inventoryComplete) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      throw new IllegalStateException("VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    return runInternal(
+        context.runId(),
+        context,
+        effective,
+        repoRoot,
+        repoFilePaths,
+        sourceFiles,
+        inventoryComplete);
+  }
+
+  private RunReport runInternal(
+      String runId,
+      ExecutionContext context,
+      List<EffectiveStandardsResolver.Effective> effective,
+      Path repoRoot,
+      List<String> repoFilePaths,
+      List<Path> sourceFiles,
+      boolean inventoryComplete) {
     List<AggregatedViolation> all = new ArrayList<>();
     if (effective == null) return new RunReport(List.of(), Map.of());
 
@@ -105,7 +139,10 @@ public class StandardsRunner {
             continue;
           }
           Path config = le.configPath() == null ? null : Path.of(le.configPath());
-          LintResult lr = adapter.run(runId, repoRoot, config, List.of());
+          LintResult lr =
+              context == null
+                  ? adapter.run(runId, repoRoot, config, List.of())
+                  : adapter.run(context, repoRoot, config, List.of());
           lintResults.put(s.id(), lr);
           for (LintViolation lv : lr.violations()) {
             all.add(

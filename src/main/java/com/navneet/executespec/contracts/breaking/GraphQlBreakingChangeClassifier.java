@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.navneet.executespec.contracts.ContractRegistry;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Component;
 
@@ -39,14 +40,33 @@ public class GraphQlBreakingChangeClassifier implements BreakingChangeClassifier
 
   @Override
   public ContractDiff classify(String oldContent, String newContent) {
+    return classifyInternal(null, oldContent, newContent);
+  }
+
+  @Override
+  public ContractDiff classify(ExecutionContext context, String oldContent, String newContent) {
+    return classifyInternal(context, oldContent, newContent);
+  }
+
+  private ContractDiff classifyInternal(
+      ExecutionContext context, String oldContent, String newContent) {
     CliBreakingChangeRunner.CliResult result =
-        runner.run(
-            oldContent,
-            newContent,
-            "graphql-inspector",
-            (oldPath, newPath) ->
-                List.of("graphql-inspector", "diff", oldPath.toString(), newPath.toString()),
-            30);
+        context == null
+            ? runner.run(
+                oldContent,
+                newContent,
+                "graphql-inspector",
+                (oldPath, newPath) ->
+                    List.of("graphql-inspector", "diff", oldPath.toString(), newPath.toString()),
+                30)
+            : runner.run(
+                context,
+                oldContent,
+                newContent,
+                "graphql-inspector",
+                (oldPath, newPath) ->
+                    List.of("graphql-inspector", "diff", oldPath.toString(), newPath.toString()),
+                30);
     if (!result.executed()) {
       return new ContractDiff(
           "graphql-inspector unavailable: " + result.unavailableReason(),

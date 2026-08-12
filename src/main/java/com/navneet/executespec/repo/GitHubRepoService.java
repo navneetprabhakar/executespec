@@ -152,6 +152,39 @@ public class GitHubRepoService {
   }
 
   /**
+   * Creates exactly the named repository once. Publication preparation binds this coordinate before
+   * the API call, so silently appending a random collision suffix would publish to an unadmitted
+   * target. A collision or ambiguous response therefore fails closed.
+   */
+  public String createRepoExact(
+      String goal, String exactName, String visibility, String overridePat, String overrideOwner) {
+    String effectivePat = overridePat;
+    String effectiveOwner = resolve(overrideOwner, defaultOwner);
+    if (effectivePat == null || effectivePat.isBlank()) return null;
+    if (exactName == null || !exactName.matches("[a-z0-9][a-z0-9._-]{2,99}")) {
+      throw new IllegalArgumentException("Exact GitHub repository name is invalid");
+    }
+    boolean isPrivate = !"public".equals(visibility);
+    String body =
+        """
+        {"name":"%s","private":%b,"auto_init":false,"description":"%s"}"""
+            .formatted(exactName, isPrivate, sanitiseDescription(goal));
+    CreateResult orgResult =
+        tryCreate(
+            "https://api.github.com/orgs/" + effectiveOwner + "/repos",
+            effectivePat,
+            body,
+            effectiveOwner,
+            exactName);
+    if (orgResult.cloneUrl() != null) return orgResult.cloneUrl();
+    if (orgResult.nameTaken()) return null;
+    CreateResult userResult =
+        tryCreate(
+            "https://api.github.com/user/repos", effectivePat, body, effectiveOwner, exactName);
+    return userResult.cloneUrl();
+  }
+
+  /**
    * v2.5.2 (Phase 2.3) — close a PR via PATCH. Idempotent: a PR already closed/merged returns
    * {@code true}. Best-effort on network/auth failure.
    *

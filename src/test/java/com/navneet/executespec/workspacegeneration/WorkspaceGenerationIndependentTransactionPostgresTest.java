@@ -75,7 +75,12 @@ class WorkspaceGenerationIndependentTransactionPostgresTest extends PostgresInte
             });
     WorkspaceGenerationRollbackService service =
         new WorkspaceGenerationRollbackService(
-            attempts, workspaces, ignored, new ObjectMapper(), transactionManager);
+            attempts,
+            workspaces,
+            mock(WorkspaceGenerationFilesystemSaga.class),
+            ignored,
+            new ObjectMapper(),
+            transactionManager);
     TransactionTemplate outer = new TransactionTemplate(transactionManager);
 
     assertThatThrownBy(

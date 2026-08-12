@@ -51,6 +51,15 @@ public class WorkspaceGenerationVerificationReceipt {
   @Column(nullable = false, length = 16)
   private String outcome;
 
+  @Column(name = "failure_category", length = 32)
+  private String failureCategory;
+
+  @Column(name = "environment_code", length = 64)
+  private String environmentCode;
+
+  @Column(name = "execution_boundary", length = 64)
+  private String executionBoundary;
+
   @Column(name = "build_passed", nullable = false)
   private boolean buildPassed;
 
@@ -75,6 +84,10 @@ public class WorkspaceGenerationVerificationReceipt {
 
   @Column(name = "evidence_digest", nullable = false, length = 64)
   private String evidenceDigest;
+
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "command_receipt_ids", nullable = false, columnDefinition = "jsonb")
+  private String commandReceiptIds;
 
   @Column(name = "started_at", nullable = false)
   private Instant startedAt;

@@ -21,6 +21,7 @@ public class WorkspaceGenerationRollbackService {
 
   private final WorkspaceGenerationAttemptRepository attempts;
   private final CorrectionWorkspaceTransaction workspaces;
+  private final WorkspaceGenerationFilesystemSaga filesystemSaga;
   private final WorkspaceIgnoredArtifactGuard ignoredArtifacts;
   private final ObjectMapper objectMapper;
   private final PlatformTransactionManager transactionManager;
@@ -60,9 +61,12 @@ public class WorkspaceGenerationRollbackService {
                     Instant.now())),
         "WORKSPACE_GENERATION_ROLLBACK_CAS_FAILED");
     try {
-      workspaces.rollback(checkpoint, authorityFence);
+      filesystemSaga.restoreRepositories(attemptId, checkpoint, authorityFence);
       ignoredArtifacts.cleanAttemptArtifacts(
-          checkpoint, attempt.getIgnoredArtifactBaselineJson(), authorityFence);
+          checkpoint,
+          attempt.getIgnoredArtifactBaselineJson(),
+          attempt.getIgnoredArtifactBaselineDigest(),
+          authorityFence);
       assertRestored(attempt, checkpoint, authorityFence);
       requireCas(
           transactions.execute(

@@ -17,6 +17,7 @@ import com.navneet.executespec.sandbox.RunSandboxStore;
 import com.navneet.executespec.sandbox.SandboxIsolationProfile;
 import com.navneet.executespec.sandbox.SandboxLeaseFencedException;
 import com.navneet.executespec.sandbox.SandboxNetworkPolicy;
+import com.navneet.executespec.sandbox.SandboxPurpose;
 import com.navneet.executespec.sandbox.SandboxRetentionState;
 import com.navneet.executespec.sandbox.SandboxSecretPolicy;
 import com.navneet.executespec.sandbox.SandboxState;
@@ -62,13 +63,13 @@ class RunSandboxLifecycleMigrationIntegrationTest {
     JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
     flyway(dataSource, schema, MigrationVersion.fromVersion("306")).migrate();
-    Flyway upgrade = flyway(dataSource, schema, MigrationVersion.fromVersion("342"));
+    Flyway upgrade = flyway(dataSource, schema, MigrationVersion.fromVersion("388"));
     assertThat(upgrade.migrate().migrationsExecuted).isGreaterThan(0);
     assertThat(
             jdbc.queryForList(
-                "SELECT version FROM flyway_schema_history WHERE version IN ('307','342')",
+                "SELECT version FROM flyway_schema_history WHERE version IN ('307','342','388')",
                 String.class))
-        .containsExactlyInAnyOrder("307", "342");
+        .containsExactlyInAnyOrder("307", "342", "388");
 
     // The three Phase 5 flags exist as separate rows and are independently OFF. Matched by exact
     // key: an unrelated pre-existing `sandbox.network-isolation` flag also lives in this table.
@@ -94,6 +95,22 @@ class RunSandboxLifecycleMigrationIntegrationTest {
     assertThat(created.state()).isEqualTo(SandboxState.REQUESTED);
     assertThat(created.leaseToken()).isZero();
     assertThat(alpha.createOrGet(request).id()).isEqualTo(id);
+
+    // V388: verification has a separate durable identity and may coexist with the canonical RUN
+    // sandbox, but a second live verifier for the same run is rejected by the database.
+    UUID verifierId = UUID.randomUUID();
+    RunSandbox.CreateRequest verifier =
+        create(verifierId, "run-1", "sandbox:idem:verify-1", SandboxPurpose.VERIFICATION);
+    assertThat(alpha.createOrGet(verifier).purpose()).isEqualTo(SandboxPurpose.VERIFICATION);
+    assertThatThrownBy(
+            () ->
+                alpha.createOrGet(
+                    create(
+                        UUID.randomUUID(),
+                        "run-1",
+                        "sandbox:idem:verify-2",
+                        SandboxPurpose.VERIFICATION)))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
 
     // A second non-terminal sandbox for the same run is refused by the database, not by a
     // read-then-write race in application code.
@@ -323,6 +340,11 @@ class RunSandboxLifecycleMigrationIntegrationTest {
   }
 
   private static RunSandbox.CreateRequest create(UUID id, String runId, String idempotencyKey) {
+    return create(id, runId, idempotencyKey, SandboxPurpose.RUN);
+  }
+
+  private static RunSandbox.CreateRequest create(
+      UUID id, String runId, String idempotencyKey, SandboxPurpose purpose) {
     return new RunSandbox.CreateRequest(
         id,
         runId,
@@ -332,6 +354,7 @@ class RunSandboxLifecycleMigrationIntegrationTest {
         "org-1",
         "abc1234",
         "[{\"repo\":\"owner/repo\"}]",
+        purpose,
         SandboxIsolationProfile.CONTAINER_STRICT_V1,
         "cfg-digest-1",
         SandboxNetworkPolicy.DENY_ALL,

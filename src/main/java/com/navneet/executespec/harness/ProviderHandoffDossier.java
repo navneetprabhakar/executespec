@@ -10,7 +10,8 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
+import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 
 /** Bounded, workspace-local metadata for an actual provider/model continuation handoff. */
 final class ProviderHandoffDossier {
@@ -23,6 +24,7 @@ final class ProviderHandoffDossier {
   private ProviderHandoffDossier() {}
 
   static void write(
+      ExecutionContext context,
       Path workspace,
       String runId,
       String taskId,
@@ -34,7 +36,7 @@ final class ProviderHandoffDossier {
       String reason,
       String failure) {
     if (workspace == null || runId == null || taskId == null) return;
-    RunWorkspaceAuthorityService.assertWorkspaceGenerationToolDispatch(runId);
+    context.assertWorkspaceGenerationDispatch(WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
     Path target = workspace.resolve(".agent-context").resolve(FILE_NAME);
     Path temp = target.resolveSibling(FILE_NAME + ".tmp");
     try {
@@ -109,6 +111,7 @@ final class ProviderHandoffDossier {
   }
 
   static String writeAndReadRecoveryNote(
+      ExecutionContext context,
       Path workspace,
       String runId,
       String taskId,
@@ -120,6 +123,7 @@ final class ProviderHandoffDossier {
       String reason,
       String failure) {
     write(
+        context,
         workspace,
         runId,
         taskId,

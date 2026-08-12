@@ -94,6 +94,26 @@ class WorkspaceGenerationTaskTransitionServiceTest {
     verifyNoInteractions(tasks);
   }
 
+  @Test
+  void publishesAcceptedCompleteThenCommitsTheOutboxReceipt() {
+    UUID attemptId = UUID.randomUUID();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    TaskStatusPersistenceService tasks = mock(TaskStatusPersistenceService.class);
+    PlatformTransactionManager transactions = transactionManager();
+    WorkspaceGenerationAttempt attempt = transition(attemptId, "MARK_COMPLETE", null);
+    when(attempts.findById(attemptId)).thenReturn(Optional.of(attempt));
+    when(tasks.publishWorkspaceGenerationTransition(
+            "12345678-run", "T1", "COMPLETE", "WORKING", 2, null))
+        .thenReturn(TaskStatusPersistenceService.Result.UPDATED);
+    when(attempts.completeTaskTransition(eq(attemptId), eq("MARK_COMPLETE"), any(Instant.class)))
+        .thenReturn(1);
+
+    new WorkspaceGenerationTaskTransitionService(attempts, tasks, transactions).publish(attemptId);
+
+    verify(attempts).completeTaskTransition(eq(attemptId), eq("MARK_COMPLETE"), any(Instant.class));
+  }
+
   private static WorkspaceGenerationAttempt transition(UUID id, String kind, String failureReason) {
     return WorkspaceGenerationAttempt.builder()
         .id(id)

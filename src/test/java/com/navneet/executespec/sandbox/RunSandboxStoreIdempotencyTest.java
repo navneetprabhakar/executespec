@@ -83,6 +83,7 @@ class RunSandboxStoreIdempotencyTest {
         r.orgId(),
         r.sourceRevision(),
         r.repositorySet(),
+        r.purpose(),
         SandboxState.REQUESTED,
         r.isolationProfile(),
         r.isolationProfile().version(),

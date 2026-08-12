@@ -14,24 +14,29 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
+import com.navneet.executespec.smoketest.BuildVerificationResult;
 import com.navneet.executespec.smoketest.TestCommandResolver;
 import com.navneet.executespec.smoketest.TestCommandResolver.Framework;
 import com.navneet.executespec.smoketest.TestCommandResolver.TestCommand;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.tool.BuildExecutionEvidence;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
-import com.navneet.executespec.tool.ToolResult;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class TaskAcceptanceVerifierTest {
 
@@ -43,15 +48,78 @@ class TaskAcceptanceVerifierTest {
   private final WorkspaceTestRunner testRunner = mock(WorkspaceTestRunner.class);
   private final PythonHttpRuntimeAcceptanceService pythonRuntime =
       mock(PythonHttpRuntimeAcceptanceService.class);
+  private final DisposableVerificationWorkspaceService disposableWorkspaces =
+      mock(DisposableVerificationWorkspaceService.class);
   private final ExecutionContext context =
       new ExecutionContext("run-1", "T1", Path.of(".").toAbsolutePath().normalize());
   private TaskAcceptanceVerifier verifier;
+
+  private static BuildExecutionEvidence executedBuild(String output) {
+    return new BuildExecutionEvidence(
+        BuildExecutionEvidence.Disposition.EXECUTED,
+        BuildVerificationResult.parse(output),
+        output,
+        null,
+        "VERIFICATION_SANDBOX",
+        false);
+  }
 
   @BeforeEach
   void setUp() {
     verifier =
         new TaskAcceptanceVerifier(
-            buildCommands, testCommands, buildTool, testRunner, pythonRuntime, new ObjectMapper());
+            buildCommands,
+            testCommands,
+            buildTool,
+            testRunner,
+            pythonRuntime,
+            new ObjectMapper(),
+            new TaskAcceptanceDisposableRunner(disposableWorkspaces, new ObjectMapper()));
+    when(disposableWorkspaces.execute(any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              ExecutionContext supplied = invocation.getArgument(0);
+              @SuppressWarnings("unchecked")
+              Function<ExecutionContext, Object> command = invocation.getArgument(2);
+              return new DisposableVerificationWorkspaceService.Execution<>(
+                  command.apply(supplied),
+                  "generation",
+                  "generation",
+                  1,
+                  1,
+                  "before",
+                  "after",
+                  0,
+                  java.time.Duration.ZERO,
+                  true);
+            });
+    when(testRunner.executeTests(any(ExecutionContext.class)))
+        .thenAnswer(
+            invocation -> {
+              ExecutionContext supplied = invocation.getArgument(0);
+              Optional<DetailedResult> detail = testRunner.runTestsDetailed(supplied);
+              if (detail.isEmpty()) {
+                return new WorkspaceTestRunner.ExecutionEvidence(
+                    WorkspaceTestRunner.ExecutionStatus.UNSUPPORTED_FRAMEWORK,
+                    null,
+                    "no recognized test framework",
+                    null,
+                    false);
+              }
+              DetailedResult result = detail.get();
+              boolean failed =
+                  result.exitCode() != 0
+                      || result.summary().getFailed() > 0
+                      || result.summary().getErrors() > 0;
+              return new WorkspaceTestRunner.ExecutionEvidence(
+                  failed
+                      ? WorkspaceTestRunner.ExecutionStatus.PRODUCT_FAILED
+                      : WorkspaceTestRunner.ExecutionStatus.PASSED,
+                  result,
+                  null,
+                  result.command(),
+                  true);
+            });
     when(pythonRuntime.verify(anyString(), any(Path.class)))
         .thenReturn(
             new PythonHttpRuntimeAcceptanceService.Result(
@@ -64,6 +132,12 @@ class TaskAcceptanceVerifierTest {
                 0,
                 "strict runtime unavailable",
                 Map.of("runtimeCommand", PythonHttpRuntimeAcceptanceService.RUNTIME_COMMAND)));
+    when(pythonRuntime.verify(any(ExecutionContext.class)))
+        .thenAnswer(
+            invocation ->
+                pythonRuntime.verify(
+                    invocation.<ExecutionContext>getArgument(0).runId(),
+                    invocation.<ExecutionContext>getArgument(0).workspaceRoot()));
     when(buildCommands.resolve(any(Path.class), nullable(String.class)))
         .thenReturn(
             BuildCommand.builder()
@@ -71,9 +145,9 @@ class TaskAcceptanceVerifierTest {
                 .timeoutSeconds(300)
                 .sourceDescription("inferred:maven")
                 .build());
-    when(buildTool.execute(any(), any()))
+    when(buildTool.executeForVerification(any()))
         .thenReturn(
-            ToolResult.ok(
+            executedBuild(
                 "command=mvn -q -DskipTests compile\n"
                     + "cwd=/workspace\nsource=inferred:maven\nexit=0\noutput:\n"));
   }
@@ -82,17 +156,72 @@ class TaskAcceptanceVerifierTest {
   void rejectsAZeroDiffGenerationEvenWhenTheBuildPasses() {
     when(testCommands.resolve(any(Path.class))).thenReturn(Optional.empty());
 
-    var result = verifier.verify(context, optionalTests(), List.of());
+    var result = verifier.verify(verificationContext(context), optionalTests(), List.of());
 
     assertThat(result.outcome()).isEqualTo("FAILED");
     assertThat(result.buildPassed()).isTrue();
   }
 
   @Test
+  void preservesSandboxPolicyDenialAsEnvironmentUnavailableNotProductFailure() {
+    when(testCommands.resolve(any(Path.class))).thenReturn(Optional.empty());
+    when(buildTool.executeForVerification(any()))
+        .thenReturn(
+            new BuildExecutionEvidence(
+                BuildExecutionEvidence.Disposition.POLICY_DENIED,
+                null,
+                null,
+                "network capability denied",
+                "VERIFICATION_SANDBOX",
+                false));
+
+    var result =
+        verifier.verify(
+            verificationContext(context), optionalTests(), List.of("src/main/App.java"));
+
+    assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
+    assertThat(result.buildPassed()).isFalse();
+    assertThat(result.failureCategory()).isEqualTo("ENVIRONMENT");
+    assertThat(result.environmentCode()).isEqualTo("BUILD_POLICY_DENIED");
+    assertThat(result.executionBoundary()).isEqualTo("DISPOSABLE_EXACT_GENERATION");
+    assertThat(result.evidenceJson())
+        .contains("\"buildExecutionDisposition\":\"POLICY_DENIED\"")
+        .contains("\"buildEnvironmentDetail\":\"network capability denied\"")
+        .contains("\"buildExecutionBoundary\":\"VERIFICATION_SANDBOX\"");
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = BuildExecutionEvidence.Disposition.class,
+      names = {"UNAVAILABLE", "TIMED_OUT", "LAUNCH_FAILED", "MALFORMED_EVIDENCE"})
+  void preservesEveryNonExecutedBuildDispositionAsTypedUnavailable(
+      BuildExecutionEvidence.Disposition disposition) {
+    when(testCommands.resolve(any(Path.class))).thenReturn(Optional.empty());
+    when(buildTool.executeForVerification(any()))
+        .thenReturn(
+            new BuildExecutionEvidence(
+                disposition, null, null, "fixture detail", "VERIFICATION_SANDBOX", true));
+
+    var result =
+        verifier.verify(
+            verificationContext(context), optionalTests(), List.of("src/main/App.java"));
+
+    assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
+    assertThat(result.failureCategory())
+        .isEqualTo(
+            disposition == BuildExecutionEvidence.Disposition.MALFORMED_EVIDENCE
+                ? "INTERNAL_PROTOCOL"
+                : "ENVIRONMENT");
+    assertThat(result.environmentCode()).isEqualTo("BUILD_" + disposition.name());
+  }
+
+  @Test
   void actualCodeChangesUpgradePlannerOptionalTestsToRequired() {
     when(testCommands.resolve(any(Path.class))).thenReturn(Optional.empty());
 
-    var result = verifier.verify(context, optionalTests(), List.of("src/main/App.java"));
+    var result =
+        verifier.verify(
+            verificationContext(context), optionalTests(), List.of("src/main/App.java"));
 
     assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
     assertThat(result.testsExecuted()).isFalse();
@@ -106,20 +235,18 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(any(Path.class))).thenReturn(Optional.of(command));
     TestExecutionSummary summary =
         TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
-    when(testRunner.runTestsDetailed(anyString(), any(Path.class)))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(Optional.of(new DetailedResult(summary, "Tests run: 2", command.command(), 0)));
 
-    var result = verifier.verify(context, optionalTests(), List.of("src/main/App.java"));
+    ExecutionContext verifiedContext = verificationContext(context);
+    var result = verifier.verify(verifiedContext, optionalTests(), List.of("src/main/App.java"));
 
     assertThat(result.outcome()).isEqualTo("PASSED");
     assertThat(result.buildPassed()).isTrue();
     assertThat(result.testsExecuted()).isTrue();
     assertThat(result.testsPassed()).isEqualTo(2);
     verify(buildCommands).resolve(context.workspaceRoot(), null);
-    verify(buildTool)
-        .execute(
-            org.mockito.ArgumentMatchers.argThat(node -> node != null && node.isEmpty()),
-            org.mockito.ArgumentMatchers.eq(context));
+    verify(buildTool).executeForVerification(verifiedContext);
     assertThat(result.serverResolvedCommandContract())
         .contains("\"buildSource\":\"inferred:maven\"")
         .doesNotContain("planner");
@@ -134,10 +261,12 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary =
         TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(Optional.of(new DetailedResult(summary, "Tests run: 2", command.command(), 0)));
 
-    var result = verifier.verify(v2Context, failureFirstContract(), List.of("src/main/App.java"));
+    var result =
+        verifier.verify(
+            verificationContext(v2Context), failureFirstContract(), List.of("src/main/App.java"));
 
     assertThat(result.outcome()).isEqualTo("PASSED");
     assertThat(result.serverResolvedCommandContract())
@@ -155,12 +284,12 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary =
         TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(Optional.of(new DetailedResult(summary, "2 passed", command.command(), 0)));
 
     var result =
         verifier.verify(
-            v2Context,
+            verificationContext(v2Context),
             requiredCandidateTestContract(),
             List.of("src/main/App.java", ".executespec/bootstrap/test_acceptance.py"));
 
@@ -184,13 +313,15 @@ class TaskAcceptanceVerifierTest {
                 .timeoutSeconds(300)
                 .sourceDescription("inferred:maven")
                 .build());
-    when(buildTool.execute(any(), any()))
+    when(buildTool.executeForVerification(any()))
         .thenReturn(
-            ToolResult.ok(
+            executedBuild(
                 "command=mvn -q package -DskipTests\n"
                     + "cwd=/workspace\nsource=inferred:maven\nexit=0\noutput:\n"));
 
-    var result = verifier.verify(v2Context, failureFirstContract(), List.of("src/main/App.java"));
+    var result =
+        verifier.verify(
+            verificationContext(v2Context), failureFirstContract(), List.of("src/main/App.java"));
 
     assertThat(result.outcome()).isEqualTo("FAILED");
     assertThat(result.buildPassed()).isFalse();
@@ -211,12 +342,14 @@ class TaskAcceptanceVerifierTest {
     TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(1).passed(1).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(Optional.of(new DetailedResult(summary, "1 passed", command.command(), 0)));
 
     var result =
         verifier.verify(
-            v2Context, bootstrapBoundContract("original\n"), List.of("src/main/App.java"));
+            verificationContext(v2Context),
+            bootstrapBoundContract("original\n"),
+            List.of("src/main/App.java"));
 
     assertThat(result.outcome()).isEqualTo("FAILED");
     assertThat(result.evidenceJson())
@@ -236,14 +369,16 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary =
         TestExecutionSummary.builder().totalTests(2).passed(2).failed(0).errors(0).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(
             Optional.of(
                 new DetailedResult(summary, "2 generated tests pass", command.command(), 0)));
 
     var result =
         verifier.verify(
-            v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
+            verificationContext(v2Context),
+            endpointContract(),
+            List.of("src/main/App.java", "openapi.json"));
 
     assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
     assertThat(result.testsPassed()).isEqualTo(2);
@@ -264,13 +399,15 @@ class TaskAcceptanceVerifierTest {
     TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(1).passed(1).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(
             Optional.of(new DetailedResult(summary, "1 test passes", command.command(), 0)));
 
     var result =
         verifier.verify(
-            v2Context, endpointContract(), List.of("src/main/App.java", "openapi.json"));
+            verificationContext(v2Context),
+            endpointContract(),
+            List.of("src/main/App.java", "openapi.json"));
 
     assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
     assertThat(result.evidenceJson()).contains("\"runtimeContractExecuted\":false");
@@ -287,13 +424,13 @@ class TaskAcceptanceVerifierTest {
     TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(1).passed(1).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(
             Optional.of(new DetailedResult(summary, "1 test passes", command.command(), 0)));
 
     var result =
         verifier.verify(
-            v2Context,
+            verificationContext(v2Context),
             endpointContract("DELETE /todos/{id}"),
             List.of("src/main/App.java", "openapi.json"));
 
@@ -307,7 +444,7 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(workspace))
         .thenReturn(Optional.of(new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven")));
 
-    var result = verifier.probeInitial(v2Context, failureFirstContract());
+    var result = verifier.probeInitial(mutationContext(v2Context), failureFirstContract());
 
     assertThat(result.observed()).isTrue();
     assertThat(result.code()).isEqualTo("REQUIRED_PATH_MISSING");
@@ -323,11 +460,12 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(workspace))
         .thenReturn(Optional.of(new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven")));
 
-    var result = verifier.probeInitial(v2Context, endpointContract());
+    ExecutionContext mutationContext = mutationContext(v2Context);
+    var result = verifier.probeInitial(mutationContext, endpointContract());
 
     assertThat(result.observed()).isFalse();
-    assertThat(result.code()).isEqualTo("INITIAL_TEST_EVIDENCE_UNAVAILABLE");
-    verify(buildTool).execute(any(), eq(v2Context));
+    assertThat(result.code()).isEqualTo("INITIAL_TEST_UNSUPPORTED_FRAMEWORK");
+    verify(buildTool).executeForVerification(eq(mutationContext));
   }
 
   @Test
@@ -335,7 +473,7 @@ class TaskAcceptanceVerifierTest {
     ExecutionContext v2Context = new ExecutionContext("run-1", "T1", workspace);
     when(testCommands.resolve(workspace)).thenReturn(Optional.empty());
 
-    var result = verifier.probeInitial(v2Context, failureFirstContract());
+    var result = verifier.probeInitial(mutationContext(v2Context), failureFirstContract());
 
     assertThat(result.observed()).isFalse();
     assertThat(result.outcome()).isEqualTo("UNAVAILABLE");
@@ -351,11 +489,11 @@ class TaskAcceptanceVerifierTest {
     TestCommand command = new TestCommand("mvn -q test", 600, Framework.SUREFIRE, "maven");
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary = TestExecutionSummary.builder().totalTests(2).passed(2).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(
             Optional.of(new DetailedResult(summary, "2 tests passed", command.command(), 0)));
 
-    var result = verifier.probeInitial(v2Context, failureFirstContract());
+    var result = verifier.probeInitial(mutationContext(v2Context), failureFirstContract());
 
     assertThat(result.observed()).isFalse();
     assertThat(result.outcome()).isEqualTo("ALREADY_PASSED");
@@ -374,12 +512,12 @@ class TaskAcceptanceVerifierTest {
     when(testCommands.resolve(workspace)).thenReturn(Optional.of(command));
     TestExecutionSummary summary =
         TestExecutionSummary.builder().totalTests(2).passed(1).failed(1).build();
-    when(testRunner.runTestsDetailed("run-1", workspace))
+    when(testRunner.runTestsDetailed(any(ExecutionContext.class)))
         .thenReturn(
             Optional.of(
                 new DetailedResult(summary, "AppTest expected 2 but got 1", command.command(), 1)));
 
-    var result = verifier.probeInitial(v2Context, failureFirstContract());
+    var result = verifier.probeInitial(mutationContext(v2Context), failureFirstContract());
 
     assertThat(result.observed()).isTrue();
     assertThat(result.code()).isEqualTo("INITIAL_TESTS_FAILED");
@@ -387,6 +525,29 @@ class TaskAcceptanceVerifierTest {
     assertThat(result.passed()).isEqualTo(1);
     assertThat(result.failed()).isEqualTo(1);
     assertThat(result.total()).isEqualTo(2);
+  }
+
+  private static ExecutionContext mutationContext(ExecutionContext context) {
+    return authorizedContext(context, WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
+  }
+
+  private static ExecutionContext verificationContext(ExecutionContext context) {
+    return authorizedContext(context, WorkspaceGenerationDispatchAuthority.Phase.VERIFICATION);
+  }
+
+  private static ExecutionContext authorizedContext(
+      ExecutionContext context, WorkspaceGenerationDispatchAuthority.Phase phase) {
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.runId()).thenReturn(context.runId());
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(java.util.UUID.randomUUID(), null, lease);
+    return context.withWorkspaceGenerationAuthority(
+        new WorkspaceGenerationDispatchAuthority(
+            context.runId(),
+            context.taskId(),
+            prepared,
+            phase,
+            mock(WorkspaceGenerationLifecycle.class)));
   }
 
   private static TaskAcceptanceContract optionalTests() {

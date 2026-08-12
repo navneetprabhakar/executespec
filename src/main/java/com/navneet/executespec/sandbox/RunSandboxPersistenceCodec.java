@@ -23,6 +23,7 @@ final class RunSandboxPersistenceCodec {
         rs.getString("org_id"),
         rs.getString("source_revision"),
         rs.getString("repository_set"),
+        SandboxPurpose.valueOf(rs.getString("purpose")),
         SandboxState.valueOf(rs.getString("state")),
         SandboxIsolationProfile.valueOf(rs.getString("isolation_profile")),
         rs.getInt("isolation_profile_version"),

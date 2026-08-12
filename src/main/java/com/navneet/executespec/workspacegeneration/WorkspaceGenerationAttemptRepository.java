@@ -86,6 +86,10 @@ public interface WorkspaceGenerationAttemptRepository
           + "a.beforeCheckpointKind = :checkpointKind, "
           + "a.beforeCheckpointKey = :checkpointKey, "
           + "a.beforeCheckpointDigest = :checkpointDigest, "
+          + "a.beforeCheckpointStorageGeneration = :storageGeneration, "
+          + "a.beforeCheckpointSizeBytes = :sizeBytes, "
+          + "a.beforeCheckpointCrc32c = :crc32c, "
+          + "a.beforeCheckpointEtag = :etag, "
           + "a.beforeCheckpointCompletedAt = :checkpointCompletedAt, "
           + "a.state = :prepared, a.updatedAt = :now WHERE a.id = :id "
           + "AND a.workspaceLeaseToken = :workspaceToken "
@@ -100,6 +104,10 @@ public interface WorkspaceGenerationAttemptRepository
       @Param("checkpointKind") String checkpointKind,
       @Param("checkpointKey") String checkpointKey,
       @Param("checkpointDigest") String checkpointDigest,
+      @Param("storageGeneration") String storageGeneration,
+      @Param("sizeBytes") long sizeBytes,
+      @Param("crc32c") String crc32c,
+      @Param("etag") String etag,
       @Param("checkpointCompletedAt") Instant checkpointCompletedAt,
       @Param("authorityAcquired") WorkspaceGenerationState authorityAcquired,
       @Param("prepared") WorkspaceGenerationState prepared,
@@ -162,7 +170,10 @@ public interface WorkspaceGenerationAttemptRepository
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.checkpointKind = :kind, "
           + "a.checkpointKey = :key, a.checkpointGeneration = :generation, "
-          + "a.checkpointDigest = :digest, a.checkpointCompletedAt = :completedAt, "
+          + "a.checkpointDigest = :digest, "
+          + "a.checkpointStorageGeneration = :storageGeneration, "
+          + "a.checkpointSizeBytes = :sizeBytes, a.checkpointCrc32c = :crc32c, "
+          + "a.checkpointEtag = :etag, a.checkpointCompletedAt = :completedAt, "
           + "a.updatedAt = :completedAt WHERE a.id = :id AND a.workspaceLeaseToken = :token "
           + "AND a.state = :checkpointing AND a.candidateGeneration = :generation "
           + "AND a.checkpointKind IS NULL AND a.checkpointKey IS NULL "
@@ -175,13 +186,20 @@ public interface WorkspaceGenerationAttemptRepository
       @Param("key") String key,
       @Param("generation") String generation,
       @Param("digest") String digest,
+      @Param("storageGeneration") String storageGeneration,
+      @Param("sizeBytes") long sizeBytes,
+      @Param("crc32c") String crc32c,
+      @Param("etag") String etag,
       @Param("checkpointing") WorkspaceGenerationState checkpointing,
       @Param("completedAt") Instant completedAt);
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :accepted, "
-          + "a.resolvedAt = :now, a.updatedAt = :now "
+          + "a.resolvedAt = :now, a.taskTransitionKind = 'MARK_COMPLETE', "
+          + "a.taskTransitionState = 'PENDING', "
+          + "a.operationTransitionTarget = 'SUCCEEDED', "
+          + "a.operationTransitionState = 'PENDING', a.updatedAt = :now "
           + "WHERE a.id = :id AND a.workspaceLeaseToken = :token "
           + "AND a.state = :checkpointing AND a.candidateGeneration = :candidate")
   int accept(
@@ -244,7 +262,9 @@ public interface WorkspaceGenerationAttemptRepository
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :rolledBack, "
           + "a.resolvedAt = :now, a.taskTransitionKind = 'MARK_PARTIAL', "
-          + "a.taskTransitionState = 'PENDING', a.updatedAt = :now "
+          + "a.taskTransitionState = 'PENDING', "
+          + "a.operationTransitionTarget = 'FAILED', "
+          + "a.operationTransitionState = 'PENDING', a.updatedAt = :now "
           + "WHERE a.id = :id AND a.workspaceLeaseToken = :token "
           + "AND a.state = :rollingBack AND a.recoveryLeaseToken IS NULL")
   int markRolledBack(
@@ -275,7 +295,9 @@ public interface WorkspaceGenerationAttemptRepository
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :rolledBack, "
           + "a.resolvedAt = :now, a.taskTransitionKind = 'REOPEN_PENDING', "
-          + "a.taskTransitionState = 'PENDING', a.updatedAt = :now "
+          + "a.taskTransitionState = 'PENDING', "
+          + "a.operationTransitionTarget = 'FAILED', "
+          + "a.operationTransitionState = 'PENDING', a.updatedAt = :now "
           + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "
           + "AND a.state = :rollingBack")
   int markRecoveredRolledBack(
@@ -291,7 +313,9 @@ public interface WorkspaceGenerationAttemptRepository
           + "a.failureCode = 'PRE_DISPATCH_ATTEMPT_RECOVERED', "
           + "a.failureReason = 'Recovered before provider or product mutation dispatch', "
           + "a.resolvedAt = :now, a.taskTransitionKind = 'REOPEN_PENDING', "
-          + "a.taskTransitionState = 'PENDING', a.updatedAt = :now "
+          + "a.taskTransitionState = 'PENDING', "
+          + "a.operationTransitionTarget = 'FAILED', "
+          + "a.operationTransitionState = 'PENDING', a.updatedAt = :now "
           + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "
           + "AND a.state = :rollingBack AND a.beforeGeneration IS NULL")
   int markPreDispatchRolledBack(

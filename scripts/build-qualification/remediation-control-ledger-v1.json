@@ -1,0 +1,581 @@
+{
+  "schemaVersion": 1,
+  "programId": "build-control-plane-remediation-2026-08-12",
+  "sourcePlan": {
+    "path": ".codex-work/control-plane-codemap-pr362-2026-08-12/DETAILED_BUILD_CONTROL_PLANE_RCA_AND_FIX_BLUEPRINT.md",
+    "sha256AtExecutionStart": "089775d7d2a52995ec55bc849af63d0a45385f814ea35277183e29718f119964"
+  },
+  "candidate": {
+    "branch": "codex/build-generation-qualification",
+    "executionStartSha": "9d9cd83135632746865433a0ee0d8f281b7f73a0"
+  },
+  "containment": {
+    "sharedBuildFlag": "build.shared-code-change-loop.enabled",
+    "seededValue": false,
+    "source": "src/main/resources/db/migration/V376__seed_build_shared_code_change_loop_flag.sql",
+    "publicationAllowedForDiagnosticFixtures": false,
+    "status": "SOURCE_CONFIRMED_RUNTIME_ATTESTATION_PENDING"
+  },
+  "hardZeroInvariants": [
+    "TERMINAL_STATE_CONTRADICTIONS",
+    "UNPROVEN_PUBLICATION",
+    "NON_WORKER_CANONICAL_MUTATION",
+    "CROSS_TENANT_EVIDENCE_ACCESS",
+    "MIXED_PROTOCOL_VERSION",
+    "SILENT_PROOF_DOWNGRADE",
+    "UNRECEIPTED_HISTORICAL_REWRITE"
+  ],
+  "operationalObjectives": {
+    "terminalConvergenceUpperBoundSeconds": 300,
+    "basis": {
+      "workspaceAuthorityLeaseSeconds": 180,
+      "recoverySchedulerIntervals": 2,
+      "recoverySchedulerIntervalSeconds": 60
+    },
+    "poisonIsolation": "EVERY_HEALTHY_RUN_ATTEMPTED_IN_SAME_SCAN",
+    "remainingCapacityLatencyCostObjectives": "PHASE_0_BASELINE_PENDING"
+  },
+  "openReleaseGates": [
+    {
+      "id": "GATE_HISTORICAL_NULL_DISPOSITION",
+      "status": "OPEN",
+      "reason": "V386 classifies pre-pin BUILD history as LEGACY_UNKNOWN with immutable missing/conflict disposition and publication quarantine. V387 adds minimized byte-bound append-only adjudication dry-run/apply receipts, an independent explicit deletion-release decision, database retention holds, and starvation-isolated retention deletion. The gate remains open until the complete deployed inventory is captured and every live historical record has an operator disposition."
+    },
+    {
+      "id": "GATE_RUNTIME_CONTAINMENT_AND_SCHEMA_ATTESTATION",
+      "status": "OPEN",
+      "reason": "WorkspaceGenerationSchemaAttestor now fail-closes protocol-v2 selection unless V398 and all 59 required BUILD/sandbox/command-journal/publication/recovery/checkpoint-identity/typed-verification/environment-receipt/filesystem-saga/reconciliation-diagnostic indexes and triggers are active. Local PostgreSQL migration and schema-artifact attestation pass, but app.executespec.ai still needs an authenticated live flag/schema attestation and a live container mount capture against the exact deployed release."
+    },
+    {
+      "id": "GATE_TYPED_DISPOSABLE_VERIFICATION",
+      "status": "OPEN",
+      "reason": "V388 and the generation-bound disposable service isolate initial/final acceptance, read-only reviewer build/tests, standards lint/invariants, breaking-change CLIs, CLI smoke, validation tests, and validation change evidence in focused local tests. V389 binds protocol-v2 passing evidence to immutable successful physical-command receipts; stale dispatch is indeterminate. V390 locally binds each pushed commit to the exact accepted generation, validation evidence, repository target and durable preparation/provision/push receipts. Deployed runtime UID/image/mount fidelity and the full live fault/container/publication matrix remain open."
+    }
+  ],
+  "controls": [
+    {
+      "id": "R1",
+      "phase": "PHASE_1",
+      "invariantId": "GENERATION_TERMINAL_STATE_OWNS_TASK_AND_OPERATION",
+      "authoritativeStore": "workspace_generation_attempt",
+      "writer": "WorkspaceGenerationConvergenceService",
+      "reconciler": "WorkspaceGenerationTerminalReconciler",
+      "fixture": "BuildTaskGenerationCoordinatorTest#frontierCasFailureConvergesFromDurableStateAndNeverInfersOperationSuccess,WorkspaceGenerationTerminalKillPostgresTest,WorkspaceGenerationTaskTransitionPostgresTest,WorkspaceGenerationProtocolPostgresTest,WorkspaceGenerationAuthorityArchitectureTest",
+      "owner": "STATE_MACHINE_OWNER",
+      "reviewer": "DATABASE_CONCURRENCY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R2",
+      "phase": "PHASE_2",
+      "invariantId": "DISPATCH_AUTHORITY_IS_EXPLICIT_AND_FRESH",
+      "authoritativeStore": "run_workspace_authority plus process-local ExecutionContext capability",
+      "writer": "BuildTaskGenerationCoordinator,ExecutionContext,SequentialExecutor",
+      "reconciler": "NONE_CAPABILITY_REVALIDATES_DURABLE_LEASE_AND_GENERATION_STATE",
+      "fixture": "WorkspaceGenerationDispatchAuthorityTest,WorkspaceGenerationAuthorityArchitectureTest,WorkerCorrectionToolFenceTest,BuildTaskGenerationCoordinatorArchitectureTest#buildAcceptanceSemanticsCannotUseImplicitThreadContext,BuildTaskGenerationCoordinatorTest#enabledFailureFirstModeMaterializesBaselineInsideLeaseBeforeDispatch",
+      "owner": "EXECUTION_SANDBOX_OWNER",
+      "reviewer": "SECURITY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R3",
+      "phase": "PHASE_2",
+      "invariantId": "ONE_PINNED_PROTOCOL_VERSION_PER_RUN",
+      "authoritativeStore": "pipeline_run,workspace_generation_attempt",
+      "writer": "BuildProtocolVersionService,RunOrchestrator,BuildContinuationAdmissionService",
+      "reconciler": "NONE_IMMUTABLE_UNKNOWN_HISTORY_QUARANTINED",
+      "fixture": "BuildProtocolVersionServiceTest,BuildProtocolVersionArchitectureTest,BuildContinuationAdmissionProtocolTest,WorkspaceGenerationProtocolPostgresTest,BuildProtocolMixedVersionPostgresTest,WorkspaceGenerationHistoricalAdjudicationPostgresTest",
+      "owner": "STATE_MACHINE_OWNER",
+      "reviewer": "DATABASE_CONCURRENCY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R4",
+      "phase": "PHASE_4",
+      "invariantId": "FILESYSTEM_SAGA_HAS_DURABLE_INTENT_AND_RECEIPT",
+      "authoritativeStore": "workspace_generation_step,workspace_generation_archive_cleanup,workspace_generation_attempt",
+      "writer": "WorkspaceGenerationLifecycle,WorkspaceGenerationFilesystemSaga,WorkspaceGenerationAcceptedReplacementSaga",
+      "reconciler": "WorkspaceGenerationRecoveryService,WorkspaceGenerationArchiveJanitor",
+      "fixture": "WorkspaceGenerationFilesystemKillPostgresTest,WorkspaceGenerationStepPostgresTest,WorkspaceGenerationArchiveJanitorTest",
+      "owner": "STORAGE_RELIABILITY_OWNER",
+      "reviewer": "FAILURE_INJECTION_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R5",
+      "phase": "PHASE_2",
+      "invariantId": "ONE_UNRESOLVED_ATTEMPT_PER_RUN",
+      "authoritativeStore": "workspace_generation_attempt partial unique index plus flyway_schema_history and pg_catalog attestation",
+      "writer": "BuildContinuationAdmissionService",
+      "reconciler": "NONE_DATABASE_ENFORCED",
+      "fixture": "WorkspaceGenerationAdmissionConcurrencyPostgresTest,WorkspaceGenerationProtocolPostgresTest,BuildProtocolMixedVersionPostgresTest,WorkspaceGenerationSchemaAttestor,BuildProtocolVersionServiceTest",
+      "owner": "STATE_MACHINE_OWNER",
+      "reviewer": "DATABASE_CONCURRENCY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R6",
+      "phase": "PHASE_3",
+      "invariantId": "IGNORED_BYTES_NEVER_ENTER_ACCEPTED_PROOF",
+      "authoritativeStore": "workspace_generation_environment_receipt plus Git-tree product generation",
+      "writer": "BuildEnvironmentMaterializer,WorkspaceIgnoredArtifactGuard,BuildEnvironmentReceiptStore",
+      "reconciler": "NONE_APPEND_ONLY_PHASE_RECEIPTS_AND_EXACT_REMATERIALIZATION",
+      "fixture": "BuildEnvironmentPlanResolverTest,BuildEnvironmentMaterializerTest,BuildEnvironmentSequentialTaskTest,WorkspaceIgnoredArtifactGuardTest,BuildEnvironmentReceiptPostgresTest,WorkspaceGenerationLifecycleBoundaryTest",
+      "owner": "BUILD_TEST_INFRASTRUCTURE_OWNER",
+      "reviewer": "SECURITY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R7",
+      "phase": "PHASE_4",
+      "invariantId": "ACKNOWLEDGED_CHECKPOINT_IS_EXACTLY_RESTORABLE",
+      "authoritativeStore": "workspace_generation_attempt before/candidate checkpoint receipt bound to immutable storage generation,size,CRC32C,ETag",
+      "writer": "GcsTaskCheckpointService,GcsWorkspaceStore,LocalGenerationCheckpointStore,WorkspaceGenerationLifecycle",
+      "reconciler": "WorkspaceGenerationRecoveryService,WorkspaceGenerationCheckpointRestorer",
+      "fixture": "LocalGenerationCheckpointStoreTest,GcsWorkspaceStoreExactArtifactTest,GcsTaskCheckpointServiceTest,WorkspaceGenerationCheckpointRestorerTest,WorkspaceGenerationTaskTransitionPostgresTest,WorkspaceGenerationProtocolPostgresTest,mixed-binary-schema-v383-v394-2026-08-12",
+      "owner": "STORAGE_RELIABILITY_OWNER",
+      "reviewer": "FAILURE_INJECTION_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R8",
+      "phase": "PHASE_1",
+      "invariantId": "REQUEST_CONTROL_FLOW_CANNOT_TERMINALIZE_OPERATION",
+      "authoritativeStore": "workspace_generation_attempt,llm_execution_operation",
+      "writer": "WorkspaceGenerationConvergenceService",
+      "reconciler": "WorkspaceGenerationOperationReconciler",
+      "fixture": "WorkspaceGenerationConvergenceServiceTest,WorkspaceGenerationTerminalKillPostgresTest,WorkspaceGenerationTaskTransitionPostgresTest,WorkspaceGenerationProtocolPostgresTest,WorkspaceGenerationAuthorityArchitectureTest",
+      "owner": "STATE_MACHINE_OWNER",
+      "reviewer": "DATABASE_CONCURRENCY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R9",
+      "phase": "PHASE_3",
+      "invariantId": "ATTESTATION_CANNOT_MUTATE_CANONICAL_WORKSPACE",
+      "authoritativeStore": "accepted generation plus disposable verification receipt",
+      "writer": "DisposableVerificationWorkspaceService,AcceptedGenerationVerificationRunner,TaskAcceptanceDisposableRunner,VerificationSandboxRoutingService",
+      "reconciler": "VerificationSandboxWorkspaceJanitor,NONE_DISPOSABLE_RESULT_DISCARDED",
+      "fixture": "DisposableVerificationWorkspaceServiceTest,BuildVerificationCommandArchitectureTest,SandboxAuxiliaryExecutionContainmentTest,RunChangeEvidenceServiceTest,CorrectionWorkspaceTransactionTest",
+      "owner": "EXECUTION_SANDBOX_OWNER",
+      "reviewer": "SECURITY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R10",
+      "phase": "PHASE_5",
+      "invariantId": "CUSTOMER_PROJECTION_MATCHES_DURABLE_CAUSALITY",
+      "authoritativeStore": "workspace generation failure projection",
+      "writer": "WorkspaceGenerationFailureProjection,RunTerminalOutcomeProjectionService,WorkspaceGenerationEvidenceProjection,RunMapper,IdeRunResult",
+      "reconciler": "NONE_DETERMINISTIC_PROJECTION",
+      "fixture": "WorkspaceGenerationFailureProjectionTest,WorkspaceGenerationEvidenceProjectionTest#every customer failure fixture is projected into the API DTO,RunTerminalOutcomeContractTest#workspace generation causality owns primary recovery copy and action,RunTerminalOutcomeProjectionServiceTest,RunMapperVerifiedScoreParityTest,RunCompletionNotifierTest,RunActivityFeedListenerTest,RunCompletionEmailListenerTest,runResultUtils.test.ts#renders explicit technical causality,IdeRunResult.test.tsx#renders primary recovery from the server contract",
+      "owner": "RUN_EXPERIENCE_OWNER",
+      "reviewer": "PRODUCT_UX_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R11",
+      "phase": "PHASE_3",
+      "invariantId": "ENVIRONMENT_FAILURE_IS_NOT_PRODUCT_FAILURE",
+      "authoritativeStore": "workspace generation verification receipt",
+      "writer": "BuildProjectTool,TaskAcceptanceVerifier,WorkspaceTestRunner,WorkspaceGenerationLifecycle",
+      "reconciler": "NONE_IMMUTABLE_RECEIPT",
+      "fixture": "TaskAcceptanceVerifierTest,SandboxRoutedBuildAndLintTest,WorkspaceTestRunnerTest,WorkspaceGenerationProtocolPostgresTest,SandboxCommandJournalPostgresTest",
+      "owner": "BUILD_TEST_INFRASTRUCTURE_OWNER",
+      "reviewer": "LANGUAGE_TOOLCHAIN_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R12",
+      "phase": "PHASE_5",
+      "invariantId": "DEPLOYED_SCHEMA_AND_ARTIFACT_MATCH_QUALIFIED_SOURCE",
+      "authoritativeStore": "graphify-out release artifact plus digest-bound control-plane release attestation bundle",
+      "writer": "deploy workflow Graphify 0.9.13 code-only extractor and ControlPlaneReleaseAttestationService",
+      "reconciler": "NONE_READ_ONLY",
+      "fixture": "ControlPlaneReleaseAttestationServiceTest,ControlPlaneReleaseAttestationControllerTest,WorkspaceGenerationProtocolPostgresTest,capture-control-plane-release-attestation.sh,control-plane-graph-diff.test.mjs;PENDING_EXACT_CANDIDATE_REVIEW_RECEIPT_DEPLOYED_CAPTURE_AND_LIVE_MOUNT",
+      "owner": "RELEASE_OWNER",
+      "reviewer": "INDEPENDENT_QUALIFICATION_REVIEWER",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "R13",
+      "phase": "PHASE_1",
+      "invariantId": "POISON_RECORD_CANNOT_STARVE_HEALTHY_RUN",
+      "authoritativeStore": "workspace_generation_attempt,workspace_generation_reconciliation_failure",
+      "writer": "WorkspaceGenerationTerminalReconciler",
+      "reconciler": "WorkspaceGenerationTerminalReconciler",
+      "fixture": "WorkspaceGenerationTerminalReconcilerTest,WorkspaceGenerationReconciliationFailurePostgresTest,WorkspaceGenerationQualificationEvidenceControllerTest,DataRetentionQuarantineIsolationTest",
+      "owner": "STATE_MACHINE_OWNER",
+      "reviewer": "FAILURE_INJECTION_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R14",
+      "phase": "PHASE_3",
+      "invariantId": "ALL_NON_WORKER_COMMANDS_RUN_DISPOSABLY",
+      "authoritativeStore": "run_sandbox purpose,sandbox_command_execution,sandbox_command_receipt,workspace_generation_verification_receipt.command_receipt_ids",
+      "writer": "DisposableVerificationWorkspaceService,VerificationSandboxRoutingService,SandboxCommandJournalStore,AcceptedGenerationVerificationRunner,TaskAcceptanceDisposableRunner,SandboxCommandRoutingService",
+      "reconciler": "SandboxCommandRecoveryService,SandboxStartupReconciler,VerificationSandboxWorkspaceJanitor",
+      "fixture": "DisposableVerificationWorkspaceServiceTest,SandboxRunWorkspaceProvisionTest,RunSandboxLifecycleMigrationIntegrationTest,BuildVerificationCommandArchitectureTest,CliBreakingChangeRunnerVerificationTest,SandboxAuxiliaryExecutionContainmentTest,SandboxCommandRoutingServiceTest,SandboxCommandJournalPostgresTest,SandboxCommandRealContainerRecoveryPostgresTest,SandboxRecoveryTakeoverProbe,CorrectionWorkspaceTransactionTest,RunChangeEvidenceServiceTest",
+      "owner": "EXECUTION_SANDBOX_OWNER",
+      "reviewer": "SECURITY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R15",
+      "phase": "PHASE_3",
+      "invariantId": "IGNORED_RECEIPT_JSON_MATCHES_DIGEST",
+      "authoritativeStore": "workspace_generation_attempt ignored receipt",
+      "writer": "WorkspaceIgnoredArtifactGuard",
+      "reconciler": "WorkspaceGenerationLifecycle,WorkspaceGenerationRollbackService,WorkspaceGenerationRecoveryService",
+      "fixture": "WorkspaceIgnoredArtifactGuardTest#rejectsCorruptedBaselineReceiptBeforeDeletingIgnoredBytes,WorkspaceIgnoredArtifactGuardTest#acceptsJsonbEquivalentBaselineTextWithoutWeakeningDigestBinding,WorkspaceGenerationLifecycleBoundaryTest,WorkspaceGenerationRecoveryServiceTest,WorkspaceGenerationTaskTransitionPostgresTest,CorrectionWorkspaceTransactionTest",
+      "owner": "BUILD_TEST_INFRASTRUCTURE_OWNER",
+      "reviewer": "SECURITY_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R16",
+      "phase": "PHASE_4",
+      "invariantId": "JANITOR_FAILURE_CANNOT_OVERRIDE_RESTORE_PROOF",
+      "authoritativeStore": "accepted workspace generation proof plus workspace_generation_recovery_cleanup",
+      "writer": "WorkspaceGenerationRecoveryService,WorkspaceGenerationRecoveryCleanupStore",
+      "reconciler": "WorkspaceGenerationRecoveryArtifactJanitor",
+      "fixture": "WorkspaceGenerationRecoveryServiceTest#replacesExistingWrongWorkspaceWithExactAcceptedArchive,WorkspaceGenerationRecoveryArtifactJanitorTest,WorkspaceGenerationProtocolPostgresTest",
+      "owner": "STORAGE_RELIABILITY_OWNER",
+      "reviewer": "FAILURE_INJECTION_REVIEWER",
+      "status": "COMPLETE_LOCAL"
+    },
+    {
+      "id": "R17",
+      "phase": "PHASE_4",
+      "invariantId": "PUBLICATION_PUSHES_ONLY_EXACT_PREPARED_COMMIT",
+      "authoritativeStore": "workspace_publication_preparation,workspace_publication_repository_receipt,workspace_publication_repository_provision,workspace_publication_attempt",
+      "writer": "PublicationPreparationService,PublicationPreparationStore,PublicationExternalEffectStore,RepositoryProvisionDispatchService,PublicationDispatchService",
+      "reconciler": "PublicationRecoveryService",
+      "fixture": "PublicationPreparationPostgresTest,PublicationRecoveryTakeoverProbe,PublicationPreparationServiceTest,PublicationPreparationArchitectureTest,NonExecutingGitTreeWriterTest,PublicationTargetResolverTest,RepositoryProvisionDispatchServiceTest,PublicationDispatchServiceTest,PublicationRealGitPartialEffectPostgresTest,PublicationRealGitCrashProbe,PENDING_DEPLOYED_GITHUB_OR_BITBUCKET_PARTIAL_MULTI_REPO_RECONCILIATION_MATRIX",
+      "owner": "STATE_MACHINE_OWNER",
+      "reviewer": "DATABASE_CONCURRENCY_REVIEWER",
+      "status": "IN_PROGRESS"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "PHASE1_FOCUSED_TESTS_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=BuildTaskGenerationCoordinatorTest,WorkspaceGenerationConvergenceServiceTest,WorkspaceGenerationTerminalReconcilerTest,WorkspaceGenerationTaskTransitionServiceTest,TaskStatusPersistenceServiceTest test",
+      "result": "PASSED",
+      "scope": "UNIT_TERMINAL_OWNERSHIP_AND_POISON_ISOLATION"
+    },
+    {
+      "id": "PHASE1_REFERENCE_MODEL_ARCHITECTURE_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=BuildTaskGenerationCoordinatorArchitectureTest,WorkspaceGenerationProtocolReferenceModelTest test",
+      "result": "PASSED",
+      "scope": "REACHABLE_STATE_INVARIANTS_AND_STATIC_TERMINAL_WRITER_FENCE"
+    },
+    {
+      "id": "PHASE1_POSTGRES_PROTOCOL_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=WorkspaceGenerationProtocolPostgresTest,WorkspaceGenerationTaskTransitionPostgresTest test",
+      "result": "PASSED",
+      "scope": "V1_TO_V384_MIGRATION_TRIGGER_CAS_RECEIPT_AND_CRASH_REPLAY;COMPLETE_KILL_MATRIX_PENDING"
+    },
+    {
+      "id": "PHASE1_WORKSPACE_GENERATION_COHORT_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest='WorkspaceGeneration*Test,BuildTaskGenerationCoordinatorTest,BuildTaskGenerationCoordinatorArchitectureTest,TaskStatusPersistenceServiceTest,FlywayMigrationInventoryTest' test",
+      "result": "PASSED",
+      "scope": "ALL_DEFAULT_WORKSPACE_GENERATION_TESTS_INCLUDING_PREPARED_MUTATING_VERIFYING_VERIFIED_CHECKPOINTING_ROLLING_BACK_RECOVERY_FAILED_RECOVERY_FIXTURES"
+    },
+    {
+      "id": "PHASE2_PROTOCOL_PIN_UNIT_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=BuildProtocolVersionServiceTest,BuildProtocolVersionArchitectureTest,BuildContinuationAdmissionProtocolTest,BuildTaskGenerationCoordinatorTest,BuildTaskGenerationCoordinatorArchitectureTest,FlywayMigrationInventoryTest test",
+      "result": "PASSED",
+      "scope": "ONE_LIVE_FLAG_READ_AT_INITIAL_ADMISSION;EXECUTION_READS_PERSISTED_PROTOCOL;UNKNOWN_AND_MISMATCH_FAIL_CLOSED"
+    },
+    {
+      "id": "PHASE2_PROTOCOL_PIN_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=WorkspaceGenerationProtocolPostgresTest test",
+      "result": "PASSED",
+      "scope": "V1_TO_V385_MIGRATION;RUN_PROTOCOL_IMMUTABILITY;PARENT_ATTEMPT_EXACT_BINDING;PATCH_EXCLUSION;HISTORICAL_NULL_FAIL_CLOSED_IN_CANDIDATE"
+    },
+    {
+      "id": "PHASE2_EXPLICIT_AUTHORITY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=WorkspaceGenerationDispatchAuthorityTest,WorkspaceGenerationAuthorityArchitectureTest,BuildTaskGenerationCoordinatorTest,WorkerCorrectionToolFenceTest,ProviderHandoffDossierTest,SequentialExecutorSoftCompletionTest,ExecutionContextOperationAuthorityTest test",
+      "result": "PASSED",
+      "scope": "NON_SERIALIZABLE_RUN_TASK_ATTEMPT_LEASE_PHASE_CAPABILITY;DIRECT_COORDINATOR_TO_WORKER_CONTEXT_FUNCTION_HANDOFF;FRESH_PER_DISPATCH_DATABASE_AND_STATE_FENCE;NO_GENERATION_THREADLOCAL"
+    },
+    {
+      "id": "PHASE2_WORKSPACE_GENERATION_COHORT_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest='WorkspaceGeneration*Test,TaskAcceptanceVerifierTest,BuildTaskGenerationCoordinatorTest,BuildTaskGenerationCoordinatorArchitectureTest,SequentialExecutorWorkspaceGenerationTest,WorkerCorrectionToolFenceTest,ProviderHandoffDossierTest,TaskStatusPersistenceServiceTest,FlywayMigrationInventoryTest' test",
+      "result": "PASSED",
+      "scope": "FULL_DEFAULT_WORKSPACE_GENERATION_AND_PHASE_BOUND_VERIFICATION_AUTHORITY_REGRESSION_COHORT"
+    },
+    {
+      "id": "PHASE0A_SCHEMA_ATTESTATION_UNIT_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=BuildProtocolVersionServiceTest,WorkspaceGenerationQualificationEvidenceControllerTest,PublicationAdmissionServiceTest,FlywayMigrationInventoryTest test",
+      "result": "PASSED",
+      "scope": "PROTOCOL_V2_FAILS_CLOSED_WITHOUT_SCHEMA;UNKNOWN_BUILD_PUBLICATION_BLOCKED;OPERATOR_ENDPOINTS_NO_STORE;V386_HEAD_COUNT_PINNED"
+    },
+    {
+      "id": "PHASE0A_MIXED_VERSION_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=BuildProtocolMixedVersionPostgresTest test",
+      "result": "PASSED",
+      "scope": "V385_TO_V386;UNKNOWN_BACKFILL;CONFLICT_QUARANTINE;PREVIOUS_WRITER_NULL_SHAPE;NO_PROTOCOL_V2_INVENTION;IMMUTABLE_DISPOSITION;DIGEST_STABLE_INVENTORY_RECONCILIATION"
+    },
+    {
+      "id": "PHASE2_FINAL_BROAD_REGRESSION_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest='WorkspaceGeneration*Test,BuildProtocol*Test,BuildTaskGenerationCoordinatorTest,BuildTaskGenerationCoordinatorArchitectureTest,SequentialExecutorWorkspaceGenerationTest,SequentialExecutorSoftCompletionTest,WorkerCorrectionToolFenceTest,ProviderHandoffDossierTest,TaskAcceptanceVerifierTest,TaskStatusPersistenceServiceTest,PublicationAdmissionServiceTest,FlywayMigrationInventoryTest' test",
+      "result": "PASSED",
+      "scope": "FINAL_PHASE0A_PHASE1_PHASE2_DEFAULT_REGRESSION_INCLUDING_KILL_STATES_POISON_ISOLATION_AUTHORITY_PROTOCOL_PUBLICATION_AND_MIGRATION_INVENTORY"
+    },
+    {
+      "id": "PHASE2_V386_PROTOCOL_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=WorkspaceGenerationProtocolPostgresTest test",
+      "result": "PASSED",
+      "scope": "V1_TO_V386;ACTIVE_VALID_READY_INDEX_AND_TRIGGER_ATTESTATION;DISABLED_TRIGGER_FAILS_READINESS;PROTOCOL_AND_DISPOSITION_IMMUTABILITY;LIFECYCLE_TRIGGER_CONTRACT"
+    },
+    {
+      "id": "PHASE0A_V387_ADJUDICATION_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=WorkspaceGenerationHistoricalAdjudicationPostgresTest test",
+      "result": "PASSED",
+      "scope": "V1_TO_V387;MINIMIZED_CAUSAL_BEFORE_STATE;BYTE_BOUND_DRY_RUN_APPLY;APPEND_ONLY_RECEIPTS;FORGED_AND_DUPLICATE_APPLY_REJECTED;SOURCE_DRIFT_REJECTED;CLOSE_RETAINS_HOLD;EXPLICIT_RELEASE_PERMITS_DELETE;RECEIPTS_SURVIVE_SOURCE_DELETION"
+    },
+    {
+      "id": "PHASE0A_V387_RETENTION_ISOLATION_UNIT_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest='DataRetentionQuarantineIsolationTest,WorkspaceGenerationQualificationEvidenceControllerTest,FlywayMigrationInventoryTest' test",
+      "result": "PASSED",
+      "scope": "HELD_HISTORY_CANNOT_STARVE_UNRELATED_RETENTION_DELETION;AUTHENTICATED_OPERATOR_DRY_RUN;NO_STORE_RESPONSE;V387_HEAD_AND_373_FILE_INVENTORY"
+    },
+    {
+      "id": "PHASE0A_PHASE1_PHASE2_V387_FINAL_DEFAULT_REGRESSION_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest='WorkspaceGeneration*Test,BuildProtocol*Test,BuildTaskGenerationCoordinatorTest,BuildTaskGenerationCoordinatorArchitectureTest,SequentialExecutorWorkspaceGenerationTest,SequentialExecutorSoftCompletionTest,WorkerCorrectionToolFenceTest,ProviderHandoffDossierTest,TaskAcceptanceVerifierTest,TaskStatusPersistenceServiceTest,PublicationAdmissionServiceTest,DataRetentionQuarantineIsolationTest,FlywayMigrationInventoryTest' test",
+      "result": "PASSED",
+      "scope": "FINAL_DEFAULT_REGRESSION_THROUGH_V387_INCLUDING_TERMINAL_CONVERGENCE;POISON_ISOLATION;PROTOCOL_PIN;EXPLICIT_AUTHORITY;PUBLICATION_QUARANTINE;HISTORICAL_ADJUDICATION;RETENTION_ISOLATION"
+    },
+    {
+      "id": "PHASE0A_PHASE1_PHASE2_V387_FINAL_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest='WorkspaceGenerationProtocolPostgresTest,BuildProtocolMixedVersionPostgresTest,WorkspaceGenerationHistoricalAdjudicationPostgresTest' test",
+      "result": "PASSED",
+      "scope": "V1_TO_V387;MIXED_WRITER_COMPATIBILITY;SCHEMA_ARTIFACT_ATTESTATION;LIFECYCLE_FENCES;APPEND_ONLY_ADJUDICATION;EXPLICIT_RETENTION_RELEASE;STALE_RELEASE_REJECTED_AT_DELETE_TIME"
+    },
+    {
+      "id": "PHASE3_V389_COMMAND_JOURNAL_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=SandboxCommandJournalPostgresTest test",
+      "result": "PASSED",
+      "scope": "V1_TO_V389;ADMIT_DISPATCH_SETTLE;IMMUTABLE_SUCCESS_RECEIPT;STALE_DISPATCH_TO_INDETERMINATE;HIGH_LEVEL_V2_RECEIPT_BINDING;PREVIOUS_WRITER_V1_COMPATIBILITY;COMMAND_PROTOCOL_IMMUTABILITY"
+    },
+    {
+      "id": "PHASE3_V389_COMMAND_JOURNAL_FOCUSED_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=SandboxCommandJournalPostgresTest,WorkspaceGenerationProtocolPostgresTest,FlywayMigrationInventoryTest,BuildVerificationCommandArchitectureTest,SandboxCommandRoutingServiceTest,DisposableVerificationWorkspaceServiceTest,BuildContinuationAdmissionProtocolTest test",
+      "result": "PASSED",
+      "scope": "JOURNAL_BEFORE_EXTERNAL_DISPATCH;EXACT_SANDBOX_LEASE_RUNTIME_EPOCH_FENCE;PHYSICAL_RECEIPT_PROPAGATION;V389_SCHEMA_ATTESTATION;NEW_ATTEMPT_PROTOCOL_V2_PIN"
+    },
+    {
+      "id": "PHASE3_V389_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q verify",
+      "result": "PASSED_7175_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_LOCAL_BACKEND_REGRESSION_THROUGH_V389;NOT_DEPLOYED_RUNTIME_OR_RESTART_TAKEOVER_PROOF"
+    },
+    {
+      "id": "PHASE4_V390_PUBLICATION_PREPARATION_FOCUSED_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=PublicationPreparationArchitectureTest,PublicationPreparationServiceTest,NonExecutingGitTreeWriterTest,RepositoryProvisionDispatchServiceTest,PublicationDispatchServiceTest,PublicationAdmissionServiceTest,PublicationTargetResolverTest,FlywayMigrationInventoryTest test",
+      "result": "PASSED",
+      "scope": "NON_EXECUTING_EXACT_GIT_OBJECT_PREPARATION;ACCEPTED_GENERATION_AND_VALIDATION_BINDING;DURABLE_REPOSITORY_PROVISION_AND_PUSH_DISPATCH;PREPARED_REPLAY_FAIL_CLOSED"
+    },
+    {
+      "id": "PHASE4_V390_PUBLICATION_PREPARATION_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dtest=PublicationPreparationPostgresTest,WorkspaceGenerationProtocolPostgresTest test",
+      "result": "PASSED",
+      "scope": "CLEAN_V1_TO_V390_376_MIGRATIONS;43_ARTIFACT_SCHEMA_ATTESTATION;IMMUTABLE_PREPARATION_REPOSITORY_PROVISION_AND_PUSH_RECEIPTS;STALE_EXTERNAL_EFFECTS_ONLY_INDETERMINATE"
+    },
+    {
+      "id": "PHASE4_V390_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q verify",
+      "result": "PASSED_7177_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_LOCAL_BACKEND_REGRESSION_THROUGH_V390;PUBLICATION_ADMISSION_596_LINES;NOT_DEPLOYED_RUNTIME_OR_REMOTE_RESTART_PROOF"
+    },
+    {
+      "id": "PHASE0A_V383_V390_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar <V383_JAR> --candidate-jar <V390_JAR> --output-dir output/build-qualification/mixed-binary-schema-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE",
+      "scope": "PREVIOUS_ON_V383;CANDIDATE_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V390;PREVIOUS_BOOTS_ON_EXPANDED_V390_WITH_ZERO_DARK_START_CONTROL_ROWS;CANDIDATE_ON_FRESH_V390"
+    },
+    {
+      "id": "PHASE3_V391_REAL_CONTAINER_CROSS_JVM_RECOVERY_2026_08_12_1",
+      "command": "scripts/build-qualification/real-container-command-recovery.sh output/build-qualification/real-container-command-recovery-cross-jvm-v391-bound-run{1,2}",
+      "result": "PASSED_5_OF_5_CASES_TWICE_SHARED_BUILD_FALSE",
+      "scope": "REAL_POSTGRESQL_16;REAL_STRICT_DOCKER_CONTAINER_IMAGE_SHA256_E57D46CC326780E9EBE2A9BF74C05F841908DA213AEDFCD11B4F4BE11D54AC76;KILL_BEFORE_DISPATCH_TO_UNAVAILABLE;KILL_LIVE_DOCKER_EXEC_TO_INDETERMINATE;PROCESS_EXIT_BEFORE_SETTLEMENT_LATE_SUCCESS_FENCED;REPLACEMENT_JVM_TEARDOWN;REPLACEMENT_JVM_JANITOR_RECLAIM;V391_UNSETTLED_RECOVERY_INDEX;TAKEOVER_PROBE_SHA256_4C6B53D9B1CFDC2A324F45730231ACB61072119623825D356D1A575283621D71;TWO_INDEPENDENT_RUNS"
+    },
+    {
+      "id": "PHASE3_PHASE4_V391_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q verify",
+      "result": "PASSED_7173_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_DEFAULT_BACKEND_REGRESSION_THROUGH_V391;JAR_SHA256_D0E62E598DF1CDA7B5C331D57EC4F36ADDFD42E004D84AE1310CA65B61A827B3;INTEGRATION_TAGGED_REAL_CONTAINER_AND_POSTGRESQL_COHORTS_RECORDED_SEPARATELY"
+    },
+    {
+      "id": "PHASE0A_V383_V391_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar /private/tmp/es-mixed-binary.boR0vi/previous.jar --candidate-jar target/executespec-2.0.0.jar --output-dir output/build-qualification/mixed-binary-schema-v383-v391-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE",
+      "scope": "PREVIOUS_SHA256_0B4460C06BCD22E1DDAF8EF897943CF9F189E63739E53AA6E3D6902416E727CB_ON_V383;CANDIDATE_SHA256_D0E62E598DF1CDA7B5C331D57EC4F36ADDFD42E004D84AE1310CA65B61A827B3_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V391;PREVIOUS_BOOTS_ON_EXPANDED_V391_WITH_ZERO_DARK_START_GENERATION_COMMAND_PUBLICATION_ROWS;CANDIDATE_ON_FRESH_V391"
+    },
+    {
+      "id": "PHASE4_V392_PUBLICATION_CROSS_JVM_RECOVERY_2026_08_12_1",
+      "command": "scripts/build-qualification/publication-recovery-matrix.sh output/build-qualification/publication-recovery-v392-run{1,2}",
+      "result": "PASSED_6_OF_6_CASES_TWICE_SHARED_BUILD_FALSE",
+      "scope": "REAL_POSTGRESQL_16;SEPARATE_RECOVERY_JVM;PRE_DISPATCH_PROVISION_FAILED_AND_NUMBERED_RETRY;POST_DISPATCH_PROVISION_INDETERMINATE;PRE_DISPATCH_PUBLICATION_FAILED_AND_NUMBERED_RETRY;MULTI_REPOSITORY_PARTIAL_EFFECT_PRESERVED;EXPIRED_OWNER_LATE_SUCCESS_FENCED;INDETERMINATE_NO_BLIND_RETRY;V392_SHA256_32B857B77BC7F2B0F771F2167A7F2DD94D5A744D8A56607DC95CCB921CB2BBBA;REMOTE_EFFECT_MARKER_IS_LOCAL_NOT_REAL_SCM"
+    },
+    {
+      "id": "PHASE3_V392_REAL_CONTAINER_CROSS_JVM_RECOVERY_2026_08_12_1",
+      "command": "scripts/build-qualification/real-container-command-recovery.sh output/build-qualification/real-container-command-recovery-cross-jvm-v392-bound-run{1,2}",
+      "result": "PASSED_5_OF_5_CASES_TWICE_SHARED_BUILD_FALSE",
+      "scope": "REAL_POSTGRESQL_16;REAL_STRICT_DOCKER_CONTAINER_IMAGE_SHA256_E57D46CC326780E9EBE2A9BF74C05F841908DA213AEDFCD11B4F4BE11D54AC76;V391_COMMAND_RECOVERY_SHA256_3E2061E7F7BCFCB3147B46041916CC866728758090725D45D46C454CCCE9A00E;V392_PUBLICATION_RECOVERY_SHA256_32B857B77BC7F2B0F771F2167A7F2DD94D5A744D8A56607DC95CCB921CB2BBBA;TAKEOVER_PROBE_SHA256_4C6B53D9B1CFDC2A324F45730231ACB61072119623825D356D1A575283621D71;TWO_INDEPENDENT_RUNS"
+    },
+    {
+      "id": "PHASE3_PHASE4_V392_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean verify",
+      "result": "PASSED_7173_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_DEFAULT_BACKEND_REGRESSION_THROUGH_V392;PUBLICATION_PREPARATION_STORE_436_LINES;PUBLICATION_EXTERNAL_EFFECT_STORE_308_LINES;PUBLICATION_ADMISSION_SERVICE_594_LINES;JAR_SHA256_9FEC66C3E58FF178F06EDE57445819DAC075E61780D1930F3DB555B5B3ADC390;INTEGRATION_TAGGED_REAL_CONTAINER_AND_POSTGRESQL_COHORTS_RECORDED_SEPARATELY"
+    },
+    {
+      "id": "PHASE0A_V383_V392_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar /private/tmp/es-mixed-binary.boR0vi/previous.jar --candidate-jar target/executespec-2.0.0.jar --output-dir output/build-qualification/mixed-binary-schema-v383-v392-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE",
+      "scope": "PREVIOUS_SHA256_0B4460C06BCD22E1DDAF8EF897943CF9F189E63739E53AA6E3D6902416E727CB_ON_V383;CANDIDATE_SHA256_9FEC66C3E58FF178F06EDE57445819DAC075E61780D1930F3DB555B5B3ADC390_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V392;PREVIOUS_BOOTS_ON_EXPANDED_V392_WITH_ZERO_DARK_START_GENERATION_COMMAND_PUBLICATION_ROWS;CANDIDATE_ON_FRESH_V392"
+    },
+    {
+      "id": "PHASE3_R15_R16_V393_FOCUSED_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=WorkspaceIgnoredArtifactGuardTest,WorkspaceGenerationLifecycleBoundaryTest,WorkspaceGenerationRecoveryServiceTest,WorkspaceGenerationRecoveryArtifactJanitorTest,CorrectionWorkspaceTransactionTest,FlywayMigrationInventoryTest,GodClassLineCeilingTest,WorkspaceGenerationProtocolPostgresTest,PublicationPreparationPostgresTest,SandboxCommandJournalPostgresTest test",
+      "result": "PASSED",
+      "scope": "IGNORED_BASELINE_JSON_SHA256_RECOMPUTED_BEFORE_DELETE;CORRUPTION_FAILS_BEFORE_SIDE_EFFECT;EXACT_RESTORE_PROOF_INDEPENDENT_OF_CLEANUP;DURABLE_CLEANUP_RETRY_CLAIM;STRICT_RUN_PATH_OWNERSHIP;V393_SCHEMA_ATTESTATION_47_ARTIFACTS"
+    },
+    {
+      "id": "PHASE3_PHASE4_V393_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean verify",
+      "result": "PASSED_7177_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_DEFAULT_BACKEND_REGRESSION_THROUGH_V393;JAR_SHA256_12A5D2FA619678027E32AABC5D4D5A42B27E14CB94B9647C57F8F352B399BD08;MIGRATION_SHA256_4C3C66DF5C92B06BF73A52D61E22DC7D1CA94A4312A12265DCF85DA6C9BC5B40"
+    },
+    {
+      "id": "PHASE0A_V383_V393_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar /private/tmp/es-mixed-binary.boR0vi/previous.jar --candidate-jar target/executespec-2.0.0.jar --output-dir output/build-qualification/mixed-binary-schema-v383-v393-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE",
+      "scope": "PREVIOUS_SHA256_0B4460C06BCD22E1DDAF8EF897943CF9F189E63739E53AA6E3D6902416E727CB_ON_V383;CANDIDATE_SHA256_12A5D2FA619678027E32AABC5D4D5A42B27E14CB94B9647C57F8F352B399BD08_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V393;PREVIOUS_BOOTS_ON_EXPANDED_V393_WITH_ZERO_DARK_START_GENERATION_COMMAND_PUBLICATION_ROWS;CANDIDATE_ON_FRESH_V393"
+    },
+    {
+      "id": "PHASE4_R7_V394_EXACT_CHECKPOINT_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -DforkCount=1 -DreuseForks=true -Dtest='BuildProtocolMixedVersionPostgresTest,WorkspaceGenerationHistoricalAdjudicationPostgresTest,WorkspaceGenerationIndependentTransactionPostgresTest,WorkspaceGenerationProtocolPostgresTest,WorkspaceGenerationRollbackAuthorityPostgresTest,WorkspaceGenerationTaskTransitionPostgresTest,PublicationPreparationPostgresTest,SandboxCommandJournalPostgresTest' test",
+      "result": "PASSED_8_CLASSES_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "V394_380_MIGRATIONS;EXACT_IMMUTABLE_LOCAL_AND_GCS_STORAGE_IDENTITY;LEGAL_V383_ADMISSION_SEQUENCE;REAL_LOCAL_ARCHIVE_RESTORE_AFTER_LIVE_WORKSPACE_LOSS;JSONB_SEMANTIC_DIGEST_BINDING;PROCESS_SCOPED_POSTGRES_FIXTURE"
+    },
+    {
+      "id": "PHASE3_PHASE4_V394_PHYSICAL_RECOVERY_2026_08_12_1",
+      "command": "scripts/build-qualification/publication-recovery-matrix.sh output/build-qualification/publication-recovery-v394-run{1,2} && scripts/build-qualification/real-container-command-recovery.sh output/build-qualification/real-container-command-recovery-cross-jvm-v394-run{1,2}",
+      "result": "PUBLICATION_6_OF_6_TWICE_AND_COMMAND_5_OF_5_TWICE_SHARED_BUILD_FALSE",
+      "scope": "V394_CHECKPOINT_MIGRATION_SHA256_CE425B6BAB6BAD5CA769F01870BFAD8BF4C7D77CE7517AACE09B5B8F962E9E62;REAL_POSTGRESQL_16;STRICT_CONTAINER_SHA256_E57D46CC326780E9EBE2A9BF74C05F841908DA213AEDFCD11B4F4BE11D54AC76;CROSS_JVM_RECOVERY"
+    },
+    {
+      "id": "PHASE3_PHASE4_V394_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean verify",
+      "result": "PASSED_7188_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_DEFAULT_BACKEND_REGRESSION_THROUGH_V394;WORKSPACE_GENERATION_LIFECYCLE_566_LINES;JAR_SHA256_96131FF3A6C20912F442564AA3D99CBFD586B3C34F2C730630F9167B7550FAF1"
+    },
+    {
+      "id": "PHASE0A_V383_V394_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar /private/tmp/es-mixed-binary.boR0vi/previous.jar --candidate-jar target/executespec-2.0.0.jar --output-dir output/build-qualification/mixed-binary-schema-v383-v394-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE",
+      "scope": "PREVIOUS_SHA256_0B4460C06BCD22E1DDAF8EF897943CF9F189E63739E53AA6E3D6902416E727CB_ON_V383;CANDIDATE_SHA256_96131FF3A6C20912F442564AA3D99CBFD586B3C34F2C730630F9167B7550FAF1_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V394;PREVIOUS_BOOTS_ON_EXPANDED_V394_WITH_ZERO_DARK_START_GENERATION_COMMAND_PUBLICATION_ROWS;CANDIDATE_ON_FRESH_V394"
+    },
+    {
+      "id": "PHASE3_R11_V395_TYPED_VERIFICATION_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dtest='BuildProtocolMixedVersionPostgresTest,WorkspaceGenerationHistoricalAdjudicationPostgresTest,WorkspaceGenerationIndependentTransactionPostgresTest,WorkspaceGenerationProtocolPostgresTest,WorkspaceGenerationRollbackAuthorityPostgresTest,WorkspaceGenerationTaskTransitionPostgresTest,PublicationPreparationPostgresTest,SandboxCommandJournalPostgresTest' test",
+      "result": "PASSED_8_CLASSES_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "V395_381_MIGRATIONS;SHARED_KERNEL_V2_REQUIRES_TYPED_FAILURE_CATEGORY_ENVIRONMENT_CODE_AND_EXECUTION_BOUNDARY;ENVIRONMENT_FAILURE_NEVER_PROJECTED_AS_PRODUCT_FAILURE;PASSING_RECEIPTS_REQUIRE_PHYSICAL_BOUNDARY;49_SCHEMA_ARTIFACTS"
+    },
+    {
+      "id": "PHASE3_PHASE4_V395_PHYSICAL_RECOVERY_2026_08_12_1",
+      "command": "scripts/build-qualification/publication-recovery-matrix.sh output/build-qualification/publication-recovery-v395-run{1,2} && scripts/build-qualification/real-container-command-recovery.sh output/build-qualification/real-container-command-recovery-cross-jvm-v395-run{1,2}",
+      "result": "PUBLICATION_6_OF_6_TWICE_AND_COMMAND_5_OF_5_TWICE_SHARED_BUILD_FALSE",
+      "scope": "V395_TYPED_FAILURE_MIGRATION_SHA256_DC20C528CE8876B88B6228C02E3D5BABD3E035E2FE677D8A274EF2D573B76722;REAL_POSTGRESQL_16;STRICT_CONTAINER_SHA256_E57D46CC326780E9EBE2A9BF74C05F841908DA213AEDFCD11B4F4BE11D54AC76;CROSS_JVM_RECOVERY"
+    },
+    {
+      "id": "PHASE3_PHASE4_V395_FULL_BACKEND_VERIFY_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q clean verify",
+      "result": "PASSED_7189_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "FULL_DEFAULT_BACKEND_REGRESSION_THROUGH_V395;JAR_SHA256_5E734A491342F7A285DBB1BAEB0883A6CE859FE098603025FD4735F4DAA3BAF4"
+    },
+    {
+      "id": "PHASE0A_V383_V395_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar /private/tmp/es-mixed-binary.boR0vi/previous.jar --candidate-jar target/executespec-2.0.0.jar --output-dir output/build-qualification/mixed-binary-schema-v383-v395-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE",
+      "scope": "PREVIOUS_SHA256_0B4460C06BCD22E1DDAF8EF897943CF9F189E63739E53AA6E3D6902416E727CB_ON_V383;CANDIDATE_SHA256_5E734A491342F7A285DBB1BAEB0883A6CE859FE098603025FD4735F4DAA3BAF4_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V395;PREVIOUS_BOOTS_ON_EXPANDED_V395_WITH_ZERO_DARK_START_GENERATION_COMMAND_PUBLICATION_ROWS;CANDIDATE_ON_FRESH_V395"
+    },
+    {
+      "id": "PHASE3_R6_V396_IGNORED_ENVIRONMENT_UNIT_MATRIX_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=WorkspaceGenerationQualificationEvidenceServiceTest,WorkspaceGenerationQualificationEvidenceControllerTest,FlywayMigrationInventoryTest,WorkspaceIgnoredArtifactGuardTest,BuildEnvironmentPlanResolverTest,BuildEnvironmentMaterializerTest,BuildEnvironmentSequentialTaskTest,TaskAcceptanceVerifierTest,WorkspaceGenerationLifecycleBoundaryTest test",
+      "result": "PASSED_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "NODE_PYTHON_MAVEN_GRADLE_GO_RUST_TWO_TASK_REMATERIALIZATION;MIXED_ROOTS;PINNED_IMAGE;DENY_ALL_OFFLINE_PLAN;PRODUCT_GENERATION_UNCHANGED;IGNORED_PRODUCT_REJECTED;TRACKED_SIBLING_AND_NESTED_REPO_PRESERVED;LIVE_AND_BROKEN_SYMLINK_SAFE;OPERATOR_RECEIPT_PROJECTION"
+    },
+    {
+      "id": "PHASE3_R6_V396_ENVIRONMENT_RECEIPT_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=BuildEnvironmentReceiptPostgresTest test",
+      "result": "PASSED_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "V396_382_MIGRATIONS;APPEND_ONLY_UPDATE_DELETE_FENCE;DUPLICATE_PHASE_FENCE;INITIAL_PROBE_AND_WORKER_GATE_VERIFYING;FINAL_ENVIRONMENT_GATE_VERIFIED;FULL_CLEANUP_INVENTORY_RETAINED;SHARED_BUILD_FALSE"
+    },
+    {
+      "id": "PHASE4_R4_V397_FILESYSTEM_SAGA_FOCUSED_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=LocalGenerationCheckpointStoreTest,WorkspaceGenerationArchiveServiceTest,WorkspaceGenerationRecoveryServiceTest,WorkspaceGenerationArchiveJanitorTest,WorkspaceGenerationQualificationEvidenceServiceTest,WorkspaceGenerationQualificationEvidenceControllerTest,BuildTaskGenerationCoordinatorTest test",
+      "result": "PASSED_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "CANONICAL_INTENT_IDENTITY;DETERMINISTIC_ARCHIVE_BYTES;RESTART_IDEMPOTENT_EXACT_LOCAL_DELETE;PER_REPOSITORY_ROLLBACK_REPLAY;ACCEPTED_REPLACEMENT_REPLAY;GUARDED_TERMINAL_ORPHAN_CLEANUP"
+    },
+    {
+      "id": "PHASE4_R4_V397_FILESYSTEM_SAGA_HARD_KILL_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Dtest=WorkspaceGenerationStepPostgresTest,WorkspaceGenerationFilesystemKillPostgresTest,WorkspaceGenerationProtocolPostgresTest test",
+      "result": "PASSED_3_CLASSES_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "V397_383_MIGRATIONS;57_SCHEMA_ARTIFACTS;12_REAL_SUBPROCESS_KILL_WINDOWS;TWO_REPOSITORY_ROLLBACK_AFTER_EACH_EXTERNAL_WRITE;ACCEPTED_REPLACEMENT_AFTER_EACH_MOVE;PREDECESSOR_AND_CANDIDATE_UPLOAD_BEFORE_DATABASE_RECEIPT;EXACT_PREDECESSOR_OR_ACCEPTED_GENERATION_RESTORED;UNRESOLVED_OR_ACCEPTED_ARCHIVE_NEVER_DELETED"
+    },
+    {
+      "id": "PHASE0A_V383_V397_MIXED_BINARY_SCHEMA_MATRIX_2026_08_12_1",
+      "command": "scripts/build-qualification/mixed-binary-schema-matrix.sh --previous-jar /private/tmp/es-mixed-binary.boR0vi/previous.jar --candidate-jar target/executespec-2.0.0.jar --output-dir output/build-qualification/mixed-binary-schema-v383-v397-2026-08-12",
+      "result": "PASSED_5_OF_5_EXPECTED_OUTCOMES_SHARED_BUILD_FALSE_VALID_JSON",
+      "scope": "PREVIOUS_SHA256_0B4460C06BCD22E1DDAF8EF897943CF9F189E63739E53AA6E3D6902416E727CB_ON_V383;CANDIDATE_SHA256_89D7E9BC0F2557B9D69E0AE8676317BF98689B8C008BD61F4D0ED025D2BC6404_FAILS_CLOSED_ON_V383_WITH_MIGRATIONS_DISABLED;CANDIDATE_MIGRATES_V383_TO_V397;PREVIOUS_BOOTS_ON_EXPANDED_V397_WITH_ZERO_DARK_START_GENERATION_COMMAND_PUBLICATION_ENVIRONMENT_FILESYSTEM_STEP_OR_CLEANUP_ROWS;CANDIDATE_ON_FRESH_V397;MIGRATION_SHA256_74F21680772C56DD67F30C83F7F641365EDB9BBF8D5D6A33EE2E08561B634091"
+    },
+    {
+      "id": "PHASE2_R5_V397_CONCURRENT_ADMISSION_POSTGRES_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q spotless:apply -Dtest=WorkspaceGenerationAdmissionConcurrencyPostgresTest,WorkspaceGenerationProtocolPostgresTest test",
+      "result": "PASSED_2_CLASSES_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "TWO_INDEPENDENT_POSTGRESQL_CONNECTIONS_RELEASED_CONCURRENTLY;DIFFERENT_TASKS_SAME_RUN;EXACTLY_ONE_COMMIT;LOSER_SQLSTATE_23505_NAMES_PARTIAL_UNIQUE_INDEX;ONE_UNRESOLVED_ROW;V397_57_ARTIFACT_ATTESTATION;DISABLED_TRIGGER_FAILS_ATTESTATION"
+    },
+    {
+      "id": "PHASE1_R13_V398_POISON_RECONCILIATION_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q spotless:apply -Dtest=WorkspaceGenerationTerminalReconcilerTest,WorkspaceGenerationReconciliationFailurePostgresTest,WorkspaceGenerationQualificationEvidenceControllerTest,WorkspaceGenerationProtocolPostgresTest,FlywayMigrationInventoryTest test",
+      "result": "PASSED_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "POISON_FIRST_MIDDLE_LAST;HEALTHY_IDENTITIES_CONVERGE_SAME_SCAN;DURABLE_SAFE_FAILURE_COUNT;OLDEST_PENDING_AGE;THRESHOLD_3_DEAD_LETTER;SUCCESS_RESOLUTION;SUPER_ADMIN_NO_STORE_EVIDENCE;DIAGNOSTIC_STORE_FAILURE_NON_AUTHORITATIVE;RUN_AND_ATTEMPT_RETENTION_CASCADE;V398_384_MIGRATIONS_59_ATTESTED_ARTIFACTS"
+    },
+    {
+      "id": "PHASE1_R1_R8_V399_TERMINAL_OWNERSHIP_2026_08_12_1",
+      "command": "JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -Pintegration -Dgroups=integration -Dtest=WorkspaceGenerationProtocolPostgresTest,WorkspaceGenerationTaskTransitionPostgresTest,WorkspaceGenerationTerminalKillPostgresTest,WorkspaceGenerationAdmissionConcurrencyPostgresTest test",
+      "result": "PASSED_4_CLASSES_11_TESTS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "V399_385_MIGRATIONS_62_ATTESTED_ARTIFACTS;DURABLE_TASK_AND_OPERATION_INTENTS_COMMIT_WITH_TERMINAL_GENERATION;16_REAL_SUBPROCESS_DEATHS_ACROSS_8_TERMINAL_BOUNDARIES;EACH_BOUNDARY_KILLED_TWICE;TWO_REPLACEMENT_JVM_REPLAYS_PER_CASE;TRANSACTIONAL_ATTEMPT_FRONTIER_ROLLBACK;NO_PREMATURE_RUN_COMPLETE;ZERO_TERMINAL_CONTRADICTIONS;EXACT_AUTHORITY_RELEASE;NEWER_OR_NON_GENERATION_AUTHORITY_PRESERVED;REQUEST_COORDINATOR_DIRECT_TERMINAL_WRITES_FORBIDDEN;SHARED_BUILD_FALSE"
+    },
+    {
+      "id": "PHASE4_R17_REAL_LOCAL_GIT_PARTIAL_EFFECT_2026_08_12_1",
+      "command": "scripts/build-qualification/real-git-publication-recovery.sh output/build-qualification/real-git-publication-v399-2026-08-12",
+      "result": "PASSED_2_REPETITIONS_2_FORCED_PUBLISHER_DEATHS_ZERO_FAILURES_ERRORS_SKIPS",
+      "scope": "LOCAL_BARE_GIT_NO_PROVIDER_CREDENTIAL;TWO_REAL_GIT_REMOTES;REMOTE_REF_EQUALS_EXACT_PREPARED_COMMIT_NOT_UNBOUND_COMMIT;SECOND_REMOTE_EFFECT_PRECEDES_FORCED_JVM_DEATH;REPLACEMENT_JVM_SETTLES_DISPATCHED_TO_INDETERMINATE;BLIND_REPLAY_BLOCKED_WITHOUT_SECOND_REMOTE_EFFECT;FIRST_REPOSITORY_REMAINS_PUBLISHED;V399_385_MIGRATIONS;SHARED_BUILD_FALSE;DEPLOYED_GITHUB_OR_BITBUCKET_PROVIDER_MATRIX_REMAINS_OPEN"
+    },
+    {
+      "id": "PHASE5_R12_LOCAL_SQL_HCL_GRAPH_PROVENANCE_2026_08_12_1",
+      "command": "graphify update . --no-cluster",
+      "result": "PASSED_46029_NODES_165731_EDGES_SQL_AND_HCL_INDEXED",
+      "scope": "GRAPHIFYY_0_9_13;TREE_SITTER_0_25_2;TREE_SITTER_SQL_0_3_11;TREE_SITTER_HCL_1_2_0;386_SQL_FILES_943_SQL_NODES;35_HCL_FILES_253_HCL_NODES;GRAPH_SHA256_29C9E7CBC8B58927139F6AB67AB9538549F0473D0BE9FBFE6DB9D814DCA33437;MANIFEST_SHA256_F2A821579D7562646875385BF5832869DE2241B39AE2AFCE7B50E20439350205;LOCAL_DIRTY_REMEDIATION_CANDIDATE_ONLY;DEPLOYED_APPLICATION_IMAGE_COMMIT_FLYWAY_CHECKSUM_PG_DEFINITION_AND_FEATURE_PROTOCOL_ATTESTATION_REMAIN_OPEN"
+    },
+    {
+      "id": "PHASE5_R12_RELEASE_ATTESTATION_CONTRACT_2026_08_12_1",
+      "command": "mvn focused unit plus PostgreSQL protocol/export test; bash syntax; workflow YAML parse; spotless compile",
+      "result": "PASSED_LOCAL_IMPLEMENTATION_SHARED_BUILD_FALSE",
+      "scope": "SUPER_ADMIN_NO_STORE;REPEATABLE_READ;SOURCE_AND_JAR_IDENTITY;385_APPLIED_FLYWAY_ROWS_WITH_CHECKSUMS;62_FULL_ACTIVE_POSTGRESQL_DEFINITIONS_WITH_INDEPENDENT_DIGEST_PARITY;PERSISTED_VS_PROCESS_FLAG_PARITY;BUILD_AND_LLM_PROTOCOL_SNAPSHOT;DIGEST_PINNED_SANDBOX_CONFIG_GATE;GRAPH_SHA_AND_SQL_HCL_PARSER_PROVENANCE;STABLE_BUNDLE_DIGEST;DEPLOY_WORKFLOW_RETAINS_EXACT_CODE_ONLY_GRAPH_AND_STAMPS_RUNNING_JVM;DEPLOYED_CAPTURE_LIVE_MOUNT_AND_GRAPH_DIFF_REVIEW_REMAIN_OPEN"
+    },
+    {
+      "id": "PHASE5_R12_CONTROL_PLANE_GRAPH_DIFF_GATE_2026_08_12_1",
+      "command": "node --test scripts/build-qualification/control-plane-graph-diff.test.mjs plus same-graph CLI smoke and deploy workflow YAML parse",
+      "result": "PASSED_4_TESTS_AND_ZERO_DIFF_CLI",
+      "scope": "CONTROL_PLANE_NODE_AND_EDGE_ADDITION_REMOVAL;SQL_TRIGGER_REMOVAL;UNRELATED_FRONTEND_EXCLUDED;SEMANTIC_AND_RAW_GRAPH_DIGESTS;EXACT_BASE_CANDIDATE_DIFF_REVIEW_IDENTITY;INDEPENDENT_REVIEWER_TIMESTAMP_RATIONALE_AND_IMPACTED_AREA_COVERAGE;DEPLOYED_SOURCE_SHA_BASE_GRAPH;FAILURE_TEMPLATE_RETAINED_BEFORE_DEPLOY;EXACT_CANDIDATE_REVIEW_RECEIPT_REMAINS_PENDING"
+    }
+  ]
+}
