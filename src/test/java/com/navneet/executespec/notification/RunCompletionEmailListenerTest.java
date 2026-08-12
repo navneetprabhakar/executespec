@@ -19,8 +19,11 @@ import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.notification.pref.NotificationPrefService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeProjectionService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttemptRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationVerificationReceiptRepository;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -149,7 +152,8 @@ class RunCompletionEmailListenerTest {
             "user-1", ActivityEventType.RUN_FAILED, NotificationPrefService.Channel.EMAIL))
         .thenReturn(true);
     RunCompletionEmailListener listener =
-        new RunCompletionEmailListener(runRepo, userRepo, reportRepo, mailService, prefService);
+        new RunCompletionEmailListener(
+            runRepo, userRepo, reportRepo, mailService, prefService, outcomeProjection());
 
     listener.onRunCompleted(new PipelineEvent.RunCompleted(runId));
 
@@ -201,7 +205,8 @@ class RunCompletionEmailListenerTest {
             "user-1", ActivityEventType.RUN_COMPLETED, NotificationPrefService.Channel.EMAIL))
         .thenReturn(true);
     RunCompletionEmailListener listener =
-        new RunCompletionEmailListener(runRepo, userRepo, reportRepo, mailService, prefService);
+        new RunCompletionEmailListener(
+            runRepo, userRepo, reportRepo, mailService, prefService, outcomeProjection());
 
     listener.onRunFailed(new PipelineEvent.RunFailed(runId, "cancelled by user"));
 
@@ -225,5 +230,11 @@ class RunCompletionEmailListenerTest {
             isNull(),
             anyString());
     assertThat(outcome.getValue().category()).isEqualTo(RunTerminalOutcome.Category.USER_STOPPED);
+  }
+
+  private static RunTerminalOutcomeProjectionService outcomeProjection() {
+    return new RunTerminalOutcomeProjectionService(
+        mock(WorkspaceGenerationAttemptRepository.class),
+        mock(WorkspaceGenerationVerificationReceiptRepository.class));
   }
 }

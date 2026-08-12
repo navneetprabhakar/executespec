@@ -13,8 +13,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.harness.event.PipelineEvent;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeProjectionService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttemptRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationVerificationReceiptRepository;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,7 +40,11 @@ class RunActivityFeedListenerTest {
     ActivityEventEmitter emitter = mock(ActivityEventEmitter.class);
     when(runRepo.findById(runId)).thenReturn(Optional.of(run));
 
-    new RunActivityFeedListener(runRepo, emitter)
+    RunTerminalOutcomeProjectionService outcomeProjection =
+        new RunTerminalOutcomeProjectionService(
+            mock(WorkspaceGenerationAttemptRepository.class),
+            mock(WorkspaceGenerationVerificationReceiptRepository.class));
+    new RunActivityFeedListener(runRepo, emitter, outcomeProjection)
         .onRunFailed(new PipelineEvent.RunFailed(runId, "provider response api_key=event-secret"));
 
     ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);

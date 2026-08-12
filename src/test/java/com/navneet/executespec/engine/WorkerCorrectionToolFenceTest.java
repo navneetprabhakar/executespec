@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.junit.jupiter.api.Test;
 
@@ -64,43 +66,40 @@ class WorkerCorrectionToolFenceTest {
   }
 
   @Test
-  void propagatesAndFencesExactBuildGenerationLease() throws Exception {
+  void explicitBuildCapabilityFencesParallelDispatchWithoutThreadLocalPropagation()
+      throws Exception {
     RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
     when(lease.runId()).thenReturn("run-build");
-    AtomicReference<RunWorkspaceAuthorityService.Lease> observed = new AtomicReference<>();
+    WorkspaceGenerationLifecycle lifecycle = mock(WorkspaceGenerationLifecycle.class);
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(java.util.UUID.randomUUID(), null, lease);
+    WorkspaceGenerationDispatchAuthority authority =
+        new WorkspaceGenerationDispatchAuthority(
+            "run-build",
+            "T1",
+            prepared,
+            WorkspaceGenerationDispatchAuthority.Phase.MUTATION,
+            lifecycle);
+    ExecutionContext matching =
+        new ExecutionContext("run-build", "T1", Path.of("/tmp/run-build"))
+            .withWorkspaceGenerationAuthority(authority);
+    WorkerTaskRequest request =
+        WorkerTaskRequest.builder()
+            .provider("anthropic")
+            .model("sonnet")
+            .userPrompt("fix")
+            .context(matching)
+            .changeMode(CodeChangeMode.BUILD)
+            .build();
 
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-          lease,
-          () -> {
-            try {
-              WorkerCorrectionToolFence.submitCurrent(
-                      executor,
-                      () ->
-                          observed.set(
-                              RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease()))
-                  .get();
-            } catch (Exception failure) {
-              throw new IllegalStateException(failure);
-            }
-            return null;
-          });
+      WorkerCorrectionToolFence.submitCurrent(
+              executor, () -> WorkerCorrectionToolFence.assertAttemptAdmission(request))
+          .get();
     }
 
-    assertThat(observed.get()).isSameAs(lease);
-    assertThat(RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease()).isNull();
-    ExecutionContext matching = new ExecutionContext("run-build", "T1", Path.of("/tmp/run-build"));
-    ExecutionContext other = new ExecutionContext("run-other", "T1", Path.of("/tmp/run-other"));
-    RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-        lease,
-        () -> {
-          WorkerCorrectionToolFence.assertDispatch(matching);
-          assertThatThrownBy(() -> WorkerCorrectionToolFence.assertDispatch(other))
-              .isInstanceOf(IllegalStateException.class)
-              .hasMessage("WORKSPACE_GENERATION_TOOL_LEASE_RUN_MISMATCH");
-          return null;
-        });
-    verify(lease, org.mockito.Mockito.atLeastOnce()).assertOwned();
+    verify(lease).assertOwned();
+    verify(lifecycle).assertMutationDispatch(prepared);
   }
 
   @Test
@@ -116,6 +115,6 @@ class WorkerCorrectionToolFenceTest {
 
     assertThatThrownBy(() -> WorkerCorrectionToolFence.assertAttemptAdmission(request))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessage("WORKSPACE_GENERATION_TOOL_LEASE_REQUIRED");
+        .hasMessage("WORKSPACE_GENERATION_AUTHORITY_REQUIRED");
   }
 }

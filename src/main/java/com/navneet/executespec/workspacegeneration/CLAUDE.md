@@ -1,5 +1,14 @@
 # Workspace generation protocol
 
+`WorkspaceGenerationFailureProjection` is the customer-safe deterministic taxonomy for a failed
+BUILD attempt. It derives category, stage, retryability, candidate presence, rollback proof,
+publication block, and recommended action only from durable attempt state, stable codes, and the
+typed verification receipt—never from free-form provider/tool exceptions. The customer API retains
+failed targets only when they exactly match a non-hidden frozen acceptance-check target; hidden and
+historical unmatched targets remain redacted. The newest attempt is authoritative for terminal
+projection, so older rejected candidates remain technical history but cannot overwrite a later
+accepted frontier.
+
 `WorkspaceGenerationQualificationEvidenceController` is a SUPER_ADMIN-only, `no-store` read path
 for separately authorized qualification. It exposes the preserved rejected-diff JSON plus immutable
 attempt/route/usage/receipt fields that customer-safe run detail intentionally redacts. It is not
@@ -32,6 +41,68 @@ any provider or mutating tool can run. Fresh and resumed BUILD tasks, same-route
 provider/model changes, approved continuations, and correction regeneration all use this path.
 `WorkspaceGenerationTerminalReconciler` converges task receipts, accepted task state, and the bound
 LLM operation after acceptance/rollback and during startup recovery.
+V384 gives ACCEPTED the same durable publication contract as rollback: the ACCEPTED row update
+also writes `MARK_COMPLETE/PENDING` and snapshots the exact task status/recovery generation. The
+coordinator re-reads committed attempt state through `WorkspaceGenerationConvergenceService`;
+request-thread booleans cannot decide task or physical-operation terminal state. Global sweeps
+isolate failures per attempt and run so one contradictory record cannot starve healthy work.
+V385 snapshots `LEGACY_V1` or `SHARED_KERNEL_V2` once during initial BUILD admission and copies the
+exact immutable value to every attempt. Execution and continuation admission read only that durable
+identity; null/unknown historical rows and parent/attempt mismatches fail closed. BUILD dispatch
+authority is a non-serializable `WorkspaceGenerationDispatchAuthority` carried by
+`ExecutionContext`, bound to run/task/attempt/workspace lease/phase, and freshly rechecks both the
+database lease and generation state at provider, tool, reproduction, and verification boundaries.
+V386 assigns every pre-pin BUILD run/attempt `LEGACY_UNKNOWN` plus an immutable historical
+disposition without changing run status, task state, generation state, operation state, or
+publication evidence. Proven terminal contradictions are `QUARANTINED_CONFLICT`; incomplete rows
+are `MISSING_EVIDENCE`. Unknown history is non-executable and non-publishable. The read-only
+`WorkspaceGenerationHistoricalInventoryService` captures a repeatable, ordered, SHA-256-bound
+operator snapshot with reconciled run/attempt/disposition counts, safe reasons, and evidence
+reference booleans. V387 adds immutable DRY_RUN/APPLIED adjudication receipts over a minimized
+causal before-state. `CLOSE_AS_NON_EXECUTABLE` retains evidence; only a distinct
+`RELEASE_FOR_DELETION` receipt releases the database hold, and neither action can rewrite source
+rows or unblock publication. Retention deletes rows independently so one held record cannot starve
+unrelated eligible runs. V398 persists safe per-identity reconciliation failure counts, oldest-
+backlog timing, dead-letter state, and later resolution; diagnostic failure cannot stop the
+isolation loop. V399 persists the exact terminal physical-operation target and an immutable
+completion receipt. The terminal reconciler consumes that durable intent, converges task and
+operation independently, and releases workspace authority only after both receipts are complete.
+`WorkspaceGenerationSchemaAttestor` independently verifies migration V399 and all 62 load-bearing
+PostgreSQL indexes/triggers before protocol-v2 admission.
+`BuildEnvironmentPlanResolver` derives deterministic, network-denied reconstruction commands from
+accepted Node, Python, Maven, Gradle, Go, and Rust manifests plus a digest-pinned runtime image.
+`BuildEnvironmentMaterializer` runs those commands only through RUN or exact VERIFICATION sandbox
+authority and rejects any tracked/non-ignored product-generation mutation. V396 stores append-only
+phase materialization and exact ignored-file cleanup receipts; both Java and PostgreSQL refuse the
+protocol-v2 transition to VERIFYING without passing INITIAL_PROBE and WORKER receipts, and refuse a
+passing final verification without FINAL_VERIFICATION. The SUPER_ADMIN qualification evidence
+includes the full removed-path inventory while customer run detail remains bounded and redacted.
+V388 also separates physical verification from canonical product mutation: `SandboxPurpose.RUN`
+keeps the derived run mount, while `SandboxPurpose.VERIFICATION` uses the sandbox-owned root and an
+opaque live capability. `DisposableVerificationWorkspaceService` copies and re-attests the exact
+generation, captures/discards command side effects, and routes build, tests, Python HTTP runtime,
+read-only reviewer attestation, standards lint/invariants, breaking-change CLIs, CLI smoke, and
+validation through that capability. `NonExecutingGitTreeWriter` constructs restorable Git tree
+identity using raw JGit blob/tree insertion rather than `git add`, preserving file modes and safe
+symlinks without executing repository filters/helpers; validation change evidence likewise avoids
+external diff/textconv. The materializer retains safe relative symlinks and refuses absolute or
+escaping targets. `run_sandbox_workspace_cleanup` plus
+the scheduled janitor provide crash/restart cleanup without deleting beneath a live mount.
+V389 adds the physical-command protocol beneath that high-level verification result. Each command
+persists `ADMITTED` before external execution, transitions to `DISPATCHED` only while the exact
+VERIFICATION sandbox owner/token/runtime epoch remains live, and settles once with an immutable
+terminal receipt. Protocol-v2 passing generation receipts must cite a non-empty set of successful
+command receipt ids for the same attempt, candidate generation and verification purpose. A stale
+dispatched command is reconciled only to `INDETERMINATE`; recovery never derives success from
+runtime disappearance or later clean execution. The attempt-level command protocol is immutable:
+previous writers default to v1 for rolling compatibility, while new admissions explicitly pin v2.
+V390 moves final Git materialization into a separate `PUBLICATION_PREPARE` authority. A preparation
+binds the exact accepted generation/checkpoint and canonical validation digest, freezes every
+repository/branch plus whether exact repository provisioning is authorized, and persists the
+non-executing JGit parent/tree/commit identity before remote work. Repository creation and exact
+commit push each persist `ADMITTED` and `DISPATCHED` before provider execution. Prepared object
+re-materialization after workspace restore must reproduce the durable ids byte-for-byte or
+publication stops. Recovery changes stale dispatch only to `INDETERMINATE`, never success.
 The worker outcome is advisory even when it is `COMPLETED_WITH_WARNING` or `WORKER_FAILED`: after
 authorized mutation, the frozen server verifier always decides acceptance. A passing receipt
 normalizes the task outcome to success while retaining raw worker evidence; a failed receipt rolls
@@ -131,7 +202,35 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   `V380__durable_workspace_generation_task_transition.sql`,
   `V381__fence_workspace_generation_rollback_authority.sql`,
   `V382__allow_workspace_generation_task_transition_receipts.sql`, and
-  `V383__fence_build_attempt_admission.sql`.
+  `V383__fence_build_attempt_admission.sql`, and
+  `V384__durable_accepted_task_transition.sql`, and
+  `V385__pin_build_protocol_version.sql`, and
+  `V386__quarantine_unpinned_build_history.sql`, and
+  `V387__append_only_build_history_adjudication.sql`.
+- **V388 verification sandbox identity + cleanup:**
+  `V388__separate_verification_sandbox_identity.sql`.
+- **V389 verification command journal:**
+  `V389__journal_verification_sandbox_commands.sql` adds mutable command intent/state, immutable
+  terminal receipts, stale-dispatch recovery, exact sandbox/generation/lease bindings, and
+  command-receipt ids on the high-level generation verification receipt.
+- **V390 durable publication preparation:**
+  `V390__durable_publication_preparation.sql` adds the accepted-frontier preparation,
+  per-repository exact commit receipts, repository-provision intents, exact push attempts,
+  immutable transition/delete guards, recovery indexes, and digest self-checks.
+- **V391–V399 forward reliability controls:** V391 recovers stale sandbox command admission, V392
+  fences publication attempt recovery, V393 queues recovery-artifact cleanup, V394 binds checkpoint
+  storage identity, V395 types verification causality, and
+  `V396__persist_build_environment_receipts.sql` makes environment cleanup/materialization evidence
+  append-only state-transition authority. V397 journals durable intent/APPLIED/VERIFIED receipts
+  around archive writes, per-repository rollback, and accepted replacement; deterministic physical
+  identities make takeover replay safe, and guarded orphan cleanup rechecks accepted/unresolved
+  references before exact-generation deletion. The replacement-JVM kill matrix terminates after
+  each Git mutation, directory move, and archive-storage-before-receipt window. V398 persists
+  poison terminal-reconciliation diagnostics and dead-letter state without granting those rows any
+  generation or terminal authority. V399 persists exact terminal operation intent and its
+  immutable receipt, blocks later attempt admission until that receipt completes, and permits
+  authority release only after task and operation convergence. The terminal kill matrix halts a
+  real JVM at eight boundaries twice each and replays every case twice from replacement JVMs.
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
@@ -153,6 +252,10 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
 - `WorkspaceGenerationTaskTransitionPostgresTest`: real-PostgreSQL task/run locking, cancellation
   precedence, rollback publication, stale-transition rejection, and terminal convergence.
 - `WorkspaceGenerationTerminalReconcilerTest`: accepted/rolled-back task and operation convergence.
+- `WorkspaceGenerationProtocolReferenceModelTest`: exhaustive reachable-state exploration for the
+  coupled run/task/generation/operation/authority/intent/checkpoint/publication invariants.
+- `WorkspaceGenerationConvergenceServiceTest`: terminal re-read, held-BUILD-lease rollback, and
+  recovery-required behavior without request-thread inference.
 - `WorkspaceGenerationAuthorityQueryContractTest`: the production JPA join takes the caller's exact
   lifecycle state and cannot regress to a hard-coded MUTATING-only query.
 - `MigratedSchemaBootSmokeTest`: all migrations + Hibernate validation.
@@ -162,11 +265,30 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   local trees require RECOVERY authority; every unresolved kill-point restores tracked, staged,
   untracked, nested-repository, and ignored-artifact state exactly.
 - `WorkspaceIgnoredArtifactGuardTest`: stale-output cleanup, baseline preservation, and Git's
-  collapsed-parent classification for ignored Python bytecode.
+  exact NUL-delimited ignored-file classification, tracked-sibling preservation, ignored-product
+  rejection, nested-repository isolation, and safe live/broken symlink unlinking.
+- `BuildEnvironmentPlanResolverTest`, `BuildEnvironmentMaterializerTest`, and
+  `BuildEnvironmentSequentialTaskTest`: lock/image/network binding, mixed-language roots,
+  product-mutation refusal, internal-protocol classification, and task-2 reconstruction after
+  task-1 cleanup for Node, Python, Maven, Gradle, Go, and Rust.
+- `BuildEnvironmentReceiptPostgresTest`: append-only receipts and database phase gates on a real
+  PostgreSQL 16 schema.
 - `WorkspaceGenerationLifecycleBoundaryTest`: task-local ignored dependencies survive deterministic
   verification but are purged before checkpoint/acceptance; rejection evidence commits before
   filesystem rollback and restore failure is durable.
-- `WorkerCorrectionToolFenceTest`: ThreadLocal propagation and exact dispatch fence.
+- `SandboxCommandJournalPostgresTest`: real-PostgreSQL admission/dispatch/settlement, immutable
+  successful and indeterminate receipts, protocol-v2 high-level receipt binding, stale-dispatch
+  recovery, receipt immutability, and previous-writer v1 compatibility.
+- `BuildVerificationCommandArchitectureTest`: every verification command journals admission before
+  dispatch and settles afterward; lifecycle passing evidence binds physical command receipts while
+  recovery code cannot manufacture `SUCCEEDED`.
+- `PublicationPreparationPostgresTest` and `PublicationPreparationArchitectureTest`: exact
+  preparation/provision/push transition guards, stale-outcome recovery, immutable receipts,
+  journal-before-side-effect ordering, and prohibition of the retired generic BUILD commit path.
+- `WorkspaceGenerationDispatchAuthorityTest`, `WorkspaceGenerationAuthorityArchitectureTest`, and
+  `WorkerCorrectionToolFenceTest`: explicit coordinator-to-worker capability handoff, exact
+  run/task/attempt/phase dispatch fencing, fresh lease/state checks, and absence of generation
+  ThreadLocal authority.
 - `TaskAcceptanceVerifierTest`: zero-diff rejection, repository-owned test evidence,
   actual-code-change test escalation, exact
   initial test counts, command drift, immutable-bootstrap tamper rejection, held-out endpoint

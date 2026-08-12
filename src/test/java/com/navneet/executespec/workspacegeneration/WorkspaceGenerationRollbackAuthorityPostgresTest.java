@@ -34,8 +34,7 @@ class WorkspaceGenerationRollbackAuthorityPostgresTest {
     UUID attemptId = UUID.randomUUID();
     UUID original = UUID.randomUUID();
     UUID recovery = UUID.randomUUID();
-    insertRunAndAttempt(jdbc, runId, attemptId, original, "PREPARED");
-    insertAuthority(jdbc, runId, "BUILD_GENERATION", original, "10 minutes");
+    insertRunAndPreparedAttempt(jdbc, runId, attemptId, original, "10 minutes");
 
     assertThat(
             jdbc.update(
@@ -114,8 +113,8 @@ class WorkspaceGenerationRollbackAuthorityPostgresTest {
     UUID originalWorkspace = UUID.randomUUID();
     UUID staleRecovery = UUID.randomUUID();
     UUID replacementRecovery = UUID.randomUUID();
-    insertRunAndAttempt(jdbc, takeoverRun, takeoverAttempt, originalWorkspace, "PREPARED");
-    insertAuthority(jdbc, takeoverRun, "BUILD_GENERATION", originalWorkspace, "10 minutes");
+    insertRunAndPreparedAttempt(
+        jdbc, takeoverRun, takeoverAttempt, originalWorkspace, "10 minutes");
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='ROLLING_BACK',"
             + " rejected_diff_digest=repeat('b',64), rejected_diff_json='{}'::jsonb,"
@@ -165,8 +164,11 @@ class WorkspaceGenerationRollbackAuthorityPostgresTest {
     String runId = "run-expired-build-intent";
     UUID attemptId = UUID.randomUUID();
     UUID original = UUID.randomUUID();
-    insertRunAndAttempt(jdbc, runId, attemptId, original, "PREPARED");
-    insertAuthority(jdbc, runId, "BUILD_GENERATION", original, "-1 second");
+    insertRunAndPreparedAttempt(jdbc, runId, attemptId, original, "10 minutes");
+    jdbc.update(
+        "UPDATE run_workspace_authority SET lease_expires_at=now()-interval '1 second'"
+            + " WHERE run_id=?",
+        runId);
 
     assertThatThrownBy(
             () ->
@@ -192,29 +194,36 @@ class WorkspaceGenerationRollbackAuthorityPostgresTest {
     return jdbc;
   }
 
-  private static void insertRunAndAttempt(
-      JdbcTemplate jdbc, String runId, UUID attemptId, UUID workspaceToken, String state) {
+  private static void insertRunAndPreparedAttempt(
+      JdbcTemplate jdbc,
+      String runId,
+      UUID attemptId,
+      UUID workspaceToken,
+      String authorityInterval) {
     jdbc.update("INSERT INTO pipeline_run(run_id,status) VALUES (?, 'WORKING')", runId);
     jdbc.update(
         "INSERT INTO agent_task(task_id,run_id,status,recovery_attempt) VALUES (?,?, 'WORKING',0)",
         runId.substring(0, Math.min(8, runId.length())) + "_T1",
         runId);
-    jdbc.update(
-        """
-        INSERT INTO workspace_generation_attempt(
-          id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,
-          before_generation,repositories_json,authority_digest,task_contract_digest,
-          ignored_artifact_baseline_json,ignored_artifact_baseline_digest,
-          workspace_lease_token,before_checkpoint_kind,before_checkpoint_key,
-          before_checkpoint_digest,before_checkpoint_completed_at)
-        VALUES (?,?,'T1',0,1,'BUILD_TASK',?,'/tmp/workspace',repeat('1',64),
-          '[]'::jsonb,repeat('2',64),repeat('3',64),'{}'::jsonb,repeat('4',64),?,
-          'GCS','gs://bucket/base.zip',repeat('5',64),NOW())
-        """,
+    insertAuthority(jdbc, runId, "BUILD_GENERATION", workspaceToken, authorityInterval);
+    WorkspaceGenerationPostgresFixture.insertPrepared(
+        jdbc,
         attemptId,
         runId,
-        state,
-        workspaceToken);
+        "T1",
+        0,
+        1,
+        "/tmp/workspace",
+        workspaceToken,
+        "1".repeat(64),
+        "[]",
+        "2".repeat(64),
+        "3".repeat(64),
+        "{}",
+        "4".repeat(64),
+        "GCS",
+        "gs://bucket/base.zip",
+        "5".repeat(64));
   }
 
   private static void insertAuthority(

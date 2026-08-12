@@ -8,6 +8,9 @@ import static org.mockito.Mockito.when;
 import java.nio.file.Path;
 
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
+import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,19 +21,18 @@ class ProviderHandoffDossierTest {
 
   @Test
   void writesAndReloadsActualRouteAndFailureContext() {
-    withGenerationLease(
-        () ->
-            ProviderHandoffDossier.write(
-                workspace,
-                "run-1",
-                "T1",
-                "anthropic",
-                "claude-sonnet",
-                "deepseek",
-                "deepseek-v4",
-                "CHANGE_PROVIDER",
-                "build failed on the previous route",
-                "missing import"));
+    ProviderHandoffDossier.write(
+        generationContext("run-1", "T1"),
+        workspace,
+        "run-1",
+        "T1",
+        "anthropic",
+        "claude-sonnet",
+        "deepseek",
+        "deepseek-v4",
+        "CHANGE_PROVIDER",
+        "build failed on the previous route",
+        "missing import");
 
     var dossier = ProviderHandoffDossier.read(workspace, "run-1", "T1").orElseThrow();
     assertThat(dossier.path("fromProvider").asText()).isEqualTo("anthropic");
@@ -41,19 +43,18 @@ class ProviderHandoffDossierTest {
 
   @Test
   void refusesDossierFromAnotherTask() {
-    withGenerationLease(
-        () ->
-            ProviderHandoffDossier.write(
-                workspace,
-                "run-1",
-                "T1",
-                "openai",
-                "gpt",
-                "gemini",
-                "flash",
-                "STEP_UP_MODEL",
-                "",
-                ""));
+    ProviderHandoffDossier.write(
+        generationContext("run-1", "T1"),
+        workspace,
+        "run-1",
+        "T1",
+        "openai",
+        "gpt",
+        "gemini",
+        "flash",
+        "STEP_UP_MODEL",
+        "",
+        "");
 
     assertThat(ProviderHandoffDossier.read(workspace, "run-1", "T2")).isEmpty();
   }
@@ -63,6 +64,7 @@ class ProviderHandoffDossierTest {
     assertThatThrownBy(
             () ->
                 ProviderHandoffDossier.write(
+                    new ExecutionContext("run-1", "T1", workspace.toAbsolutePath()),
                     workspace,
                     "run-1",
                     "T1",
@@ -74,18 +76,21 @@ class ProviderHandoffDossierTest {
                     "",
                     ""))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessage("WORKSPACE_GENERATION_TOOL_LEASE_REQUIRED");
+        .hasMessage("WORKSPACE_GENERATION_AUTHORITY_REQUIRED");
   }
 
-  private static void withGenerationLease(Runnable action) {
+  private static ExecutionContext generationContext(String runId, String taskId) {
     RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
-    when(lease.runId()).thenReturn("run-1");
-    RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-        lease,
-        () -> {},
-        () -> {
-          action.run();
-          return null;
-        });
+    when(lease.runId()).thenReturn(runId);
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(java.util.UUID.randomUUID(), null, lease);
+    return new ExecutionContext(runId, taskId, Path.of("/tmp").toAbsolutePath())
+        .withWorkspaceGenerationAuthority(
+            new WorkspaceGenerationDispatchAuthority(
+                runId,
+                taskId,
+                prepared,
+                WorkspaceGenerationDispatchAuthority.Phase.MUTATION,
+                mock(WorkspaceGenerationLifecycle.class)));
   }
 }

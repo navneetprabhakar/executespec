@@ -69,6 +69,21 @@ public class PipelineRun {
   private String runMode = com.navneet.executespec.state.RunMode.BUILD;
 
   /**
+   * V385 — immutable BUILD execution protocol selected once in the initial run INSERT. Null is
+   * reserved for historical/PATCH rows; candidate execution refuses an unpinned BUILD row rather
+   * than consulting the current rollout flag.
+   */
+  @Column(name = "build_protocol_version", length = 32)
+  private String buildProtocolVersion;
+
+  /**
+   * V386 — immutable historical protocol disposition; supported new admissions are not applicable.
+   */
+  @Column(name = "build_protocol_disposition", length = 32, nullable = false)
+  @lombok.Builder.Default
+  private String buildProtocolDisposition = "NOT_APPLICABLE";
+
+  /**
    * V183 (2026-05-08) — when a patch-mode run is dispatched in response to a project-side finding
    * (PR review, tech debt, code review, CI failure), this column stamps the originating finding id
    * so the dashboard can render "Triggered by ..." instead of an orphan run + the {@link

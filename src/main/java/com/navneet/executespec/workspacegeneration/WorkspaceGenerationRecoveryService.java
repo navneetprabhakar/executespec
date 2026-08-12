@@ -8,7 +8,6 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
-import com.navneet.executespec.deployment.GcsWorkspaceStore;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService.Authority;
@@ -52,12 +51,15 @@ public class WorkspaceGenerationRecoveryService {
   private final ObjectMapper objectMapper;
   private final PlatformTransactionManager transactionManager;
   private final WorkspaceGenerationTerminalReconciler terminalReconciler;
-  private final GcsWorkspaceStore gcsStore;
-  private final WorkspaceGenerationArchiveService generationArchives;
+  private final WorkspaceGenerationCheckpointRestorer checkpointRestorer;
   private final PipelineRunRepository runs;
   private final WorkspaceIgnoredArtifactGuard ignoredArtifacts;
   private final AgentProperties agentProperties;
   private final WorkspaceGenerationTelemetry telemetry;
+  private final WorkspaceGenerationRecoveryArtifactJanitor recoveryArtifactJanitor;
+  private final WorkspaceGenerationFilesystemSaga filesystemSaga;
+  private final WorkspaceGenerationStepStore generationSteps;
+  private final com.navneet.executespec.deployment.GcsTaskCheckpointService checkpointService;
 
   /** Read-only fence used by reviewer, validation and publication admission. */
   public void assertNoUnresolvedAttempt(String runId) {
@@ -173,18 +175,7 @@ public class WorkspaceGenerationRecoveryService {
       // A competing recovery may have repaired the tree before this lease was acquired.
       lease.assertOwned();
       if (acceptedGenerationPresent(accepted, root)) return;
-      if (!java.nio.file.Files.isDirectory(root)) {
-        restoreArchive(
-            accepted.getCheckpointKind(),
-            accepted.getCheckpointKey(),
-            accepted.getCheckpointDigest(),
-            accepted.getCandidateGeneration(),
-            root,
-            accepted.getRunId(),
-            lease::assertOwned);
-      } else {
-        replaceFromAcceptedArchive(accepted, root, lease);
-      }
+      replaceFromAcceptedArchive(accepted, root, lease);
     } finally {
       lease.close();
     }
@@ -228,6 +219,7 @@ public class WorkspaceGenerationRecoveryService {
     boolean recoveryClaimed = false;
     boolean rolledBack = false;
     try {
+      reconcileInterruptedArchive(stale, recoveryLease);
       int claimed =
           transactions.execute(
               ignored ->
@@ -287,9 +279,12 @@ public class WorkspaceGenerationRecoveryService {
                       "Recovered an unresolved workspace generation before dependent execution",
                       Instant.now()));
       requireCas(evidenceRecorded, "WORKSPACE_GENERATION_RECOVERY_EVIDENCE_CAS_FAILED");
-      workspaces.rollback(checkpoint, recoveryLease::assertOwned);
+      filesystemSaga.restoreRepositories(row.getId(), checkpoint, recoveryLease::assertOwned);
       ignoredArtifacts.cleanAttemptArtifacts(
-          checkpoint, row.getIgnoredArtifactBaselineJson(), recoveryLease::assertOwned);
+          checkpoint,
+          row.getIgnoredArtifactBaselineJson(),
+          row.getIgnoredArtifactBaselineDigest(),
+          recoveryLease::assertOwned);
       String restored = workspaces.currentGeneration(checkpoint, recoveryLease::assertOwned);
       if (!row.getBeforeGeneration().equals(restored)) {
         throw new IllegalStateException("WORKSPACE_GENERATION_RECOVERY_ROLLBACK_UNPROVEN");
@@ -354,6 +349,63 @@ public class WorkspaceGenerationRecoveryService {
     }
   }
 
+  /**
+   * Closes the upload-before-receipt crash interval by replaying the deterministic create-only
+   * object write while the original candidate bytes still exist. A later rollback may orphan this
+   * verified object, but it can no longer be an unidentifiable physical effect.
+   */
+  private void reconcileInterruptedArchive(WorkspaceGenerationAttempt stale, Lease recoveryLease) {
+    WorkspaceGenerationStepStore.Kind kind;
+    if (stale.getState() == WorkspaceGenerationState.AUTHORITY_ACQUIRED) {
+      kind = WorkspaceGenerationStepStore.Kind.BEFORE_ARCHIVE_UPLOAD;
+    } else if (stale.getState() == WorkspaceGenerationState.CHECKPOINTING) {
+      kind = WorkspaceGenerationStepStore.Kind.CANDIDATE_ARCHIVE_UPLOAD;
+    } else {
+      return;
+    }
+    List<WorkspaceGenerationStepStore.Step> incomplete =
+        generationSteps.incomplete(stale.getId(), kind);
+    if (incomplete.isEmpty()) return;
+    if (incomplete.size() != 1) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_ARCHIVE_STEP_AMBIGUOUS");
+    }
+    WorkspaceGenerationStepStore.Step step = incomplete.getFirst();
+    Path root = currentWorkspaceRoot(stale.getRunId());
+    recoveryLease.assertOwned();
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint = workspaces.begin(root);
+    if (!step.expectedGeneration().equals(checkpoint.generation())) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_ARCHIVE_REPLAY_GENERATION_MISMATCH");
+    }
+    String objectKey;
+    try {
+      objectKey = objectMapper.readTree(step.evidenceJson()).path("objectKey").asText();
+    } catch (Exception malformed) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_ARCHIVE_STEP_INVALID", malformed);
+    }
+    var receipt =
+        checkpointService.checkpointGeneration(
+            stale.getRunId(), stale.getTaskId() + ":recovery", checkpoint, objectKey);
+    generationSteps.markArchiveApplied(
+        stale.getId(),
+        kind,
+        step.stepKey(),
+        new WorkspaceGenerationStepStore.ArchiveReceipt(
+            receipt.key(),
+            receipt.artifactDigest(),
+            receipt.storageGeneration(),
+            receipt.sizeBytes(),
+            receipt.crc32c(),
+            receipt.etag()));
+    generationSteps.markVerified(
+        stale.getId(),
+        kind,
+        step.stepKey(),
+        Map.of(
+            "generation", step.expectedGeneration(),
+            "artifactDigest", receipt.artifactDigest(),
+            "recoveredBeforeRollback", true));
+  }
+
   private static boolean preDispatch(WorkspaceGenerationState state) {
     return state == WorkspaceGenerationState.ADMITTED
         || state == WorkspaceGenerationState.OPERATION_CLAIMED
@@ -369,6 +421,10 @@ public class WorkspaceGenerationRecoveryService {
             attempt.getBeforeCheckpointKind(),
             attempt.getBeforeCheckpointKey(),
             attempt.getBeforeCheckpointDigest(),
+            attempt.getBeforeCheckpointStorageGeneration(),
+            attempt.getBeforeCheckpointSizeBytes(),
+            attempt.getBeforeCheckpointCrc32c(),
+            attempt.getBeforeCheckpointEtag(),
             attempt.getBeforeGeneration(),
             declaredRoot,
             attempt.getRunId(),
@@ -427,70 +483,34 @@ public class WorkspaceGenerationRecoveryService {
       String kind,
       String key,
       String digest,
+      String storageGeneration,
+      Long sizeBytes,
+      String crc32c,
+      String etag,
       String generation,
       Path root,
       String runId,
       Runnable fence) {
-    if (!"GCS".equals(kind)) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_SAME_HOST_CHECKPOINT_UNAVAILABLE");
-    }
-    Path archive = null;
-    try {
-      fence.run();
-      archive = gcsStore.downloadToTemp(key, runId);
-      fence.run();
-      generationArchives.restore(archive, digest, root, generation);
-      fence.run();
-    } catch (java.io.IOException failure) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_ARCHIVE_DOWNLOAD_FAILED", failure);
-    } finally {
-      if (archive != null) {
-        try {
-          java.nio.file.Files.deleteIfExists(archive);
-        } catch (java.io.IOException ignored) {
-        }
-      }
-    }
+    checkpointRestorer.restore(
+        kind,
+        key,
+        digest,
+        storageGeneration,
+        sizeBytes,
+        crc32c,
+        etag,
+        generation,
+        root,
+        runId,
+        fence);
   }
 
   /** Replaces a stale/partial local tree only after an exact accepted archive is reconstructed. */
   private void replaceFromAcceptedArchive(
       WorkspaceGenerationAttempt accepted, Path root, Lease recoveryLease) {
-    Path replacement =
-        root.resolveSibling(root.getFileName() + ".accepted-" + java.util.UUID.randomUUID());
-    Path displaced =
-        root.resolveSibling(root.getFileName() + ".displaced-" + java.util.UUID.randomUUID());
-    try {
-      restoreArchive(
-          accepted.getCheckpointKind(),
-          accepted.getCheckpointKey(),
-          accepted.getCheckpointDigest(),
-          accepted.getCandidateGeneration(),
-          replacement,
-          accepted.getRunId(),
-          recoveryLease::assertOwned);
-      recoveryLease.assertOwned();
-      move(root, displaced);
-      try {
-        recoveryLease.assertOwned();
-        move(replacement, root);
-        recoveryLease.assertOwned();
-        String restored = workspaces.captureGeneration(root);
-        if (!accepted.getCandidateGeneration().equals(restored)) {
-          throw new IllegalStateException("WORKSPACE_GENERATION_REPLACEMENT_UNPROVEN");
-        }
-      } catch (RuntimeException replacementFailure) {
-        Path rejected =
-            root.resolveSibling(root.getFileName() + ".rejected-" + java.util.UUID.randomUUID());
-        if (java.nio.file.Files.exists(root)) move(root, rejected);
-        move(displaced, root);
-        deleteTree(rejected);
-        throw replacementFailure;
-      }
-      deleteTree(displaced);
-    } finally {
-      deleteTree(replacement);
-    }
+    new WorkspaceGenerationAcceptedReplacementSaga(
+            checkpointRestorer, workspaces, generationSteps, recoveryArtifactJanitor)
+        .ensureAccepted(accepted, root, recoveryLease::assertOwned);
   }
 
   private boolean acceptedGenerationPresent(
@@ -504,31 +524,6 @@ public class WorkspaceGenerationRecoveryService {
           accepted.getRunId(),
           malformedLocalWorkspace.getClass().getSimpleName());
       return false;
-    }
-  }
-
-  private static void move(Path source, Path target) {
-    try {
-      java.nio.file.Files.move(source, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-    } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-      try {
-        java.nio.file.Files.move(source, target);
-      } catch (java.io.IOException failure) {
-        throw new IllegalStateException("WORKSPACE_GENERATION_REPLACEMENT_MOVE_FAILED", failure);
-      }
-    } catch (java.io.IOException failure) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_REPLACEMENT_MOVE_FAILED", failure);
-    }
-  }
-
-  private static void deleteTree(Path root) {
-    if (root == null || !java.nio.file.Files.exists(root)) return;
-    try (var paths = java.nio.file.Files.walk(root)) {
-      for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
-        java.nio.file.Files.deleteIfExists(path);
-      }
-    } catch (java.io.IOException failure) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_REPLACEMENT_CLEANUP_FAILED", failure);
     }
   }
 

@@ -3,6 +3,8 @@ package com.navneet.executespec.standards.enforcement.lint;
 import java.nio.file.Path;
 import java.util.List;
 
+import com.navneet.executespec.tool.ExecutionContext;
+
 /**
  * E3.4 — strategy interface for lint enforcement. One implementation per linter the platform
  * supports. v1 ships ESLint + Checkstyle (cut from the source plan's 5 per the eval doc §7); Detekt
@@ -34,4 +36,17 @@ public interface LintAdapter {
    * @param changedFiles files to focus on; empty = full project lint
    */
   LintResult run(String runId, Path repoRoot, Path configPath, List<Path> changedFiles);
+
+  /** Generation-bound BUILD entrypoint; implementations must preserve its physical authority. */
+  default LintResult run(
+      ExecutionContext context, Path repoRoot, Path configPath, List<Path> changedFiles) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      return new LintResult(
+          tool(),
+          LintResult.Status.UNAVAILABLE,
+          List.of(),
+          "VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    return run(context.runId(), repoRoot, configPath, changedFiles);
+  }
 }

@@ -82,9 +82,32 @@ class FlywayMigrationInventoryTest {
     // V382 preserves resolved-attempt immutability while permitting only the V380 task-transition
     // receipt state machine, bringing the exact inventory to 368. V383 atomically binds BUILD
     // admission, the physical LLM operation, workspace authority, and terminal convergence,
-    // bringing the exact inventory to 369.
-    assertThat(migrations).hasSize(369);
-    assertThat(migrations.getLast().version()).isEqualTo("383");
+    // bringing the exact inventory to 369. V384 adds the mixed-version-safe accepted
+    // MARK_COMPLETE task-transition intent and receipt, bringing the exact inventory to 370. V385
+    // pins immutable BUILD protocol identity on the run and each physical generation attempt,
+    // bringing the exact inventory to 371. V386 explicitly labels all pre-pin BUILD history
+    // LEGACY_UNKNOWN and persists its fail-closed historical disposition, bringing the exact
+    // inventory to 372. V387 adds immutable, byte-bound historical BUILD adjudication and an
+    // explicit retention-release fence, bringing the exact inventory to 373. V388 separates the
+    // canonical RUN sandbox from exact-generation VERIFICATION sandboxes, bringing it to 374.
+    // V389 journals every physical verification command and binds passing workspace receipts to
+    // immutable all-successful command receipts. V390 adds exact publication preparation,
+    // per-repository artifact receipts, and per-repository publication attempts, bringing the
+    // exact inventory to 376. V391 adds the unsettled-command recovery index required to recover
+    // both pre-dispatch ADMITTED and post-dispatch DISPATCHED crash windows, bringing it to 377.
+    // V392 applies the same split to remote publication/provision attempts, adds numbered retries,
+    // and atomically fences terminal settlement to live publication authority, bringing it to 378.
+    // V393 makes accepted-recovery scratch cleanup a durable retry queue. V394 binds checkpoint
+    // receipts to physical storage generation, size, CRC32C, and ETag. V395 preserves typed
+    // product/environment/internal verification causality, bringing the total to 381. V396 adds
+    // append-only ignored-environment cleanup/materialization receipts and database transition
+    // gates, bringing the total to 382. V397 journals filesystem/object-store saga intent and
+    // receipt, per-repository rollback, deterministic accepted replacement, and guarded orphan
+    // archive cleanup, bringing the total to 383. V398 adds durable poison-record reconciliation
+    // diagnostics and dead-letter indexes, bringing the total to 384. V399 persists the exact
+    // physical-operation terminal intent and completion receipt, bringing the total to 385.
+    assertThat(migrations).hasSize(385);
+    assertThat(migrations.getLast().version()).isEqualTo("399");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

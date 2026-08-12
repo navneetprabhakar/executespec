@@ -10,7 +10,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeSet;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
@@ -19,11 +18,11 @@ import org.springframework.stereotype.Component;
  * Creates a reversible, content-addressed checkpoint before an automatic correction mutates a run
  * workspace.
  *
- * <p>The checkpoint is a Git tree object produced with plumbing commands against a TEMPORARY index
- * file ({@code GIT_INDEX_FILE}). It captures tracked and untracked (but not ignored) files without
- * moving {@code HEAD}, creating a branch, copying the repository, or staging/resetting the live
- * caller-owned index. A rejected correction restores that exact tree while leaving the repository
- * on its original commit.
+ * <p>The checkpoint is a Git tree object produced by a non-executing JGit tree writer. It captures
+ * tracked and untracked (but not ignored) files without applying repository filters or invoking
+ * hooks/helpers, and without moving {@code HEAD}, creating a branch, copying the repository, or
+ * staging/resetting the live caller-owned index. A rejected correction restores that exact tree
+ * while leaving the repository on its original commit.
  *
  * <p>Multi-repository project workspaces are supported by checkpointing the workspace root
  * repository (when it is Git-backed) PLUS every nested repository below it, so uncommitted worker
@@ -47,7 +46,27 @@ public class CorrectionWorkspaceTransaction {
    */
   static final String GENERATION_PREIMAGE_VERSION = "v2\n";
 
-  private final CorrectionGitCommands commands = new CorrectionGitCommands();
+  @FunctionalInterface
+  interface PhysicalMutationObserver {
+    void afterMutation(String label, Path repository);
+  }
+
+  private final CorrectionGitCommands commands;
+  private final NonExecutingGitTreeWriter treeWriter;
+  private final PhysicalMutationObserver physicalMutations;
+
+  public CorrectionWorkspaceTransaction() {
+    this(new CorrectionGitCommands(), new NonExecutingGitTreeWriter(), (label, repository) -> {});
+  }
+
+  CorrectionWorkspaceTransaction(
+      CorrectionGitCommands commands,
+      NonExecutingGitTreeWriter treeWriter,
+      PhysicalMutationObserver physicalMutations) {
+    this.commands = Objects.requireNonNull(commands);
+    this.treeWriter = Objects.requireNonNull(treeWriter);
+    this.physicalMutations = Objects.requireNonNull(physicalMutations);
+  }
 
   /**
    * Captures the current content-addressed workspace generation without retaining rollback state.
@@ -300,51 +319,52 @@ public class CorrectionWorkspaceTransaction {
     }
   }
 
+  /**
+   * Idempotent single-repository rollback primitive for the durable workspace-generation saga.
+   * Replaying this method after any individual Git mutation is safe; the final tree attestation is
+   * the only success signal.
+   */
+  public void rollbackRepository(
+      Checkpoint checkpoint, RepositoryCheckpoint repository, Runnable authorityFence) {
+    Objects.requireNonNull(checkpoint, "checkpoint");
+    Objects.requireNonNull(repository, "repository");
+    Objects.requireNonNull(authorityFence, "authorityFence");
+    if (!checkpoint.repositories().contains(repository)) {
+      throw new IllegalArgumentException("CORRECTION_REPOSITORY_NOT_IN_CHECKPOINT");
+    }
+    authorityFence.run();
+    restore(repository, checkpoint.nestedRepositoriesOf(repository), authorityFence);
+  }
+
+  /** Non-mutating exact-tree proof used to settle an APPLIED repository step after restart. */
+  public String attestRepository(
+      Checkpoint checkpoint, RepositoryCheckpoint repository, Runnable authorityFence) {
+    Objects.requireNonNull(checkpoint, "checkpoint");
+    Objects.requireNonNull(repository, "repository");
+    Objects.requireNonNull(authorityFence, "authorityFence");
+    if (!checkpoint.repositories().contains(repository)) {
+      throw new IllegalArgumentException("CORRECTION_REPOSITORY_NOT_IN_CHECKPOINT");
+    }
+    authorityFence.run();
+    assertHeadUnchanged(repository);
+    return writeTree(
+        repository.repository(), checkpoint.nestedRepositoriesOf(repository), authorityFence);
+  }
+
   private RepositoryCheckpoint capture(Path repository, List<String> nestedRepositories) {
-    String head = commands.git(repository, "rev-parse", "HEAD").trim();
+    String head = treeWriter.head(repository);
     String tree = writeTree(repository, nestedRepositories, () -> {});
     return new RepositoryCheckpoint(repository.toAbsolutePath().normalize(), head, tree);
   }
 
   /**
-   * Computes the content-addressed working-tree object through a TEMPORARY index file, so the live
-   * caller-owned index is never staged or reset and pre-staged caller state survives untouched.
-   * Nested repository paths are removed/excluded so the parent tree owns none of their bytes.
+   * Computes the content-addressed working-tree object without a Git subprocess, temporary index,
+   * or repository-controlled filter/helper execution. The live index remains untouched. Nested
+   * repository paths are removed/excluded so the parent tree owns none of their bytes.
    */
   private String writeTree(
       Path repository, List<String> nestedRepositories, Runnable authorityFence) {
-    authorityFence.run();
-    Path indexFile =
-        commands.gitDir(repository).resolve("es-generation-" + UUID.randomUUID() + ".idx");
-    try {
-      if (commands.hasCommit(repository)) {
-        authorityFence.run();
-        commands.gitIndexed(repository, indexFile, "read-tree", "HEAD");
-        if (!nestedRepositories.isEmpty()) {
-          List<String> remove =
-              new ArrayList<>(List.of("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--"));
-          remove.addAll(nestedRepositories);
-          authorityFence.run();
-          commands.gitIndexed(repository, indexFile, remove.toArray(String[]::new));
-        }
-      }
-      List<String> add = new ArrayList<>(List.of("add", "-A"));
-      if (!nestedRepositories.isEmpty()) {
-        add.add("--");
-        add.add(".");
-        nestedRepositories.forEach(nested -> add.add(":(exclude)" + nested));
-      }
-      authorityFence.run();
-      commands.gitIndexed(repository, indexFile, add.toArray(String[]::new));
-      authorityFence.run();
-      return commands.gitIndexed(repository, indexFile, "write-tree").trim();
-    } finally {
-      try {
-        Files.deleteIfExists(indexFile);
-      } catch (IOException cleanupFailure) {
-        // The temporary index is content-addressed scratch; a leaked file cannot alter evidence.
-      }
-    }
+    return treeWriter.writeTree(repository, nestedRepositories, authorityFence);
   }
 
   private void restore(
@@ -354,16 +374,20 @@ public class CorrectionWorkspaceTransaction {
     assertHeadUnchanged(checkpoint);
     authorityFence.run();
     commands.git(repository, "reset", "--hard", "--quiet", checkpoint.head());
+    physicalMutations.afterMutation("RESET_HARD", repository);
     authorityFence.run();
     // Nested repositories are restored by their own checkpoint entries; the parent clean must
     // never delete them.
     List<String> clean = new ArrayList<>(List.of("clean", "-fd", "--quiet"));
     nestedRepositories.forEach(nested -> clean.add("--exclude=" + nested));
     commands.git(repository, clean.toArray(String[]::new));
+    physicalMutations.afterMutation("CLEAN_UNTRACKED", repository);
     authorityFence.run();
     commands.git(repository, "read-tree", "--reset", "-u", checkpoint.tree());
+    physicalMutations.afterMutation("READ_TREE", repository);
     authorityFence.run();
     commands.git(repository, "reset", "--mixed", "--quiet", checkpoint.head());
+    physicalMutations.afterMutation("RESET_MIXED", repository);
     authorityFence.run();
     String restored = writeTree(repository, nestedRepositories, authorityFence);
     if (!checkpoint.tree().equals(restored)) {

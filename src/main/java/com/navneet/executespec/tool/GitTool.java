@@ -2,6 +2,7 @@ package com.navneet.executespec.tool;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.function.Supplier;
@@ -992,6 +993,130 @@ public class GitTool {
     } catch (Exception e) {
       log.warn("[GitTool] pushToExistingBranch failed: {}", describeFailure(e));
       return GitToolResult.err("push to existing branch failed: " + describeFailure(e));
+    }
+  }
+
+  /**
+   * Pushes one already-prepared immutable commit object without staging, committing, checking out,
+   * or moving a local ref. This is the only protocol-v2 publication primitive: callers must bind
+   * {@code preparedCommitId} to a durable repository receipt before entering this method.
+   */
+  public GitToolResult pushPreparedCommit(
+      String runId,
+      String subPath,
+      String remoteUrl,
+      String pat,
+      String branchName,
+      String preparedCommitId,
+      String expectedRemoteSha) {
+    Path output = null;
+    try {
+      String repoDir =
+          Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
+      if (preparedCommitId == null || !preparedCommitId.matches("[0-9a-fA-F]{40,64}")) {
+        return GitToolResult.err("prepared commit identity is invalid");
+      }
+      if (branchName == null || branchName.isBlank() || branchName.contains("..")) {
+        return GitToolResult.err("publication branch identity is invalid");
+      }
+      String destination = "refs/heads/" + branchName;
+      java.util.ArrayList<String> args =
+          new java.util.ArrayList<>(
+              java.util.List.of(
+                  "-C", repoDir, "push", remoteUrl, preparedCommitId + ":" + destination));
+      if (expectedRemoteSha != null && !expectedRemoteSha.isBlank()) {
+        if (!expectedRemoteSha.matches("[0-9a-fA-F]{40,64}")) {
+          return GitToolResult.err("expected remote revision is invalid");
+        }
+        args.add("--force-with-lease=" + destination + ":" + expectedRemoteSha.trim());
+      }
+      output = Files.createTempFile("executespec-prepared-push-", ".log");
+      ProcessBuilder push = com.navneet.executespec.repo.GitProcessAuth.git(pat, args);
+      push.redirectErrorStream(true);
+      push.redirectOutput(output.toFile());
+      Process process = push.start();
+      boolean completed = process.waitFor(120, java.util.concurrent.TimeUnit.SECONDS);
+      if (!completed) {
+        process.destroyForcibly();
+        process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        return GitToolResult.err("prepared commit push timed out; remote outcome is unknown");
+      }
+      String detail = Files.readString(output);
+      if (process.exitValue() != 0) {
+        return GitToolResult.err(describePushFailure(branchName, expectedRemoteSha, detail));
+      }
+      return GitToolResult.ok("PUSHED_PREPARED:" + preparedCommitId.toLowerCase());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return GitToolResult.err("prepared commit push interrupted; remote outcome is unknown");
+    } catch (Exception failure) {
+      log.warn("[GitTool] prepared commit push failed: {}", describeFailure(failure));
+      return GitToolResult.err("prepared commit push failed: " + describeFailure(failure));
+    } finally {
+      if (output != null) {
+        try {
+          Files.deleteIfExists(output);
+        } catch (Exception ignored) {
+          // Ephemeral bounded transport log; no publication state depends on cleanup.
+        }
+      }
+    }
+  }
+
+  /** Bitbucket-authenticated variant of {@link #pushPreparedCommit}. */
+  public GitToolResult pushPreparedCommitBitbucket(
+      String runId,
+      String subPath,
+      String remoteUrl,
+      String appPassword,
+      String branchName,
+      String preparedCommitId,
+      String expectedRemoteSha) {
+    Path output = null;
+    try {
+      String repoDir =
+          Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
+      if (preparedCommitId == null || !preparedCommitId.matches("[0-9a-fA-F]{40,64}")) {
+        return GitToolResult.err("prepared commit identity is invalid");
+      }
+      String destination = "refs/heads/" + branchName;
+      java.util.ArrayList<String> args =
+          new java.util.ArrayList<>(
+              java.util.List.of(
+                  "-C", repoDir, "push", remoteUrl, preparedCommitId + ":" + destination));
+      if (expectedRemoteSha != null && !expectedRemoteSha.isBlank()) {
+        args.add("--force-with-lease=" + destination + ":" + expectedRemoteSha.trim());
+      }
+      output = Files.createTempFile("executespec-prepared-bitbucket-push-", ".log");
+      ProcessBuilder push =
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              appPassword, "x-bitbucket-api-token-auth", args);
+      push.redirectErrorStream(true);
+      push.redirectOutput(output.toFile());
+      Process process = push.start();
+      boolean completed = process.waitFor(120, java.util.concurrent.TimeUnit.SECONDS);
+      if (!completed) {
+        process.destroyForcibly();
+        process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        return GitToolResult.err("prepared commit push timed out; remote outcome is unknown");
+      }
+      String detail = Files.readString(output);
+      return process.exitValue() == 0
+          ? GitToolResult.ok("PUSHED_PREPARED:" + preparedCommitId.toLowerCase())
+          : GitToolResult.err(describePushFailure(branchName, expectedRemoteSha, detail));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return GitToolResult.err("prepared commit push interrupted; remote outcome is unknown");
+    } catch (Exception failure) {
+      return GitToolResult.err("prepared commit push failed: " + describeFailure(failure));
+    } finally {
+      if (output != null) {
+        try {
+          Files.deleteIfExists(output);
+        } catch (Exception ignored) {
+          // Ephemeral transport log only.
+        }
+      }
     }
   }
 

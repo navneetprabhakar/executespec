@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.deployment.ControlPlaneSchemaEvidenceExporter;
+
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,135 @@ class WorkspaceGenerationProtocolPostgresTest {
     jdbc.execute("CREATE EXTENSION IF NOT EXISTS vector");
     Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
 
+    WorkspaceGenerationSchemaAttestor.Attestation schema =
+        new WorkspaceGenerationSchemaAttestor(jdbc).attest();
+    assertThat(schema.ready()).isTrue();
+    assertThat(schema.latestSuccessfulMigration()).isEqualTo("399");
+    assertThat(schema.artifacts())
+        .hasSize(62)
+        .allMatch(
+            artifact ->
+                artifact.present()
+                    && artifact.active()
+                    && artifact.definitionSha256().length() == 64);
+    var releaseSchema = new ControlPlaneSchemaEvidenceExporter(jdbc).export(schema);
+    assertThat(releaseSchema.complete()).isTrue();
+    assertThat(releaseSchema.appliedMigrations())
+        .isNotEmpty()
+        .allMatch(ControlPlaneSchemaEvidenceExporter.AppliedMigration::success)
+        .last()
+        .extracting(ControlPlaneSchemaEvidenceExporter.AppliedMigration::version)
+        .isEqualTo("399");
+    assertThat(releaseSchema.definitions())
+        .hasSize(62)
+        .allMatch(
+            definition ->
+                definition.present()
+                    && definition.active()
+                    && definition.digestMatchesAttestor()
+                    && definition.definition() != null
+                    && !definition.definition().isBlank());
+    jdbc.execute(
+        "ALTER TABLE pipeline_run DISABLE TRIGGER pipeline_run_build_protocol_version_immutable");
+    var disabledSchema = new WorkspaceGenerationSchemaAttestor(jdbc).attest();
+    assertThat(disabledSchema.ready()).isFalse();
+    var disabledReleaseSchema = new ControlPlaneSchemaEvidenceExporter(jdbc).export(disabledSchema);
+    assertThat(disabledReleaseSchema.complete()).isFalse();
+    assertThat(disabledSchema.artifacts())
+        .filteredOn(
+            artifact -> "pipeline_run_build_protocol_version_immutable".equals(artifact.name()))
+        .singleElement()
+        .satisfies(
+            artifact -> {
+              assertThat(artifact.present()).isTrue();
+              assertThat(artifact.active()).isFalse();
+            });
+    jdbc.execute(
+        "ALTER TABLE pipeline_run ENABLE TRIGGER pipeline_run_build_protocol_version_immutable");
+
+    jdbc.update(
+        "INSERT INTO pipeline_run(run_id,status,run_mode) VALUES ('cleanup-run','FAILED','PATCH')");
+    WorkspaceGenerationRecoveryCleanupStore cleanupStore =
+        new WorkspaceGenerationRecoveryCleanupStore(jdbc);
+    cleanupStore.enqueue("cleanup-run", "/tmp/cleanup-run.displaced-fixture");
+    cleanupStore.enqueue("cleanup-run", "/tmp/cleanup-run.displaced-fixture");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM workspace_generation_recovery_cleanup WHERE"
+                    + " run_id='cleanup-run'",
+                Integer.class))
+        .isEqualTo(1);
+    var cleanupClaim1 = cleanupStore.claimNext(java.time.Duration.ZERO).orElseThrow();
+    cleanupStore.fail(cleanupClaim1, "fixture failure");
+    var cleanupClaim2 = cleanupStore.claimNext(java.time.Duration.ZERO).orElseThrow();
+    assertThat(cleanupClaim2.attempt()).isEqualTo(2);
+    cleanupStore.complete(cleanupClaim2);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT status FROM workspace_generation_recovery_cleanup WHERE"
+                    + " run_id='cleanup-run'",
+                String.class))
+        .isEqualTo("COMPLETED");
+
+    String pinnedRun = "run-v385-pinned";
+    UUID pinnedAttempt = UUID.randomUUID();
+    jdbc.update(
+        "INSERT INTO pipeline_run(run_id,status,run_mode,build_protocol_version)"
+            + " VALUES (?,'WORKING','BUILD','SHARED_KERNEL_V2')",
+        pinnedRun);
+    jdbc.update(
+        "INSERT INTO workspace_generation_attempt(id,run_id,task_id,task_index,attempt_number,"
+            + "attempt_kind,state,workspace_root,authority_digest,task_contract_digest,"
+            + "build_protocol_version) VALUES (?,?,'T1',0,1,'BUILD_TASK','ADMITTED',"
+            + "'/tmp/pinned',repeat('1',64),repeat('2',64),'SHARED_KERNEL_V2')",
+        pinnedAttempt,
+        pinnedRun);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO workspace_generation_attempt(id,run_id,task_id,task_index,"
+                        + "attempt_number,attempt_kind,state,workspace_root,authority_digest,"
+                        + "task_contract_digest,build_protocol_version) VALUES (?,?,'T2',1,1,"
+                        + "'BUILD_TASK','ADMITTED','/tmp/mismatch',repeat('1',64),repeat('2',64),"
+                        + "'LEGACY_V1')",
+                    UUID.randomUUID(),
+                    pinnedRun))
+        .rootCause()
+        .hasMessageContaining("does not match parent run");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    typedUnavailableReceiptInsert(null, null),
+                    UUID.randomUUID(),
+                    pinnedAttempt,
+                    "3".repeat(64),
+                    "2".repeat(64),
+                    "4".repeat(64),
+                    "5".repeat(64)))
+        .rootCause()
+        .hasMessageContaining("protocol-v2 workspace verification causality is incomplete");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE pipeline_run SET build_protocol_version='LEGACY_V1' WHERE run_id=?",
+                    pinnedRun))
+        .rootCause()
+        .hasMessageContaining("BUILD protocol identity/disposition is immutable");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO pipeline_run(run_id,status,run_mode,build_protocol_version)"
+                        + " VALUES ('run-v385-patch','WORKING','PATCH','SHARED_KERNEL_V2')"))
+        .rootCause()
+        .hasMessageContaining("non-BUILD run cannot carry a BUILD protocol version");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO pipeline_run(run_id,status,run_mode,build_protocol_version)"
+                        + " VALUES ('run-v385-null-mode','WORKING',NULL,'SHARED_KERNEL_V2')"))
+        .rootCause()
+        .hasMessageContaining("non-BUILD run cannot carry a BUILD protocol version");
+
     String runId = "run-v374";
     UUID attemptId = UUID.randomUUID();
     UUID workspaceToken = UUID.randomUUID();
@@ -48,6 +180,10 @@ class WorkspaceGenerationProtocolPostgresTest {
     String contract = "c".repeat(64);
     jdbc.update("INSERT INTO pipeline_run(run_id,status) VALUES (?, 'WORKING')", runId);
     jdbc.update(
+        "INSERT INTO agent_task(task_id,run_id,status,recovery_attempt,started_at)"
+            + " VALUES ('run-v374_T1',?,'WORKING',0,NOW())",
+        runId);
+    jdbc.update(
         "INSERT INTO run_workspace_authority(run_id,authority_type,owner_token,lease_expires_at,"
             + "heartbeat_at) VALUES (?,'BUILD_GENERATION',?::uuid,"
             + "now() + interval '10 minutes',now())",
@@ -56,6 +192,14 @@ class WorkspaceGenerationProtocolPostgresTest {
     String unboundRun = "run-v383-unbound";
     UUID unboundAttempt = UUID.randomUUID();
     jdbc.update("INSERT INTO pipeline_run(run_id,status) VALUES (?, 'WORKING')", unboundRun);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE pipeline_run SET build_protocol_version='SHARED_KERNEL_V2'"
+                        + " WHERE run_id=?",
+                    unboundRun))
+        .rootCause()
+        .hasMessageContaining("BUILD protocol identity/disposition is immutable");
     jdbc.update(
         "INSERT INTO workspace_generation_attempt(id,run_id,task_id,task_index,attempt_number,"
             + "attempt_kind,state,workspace_root,authority_digest,task_contract_digest)"
@@ -63,6 +207,14 @@ class WorkspaceGenerationProtocolPostgresTest {
             + "repeat('2',64))",
         unboundAttempt,
         unboundRun);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET"
+                        + " build_protocol_version='SHARED_KERNEL_V2' WHERE id=?",
+                    unboundAttempt))
+        .rootCause()
+        .hasMessageContaining("BUILD protocol identity/disposition is immutable");
     assertThatThrownBy(
             () ->
                 jdbc.update(
@@ -93,7 +245,7 @@ class WorkspaceGenerationProtocolPostgresTest {
         llmContextId,
         llmOperationId,
         llmToken,
-        java.time.Duration.ofMillis(500));
+        java.time.Duration.ofSeconds(2));
     jdbc.update(
         "UPDATE pipeline_run SET accepted_workspace_generation=?,accepted_task_index=-1"
             + " WHERE run_id=?",
@@ -229,7 +381,7 @@ FROM workspace_generation_attempt WHERE id=?
         .rootCause()
         .hasMessageContaining("illegal RUNNING operation heartbeat");
     try {
-      Thread.sleep(600);
+      Thread.sleep(2100);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       throw new AssertionError(interrupted);
@@ -308,16 +460,39 @@ FROM workspace_generation_attempt WHERE id=?
         .rootCause()
         .hasMessageContaining("lacks an exact completed checkpoint");
 
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET checkpoint_kind='GCS',"
+                        + " checkpoint_key='gs://bucket/unbound.tar.gz',"
+                        + " checkpoint_generation=?,checkpoint_digest=?,"
+                        + " checkpoint_completed_at=NOW() WHERE id=?",
+                    candidate,
+                    "1".repeat(64),
+                    attemptId))
+        .rootCause()
+        .hasMessageContaining("checkpoint storage identity is incomplete");
+
     jdbc.update(
         """
         UPDATE workspace_generation_attempt
            SET checkpoint_kind='GCS', checkpoint_key='gs://bucket/run-v374.zip',
-               checkpoint_generation=?, checkpoint_digest=?, checkpoint_completed_at=NOW()
+               checkpoint_generation=?, checkpoint_digest=?,
+               checkpoint_storage_generation='fixture-generation', checkpoint_size_bytes=1024,
+               checkpoint_crc32c='fixture-crc', checkpoint_etag='fixture-etag',
+               checkpoint_completed_at=NOW()
          WHERE id=?
         """,
         candidate,
         "1".repeat(64),
         attemptId);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET checkpoint_etag='replaced' WHERE id=?",
+                    attemptId))
+        .rootCause()
+        .hasMessageContaining("checkpoint storage identity is immutable");
     assertThatThrownBy(
             () ->
                 jdbc.update(
@@ -327,8 +502,22 @@ FROM workspace_generation_attempt WHERE id=?
         .rootCause()
         .hasMessageContaining("checkpoint receipt is immutable");
     jdbc.update(
-        "UPDATE workspace_generation_attempt SET state='ACCEPTED',resolved_at=NOW() WHERE id=?",
+        "UPDATE workspace_generation_attempt SET state='ACCEPTED',resolved_at=NOW(),"
+            + "task_transition_kind='MARK_COMPLETE',task_transition_state='PENDING' WHERE id=?",
         attemptId);
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT task_transition_kind,task_transition_state,"
+                    + "task_transition_expected_status,task_transition_expected_recovery_attempt,"
+                    + "operation_transition_target,operation_transition_state "
+                    + "FROM workspace_generation_attempt WHERE id=?",
+                attemptId))
+        .containsEntry("task_transition_kind", "MARK_COMPLETE")
+        .containsEntry("task_transition_state", "PENDING")
+        .containsEntry("task_transition_expected_status", "WORKING")
+        .containsEntry("task_transition_expected_recovery_attempt", 0)
+        .containsEntry("operation_transition_target", "SUCCEEDED")
+        .containsEntry("operation_transition_state", "PENDING");
     jdbc.update(
         "UPDATE pipeline_run SET accepted_workspace_generation=?,accepted_task_index=0,"
             + " accepted_generation_attempt_id=?,accepted_checkpoint_kind='GCS',"
@@ -342,6 +531,11 @@ FROM workspace_generation_attempt WHERE id=?
         attemptId,
         runId);
 
+    assertThatThrownBy(
+            () -> jdbc.update("UPDATE pipeline_run SET status='COMPLETE' WHERE run_id=?", runId))
+        .rootCause()
+        .hasMessageContaining("terminal BUILD run retains unresolved generation state");
+
     WorkspaceGenerationOperationReconciler operationReconciler =
         new WorkspaceGenerationOperationReconciler(jdbc);
     assertThat(operationReconciler.reconcile(attemptId))
@@ -352,6 +546,15 @@ FROM workspace_generation_attempt WHERE id=?
                 String.class,
                 llmOperationId))
         .isEqualTo("SUCCEEDED");
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT operation_transition_target,operation_transition_state,"
+                    + "operation_transition_completed_at IS NOT NULL AS receipted "
+                    + "FROM workspace_generation_attempt WHERE id=?",
+                attemptId))
+        .containsEntry("operation_transition_target", "SUCCEEDED")
+        .containsEntry("operation_transition_state", "COMPLETED")
+        .containsEntry("receipted", true);
     operationReconciler.assertRunConverged(runId);
 
     assertThat(
@@ -432,7 +635,9 @@ FROM workspace_generation_attempt WHERE id=?
     jdbc.update(
         "UPDATE workspace_generation_attempt SET checkpoint_kind='GCS',"
             + "checkpoint_key='gs://bucket/run-v374-next.zip',checkpoint_generation=?,"
-            + "checkpoint_digest=?,checkpoint_completed_at=NOW() WHERE id=?",
+            + "checkpoint_digest=?,checkpoint_storage_generation='fixture-generation',"
+            + "checkpoint_size_bytes=1024,checkpoint_crc32c='fixture-crc',"
+            + "checkpoint_etag='fixture-etag',checkpoint_completed_at=NOW() WHERE id=?",
         nextCandidate,
         "7".repeat(64),
         nextAttemptId);
@@ -455,6 +660,11 @@ FROM workspace_generation_attempt WHERE id=?
                     runId))
         .rootCause()
         .hasMessageContaining("lacks exact checkpoint receipt");
+    // The intentionally rejected frontier write leaves a terminal attempt in this fixture. Its
+    // exact physical operation still has to consume the durable terminal intent before any later
+    // sequential BUILD attempt may be admitted.
+    assertThat(operationReconciler.reconcile(nextAttemptId))
+        .isEqualTo(WorkspaceGenerationOperationReconciler.Outcome.RECONCILED);
 
     assertThatThrownBy(
             () ->
@@ -462,6 +672,37 @@ FROM workspace_generation_attempt WHERE id=?
                     "UPDATE workspace_generation_verification_receipt SET evidence_json='{}'"
                         + " WHERE id=?",
                     passingReceipt))
+        .rootCause()
+        .hasMessageContaining("receipts are immutable");
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    typedUnavailableReceiptInsert("PRODUCT", "BUILD_POLICY_DENIED"),
+                    UUID.randomUUID(),
+                    nextAttemptId,
+                    nextCandidate,
+                    nextContract,
+                    "7".repeat(64),
+                    "8".repeat(64)))
+        .rootCause()
+        .hasMessageContaining("workspace_generation_verification_failure_shape_chk");
+    UUID unavailableReceipt = UUID.randomUUID();
+    assertThat(
+            jdbc.update(
+                typedUnavailableReceiptInsert("ENVIRONMENT", "BUILD_POLICY_DENIED"),
+                unavailableReceipt,
+                nextAttemptId,
+                nextCandidate,
+                nextContract,
+                "9".repeat(64),
+                "a".repeat(64)))
+        .isEqualTo(1);
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_verification_receipt"
+                        + " SET failure_category='INTERNAL_PROTOCOL' WHERE id=?",
+                    unavailableReceipt))
         .rootCause()
         .hasMessageContaining("receipts are immutable");
     assertThatThrownBy(
@@ -609,8 +850,22 @@ VALUES (?,'run-v374','T3',2,1,'BUILD_TASK','ADMITTED','/tmp/run-v374',?,?)
                 recoveryAttemptId))
         .isEqualTo("INTERRUPTED_GENERATION_RECOVERED");
 
-    jdbc.update("DELETE FROM pipeline_run WHERE run_id=?", runId);
-    jdbc.update("DELETE FROM pipeline_run WHERE run_id=?", recoveryRunId);
+    WorkspaceGenerationHistoricalAdjudicationService adjudication =
+        new WorkspaceGenerationHistoricalAdjudicationService(jdbc, new ObjectMapper());
+    for (String historicalRun : java.util.List.of(runId, recoveryRunId)) {
+      var release =
+          adjudication.dryRun(
+              WorkspaceGenerationHistoricalAdjudicationService.RecordKind.RUN,
+              historicalRun,
+              WorkspaceGenerationHistoricalAdjudicationService.Action.RELEASE_FOR_DELETION,
+              "Protocol fixture explicitly releases retained legacy evidence after verification.",
+              "postgres-fixture");
+      adjudication.apply(
+          release.id(),
+          "Protocol fixture explicitly applies the exact retained-evidence deletion release.",
+          "postgres-fixture");
+      jdbc.update("DELETE FROM pipeline_run WHERE run_id=?", historicalRun);
+    }
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM workspace_generation_attempt WHERE id=?",
@@ -634,6 +889,21 @@ INSERT INTO workspace_generation_verification_receipt(
 VALUES (?,?,?,?,'BUILD_ONLY','SERVER_RESOLVED_CONTRACT',?,'FAILED',FALSE,FALSE,
   0,0,0,0,'{}'::jsonb,?,NOW(),NOW())
 """;
+  }
+
+  private static String typedUnavailableReceiptInsert(String category, String environmentCode) {
+    String categorySql = category == null ? "NULL" : "'" + category + "'";
+    String environmentSql = environmentCode == null ? "NULL" : "'" + environmentCode + "'";
+    return """
+INSERT INTO workspace_generation_verification_receipt(
+  id,attempt_id,candidate_generation,task_contract_digest,verifier_kind,command_source,
+  command_digest,outcome,failure_category,environment_code,execution_boundary,build_passed,
+  tests_executed,tests_passed,tests_failed,tests_errors,tests_skipped,evidence_json,evidence_digest,
+  started_at,completed_at)
+VALUES (?,?,?,?,'BUILD_ONLY','SERVER_RESOLVED_CONTRACT',?,'UNAVAILABLE',
+  %s,%s,'DISPOSABLE_EXACT_GENERATION',FALSE,FALSE,0,0,0,0,'{}'::jsonb,?,NOW(),NOW())
+"""
+        .formatted(categorySql, environmentSql);
   }
 
   private static int authorityCount(JdbcTemplate jdbc, UUID attemptId, String expectedState) {

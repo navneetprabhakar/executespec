@@ -1399,6 +1399,10 @@ executespec:
     test-mode: false
     reservation-id: ""
   sandbox:
+    # Release qualification requires the deployed value to be digest-pinned. The mutable default
+    # remains deliberately unqualified so a missing deployment override fails attestation closed.
+    image: ${SANDBOX_IMAGE:docker.io/library/debian:stable-slim}
+    workspace-root: ${SANDBOX_WORKSPACE_ROOT:/var/lib/executespec/sandboxes}
     # Must match the deployed non-root service/workspace owner before strict routing is enabled.
     # Provisioning verifies ownership and never chmods/chowns customer data.
     runtime-uid: ${SANDBOX_RUNTIME_UID:65532}

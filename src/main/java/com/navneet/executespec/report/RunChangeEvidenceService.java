@@ -1,16 +1,13 @@
 package com.navneet.executespec.report;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -19,6 +16,16 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.state.entity.RunRepoSnapshot;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.diff.DiffEntry;
+import org.eclipse.jgit.lib.Constants;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
+import org.eclipse.jgit.treewalk.CanonicalTreeParser;
+import org.eclipse.jgit.treewalk.FileTreeIterator;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -38,7 +45,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunChangeEvidenceService {
 
-  private static final Duration GIT_TIMEOUT = Duration.ofSeconds(60);
   private static final Pattern TOOL_PATH_PATTERN =
       Pattern.compile("\\\"(?:path|file)\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
   private static final Pattern PATCH_PATH_PATTERN =
@@ -57,6 +63,12 @@ public class RunChangeEvidenceService {
 
   public ChangeEvidence inspect(String runId, List<WorkerReport> workerReports) {
     Path workspace = Path.of(properties.getWorkspace(), runId).toAbsolutePath().normalize();
+    return inspect(runId, workspace, workerReports);
+  }
+
+  /** Exact-generation sibling used by disposable BUILD validation. */
+  public ChangeEvidence inspect(String runId, Path workspace, List<WorkerReport> workerReports) {
+    if (workspace != null) workspace = workspace.toAbsolutePath().normalize();
     if (!Files.isDirectory(workspace)) {
       return ChangeEvidence.invalid("workspace is unavailable");
     }
@@ -88,24 +100,21 @@ public class RunChangeEvidenceService {
         // A single-commit history is the one case where root IS the run baseline: the workspace
         // was initialised for this run and `gitCommit` is filtered out of worker authority, so
         // nothing can advance HEAD mid-run. Any deeper history is unprovable — fail closed.
-        String baseline = git(workspace, "rev-list", "--max-parents=0", "HEAD").trim();
-        if (baseline.isBlank())
+        History history = history(workspace);
+        String baseline = history.rootCommit();
+        if (baseline == null || baseline.isBlank())
           return ChangeEvidence.invalid("workspace Git baseline is unavailable");
-        String commitCount = git(workspace, "rev-list", "--count", "HEAD").trim();
         boolean managedFinalCommit =
-            "2".equals(commitCount)
-                && "init agent workspace"
-                    .equals(git(workspace, "log", "-1", "--format=%s", baseline).trim())
-                && ("V2 run output for " + runId)
-                    .equals(git(workspace, "log", "-1", "--format=%s", "HEAD").trim());
-        if (!"1".equals(commitCount) && !managedFinalCommit) {
+            history.commitCount() == 2
+                && "init agent workspace".equals(history.rootMessage())
+                && ("V2 run output for " + runId).equals(history.headMessage());
+        if (history.commitCount() != 1 && !managedFinalCommit) {
           return ChangeEvidence.invalid(
               "no admitted run-start snapshot for this workspace; the repository root commit is"
                   + " not a valid run baseline");
         }
-        collectDiff(
-            workspace, baseline.lines().findFirst().orElse(baseline), "", workerPaths, files);
-        baselines.add("workspace@" + baseline.lines().findFirst().orElse(baseline));
+        collectDiff(workspace, baseline, "", workerPaths, files);
+        baselines.add("workspace@" + baseline);
       } else {
         return ChangeEvidence.invalid("workspace has no admitted Git baseline");
       }
@@ -180,51 +189,65 @@ public class RunChangeEvidenceService {
 
   private void collectDiff(
       Path repo, String baseline, String prefix, Set<String> workerPaths, List<ChangedFile> output)
-      throws IOException, InterruptedException {
-    String diff = git(repo, "diff", "--name-status", "--find-renames", baseline, "--");
-    for (String line : diff.lines().toList()) {
-      if (line.isBlank()) continue;
-      String[] fields = line.split("\\t");
-      if (fields.length < 2) continue;
-      String status = fields[0];
-      String relative = fields[fields.length - 1].replace('\\', '/');
-      String path = prefix + relative;
-      boolean workerClaimed =
-          workerPaths.contains(normalize(path)) || workerPaths.contains(normalize(relative));
-      boolean system =
-          isSystemPath(relative) || ("readme.md".equals(normalize(relative)) && !workerClaimed);
-      Provenance provenance =
-          system
-              ? Provenance.SYSTEM
-              : workerClaimed ? Provenance.WORKER : Provenance.REVIEWER_OR_POST_PROCESSING;
-      output.add(new ChangedFile(path, status, provenance, !system));
+      throws Exception {
+    Set<String> untracked;
+    try (Repository repository = open(repo);
+        Git git = new Git(repository);
+        RevWalk walk = new RevWalk(repository);
+        var reader = repository.newObjectReader()) {
+      ObjectId baselineId = repository.resolve(baseline);
+      if (baselineId == null) throw new IllegalStateException("baseline commit is unavailable");
+      RevCommit baselineCommit = walk.parseCommit(baselineId);
+      CanonicalTreeParser oldTree = new CanonicalTreeParser();
+      oldTree.reset(reader, baselineCommit.getTree());
+      FileTreeIterator workingTree = new FileTreeIterator(repository);
+      List<DiffEntry> changes =
+          git.diff()
+              .setOldTree(oldTree)
+              .setNewTree(workingTree)
+              .setShowNameAndStatusOnly(true)
+              .call();
+      for (DiffEntry change : changes) {
+        String relative =
+            (change.getChangeType() == DiffEntry.ChangeType.DELETE
+                    ? change.getOldPath()
+                    : change.getNewPath())
+                .replace('\\', '/');
+        addChanged(
+            relative, change.getChangeType().name().substring(0, 1), prefix, workerPaths, output);
+      }
+      untracked = Set.copyOf(git.status().call().getUntracked());
     }
-    // `git diff <baseline>` does not include untracked worker-created files. Include them from the
-    // same checkout, while retaining the deterministic/system exclusions above.
-    String untracked = git(repo, "ls-files", "--others", "--exclude-standard");
     Set<String> alreadySeen =
         output.stream()
             .map(ChangedFile::path)
             .map(RunChangeEvidenceService::normalize)
             .collect(java.util.stream.Collectors.toSet());
-    for (String relativeRaw : untracked.lines().toList()) {
+    for (String relativeRaw : untracked.stream().sorted().toList()) {
       if (relativeRaw.isBlank()) continue;
       String relative = relativeRaw.replace('\\', '/');
       String path = prefix + relative;
       if (alreadySeen.contains(normalize(path))) continue;
-      boolean workerClaimed =
-          workerPaths.contains(normalize(path)) || workerPaths.contains(normalize(relative));
-      boolean system =
-          isSystemPath(relative) || ("readme.md".equals(normalize(relative)) && !workerClaimed);
-      output.add(
-          new ChangedFile(
-              path,
-              "A",
-              system
-                  ? Provenance.SYSTEM
-                  : workerClaimed ? Provenance.WORKER : Provenance.REVIEWER_OR_POST_PROCESSING,
-              !system));
+      addChanged(relative, "A", prefix, workerPaths, output);
     }
+  }
+
+  private static void addChanged(
+      String relative,
+      String status,
+      String prefix,
+      Set<String> workerPaths,
+      List<ChangedFile> output) {
+    String path = prefix + relative;
+    boolean workerClaimed =
+        workerPaths.contains(normalize(path)) || workerPaths.contains(normalize(relative));
+    boolean system =
+        isSystemPath(relative) || ("readme.md".equals(normalize(relative)) && !workerClaimed);
+    Provenance provenance =
+        system
+            ? Provenance.SYSTEM
+            : workerClaimed ? Provenance.WORKER : Provenance.REVIEWER_OR_POST_PROCESSING;
+    output.add(new ChangedFile(path, status, provenance, !system));
   }
 
   private static boolean isSystemPath(String relative) {
@@ -284,33 +307,38 @@ public class RunChangeEvidenceService {
     }
   }
 
-  private static String git(Path directory, String... arguments)
-      throws IOException, InterruptedException {
-    List<String> command = new ArrayList<>();
-    command.add("git");
-    command.addAll(List.of(arguments));
-    Path outputFile = Files.createTempFile("executespec-git-evidence-", ".log");
-    try {
-      Process process =
-          new ProcessBuilder(command)
-              .directory(directory.toFile())
-              .redirectErrorStream(true)
-              .redirectOutput(outputFile.toFile())
-              .start();
-      boolean completed = process.waitFor(GIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      if (!completed) {
-        process.destroyForcibly();
-        throw new IOException("git command timed out");
+  private static History history(Path workTree) throws Exception {
+    try (Repository repository = open(workTree);
+        RevWalk walk = new RevWalk(repository)) {
+      ObjectId headId = repository.resolve(Constants.HEAD);
+      if (headId == null) throw new IllegalStateException("workspace HEAD is unavailable");
+      RevCommit head = walk.parseCommit(headId);
+      walk.markStart(head);
+      int count = 0;
+      List<RevCommit> roots = new ArrayList<>();
+      for (RevCommit commit : walk) {
+        count++;
+        if (commit.getParentCount() == 0) roots.add(commit);
       }
-      String output = Files.readString(outputFile, StandardCharsets.UTF_8);
-      if (process.exitValue() != 0) {
-        throw new IOException("git " + arguments[0] + " failed: " + output.trim());
+      if (roots.size() != 1) {
+        throw new IllegalStateException("workspace history must have exactly one root commit");
       }
-      return output;
-    } finally {
-      Files.deleteIfExists(outputFile);
+      RevCommit root = roots.getFirst();
+      return new History(
+          root.getId().name(), count, root.getFullMessage().strip(), head.getFullMessage().strip());
     }
   }
+
+  private static Repository open(Path workTree) throws Exception {
+    return new FileRepositoryBuilder()
+        .setWorkTree(workTree.toFile())
+        .findGitDir(workTree.toFile())
+        .setMustExist(true)
+        .build();
+  }
+
+  private record History(
+      String rootCommit, int commitCount, String rootMessage, String headMessage) {}
 
   public enum Provenance {
     WORKER,

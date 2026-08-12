@@ -74,6 +74,110 @@ final class WorkspaceGenerationPostgresFixture {
       String operationId,
       UUID operationToken,
       Duration operationLease) {
+    return insertPreparedExact(
+        jdbc,
+        attemptId,
+        runId,
+        taskId,
+        taskIndex,
+        attemptNumber,
+        workspaceRoot,
+        workspaceToken,
+        beforeGeneration,
+        repositoriesJson,
+        authorityDigest,
+        taskContractDigest,
+        ignoredBaselineJson,
+        ignoredBaselineDigest,
+        beforeCheckpointKind,
+        beforeCheckpointKey,
+        beforeCheckpointDigest,
+        "fixture-generation",
+        1024,
+        "fixture-crc",
+        "fixture-etag",
+        contextId,
+        operationId,
+        operationToken,
+        operationLease);
+  }
+
+  static OperationBinding insertPreparedExact(
+      JdbcTemplate jdbc,
+      UUID attemptId,
+      String runId,
+      String taskId,
+      int taskIndex,
+      int attemptNumber,
+      String workspaceRoot,
+      UUID workspaceToken,
+      String beforeGeneration,
+      String repositoriesJson,
+      String authorityDigest,
+      String taskContractDigest,
+      String ignoredBaselineJson,
+      String ignoredBaselineDigest,
+      String beforeCheckpointKind,
+      String beforeCheckpointKey,
+      String beforeCheckpointDigest,
+      String storageGeneration,
+      long sizeBytes,
+      String crc32c,
+      String etag) {
+    return insertPreparedExact(
+        jdbc,
+        attemptId,
+        runId,
+        taskId,
+        taskIndex,
+        attemptNumber,
+        workspaceRoot,
+        workspaceToken,
+        beforeGeneration,
+        repositoriesJson,
+        authorityDigest,
+        taskContractDigest,
+        ignoredBaselineJson,
+        ignoredBaselineDigest,
+        beforeCheckpointKind,
+        beforeCheckpointKey,
+        beforeCheckpointDigest,
+        storageGeneration,
+        sizeBytes,
+        crc32c,
+        etag,
+        "ctx-" + UUID.randomUUID(),
+        "op-" + UUID.randomUUID(),
+        UUID.randomUUID(),
+        Duration.ofMinutes(10));
+  }
+
+  private static OperationBinding insertPreparedExact(
+      JdbcTemplate jdbc,
+      UUID attemptId,
+      String runId,
+      String taskId,
+      int taskIndex,
+      int attemptNumber,
+      String workspaceRoot,
+      UUID workspaceToken,
+      String beforeGeneration,
+      String repositoriesJson,
+      String authorityDigest,
+      String taskContractDigest,
+      String ignoredBaselineJson,
+      String ignoredBaselineDigest,
+      String beforeCheckpointKind,
+      String beforeCheckpointKey,
+      String beforeCheckpointDigest,
+      String storageGeneration,
+      long sizeBytes,
+      String crc32c,
+      String etag,
+      String contextId,
+      String operationId,
+      UUID operationToken,
+      Duration operationLease) {
     jdbc.update(
         "INSERT INTO llm_execution_context("
             + "id,context_type,feature,source_type,source_id,correlation_id,scope_mode,isolation_key,"
@@ -100,8 +204,12 @@ final class WorkspaceGenerationPostgresFixture {
     jdbc.update(
         "INSERT INTO workspace_generation_attempt("
             + "id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,"
-            + "authority_digest,task_contract_digest,created_at,updated_at)"
-            + " VALUES (?,?,?,?,?,'BUILD_TASK','ADMITTED',?,?,?,NOW(),NOW())",
+            + "authority_digest,task_contract_digest,build_protocol_version,"
+            + "verification_command_protocol_version,created_at,updated_at)"
+            + " VALUES (?,?,?,?,?,'BUILD_TASK','ADMITTED',?,?,?,"
+            + "(SELECT build_protocol_version FROM pipeline_run WHERE run_id=?),"
+            + "(SELECT CASE WHEN build_protocol_version='SHARED_KERNEL_V2' THEN 2 ELSE 1 END"
+            + " FROM pipeline_run WHERE run_id=?),NOW(),NOW())",
         attemptId,
         runId,
         taskId,
@@ -109,7 +217,9 @@ final class WorkspaceGenerationPostgresFixture {
         attemptNumber,
         workspaceRoot,
         authorityDigest,
-        taskContractDigest);
+        taskContractDigest,
+        runId,
+        runId);
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='OPERATION_CLAIMED',"
             + "llm_operation_id=?,llm_attempt_number=1,llm_lease_token=?::uuid,updated_at=NOW()"
@@ -127,6 +237,9 @@ final class WorkspaceGenerationPostgresFixture {
             + "repositories_json=?::jsonb,ignored_artifact_baseline_json=?::jsonb,"
             + "ignored_artifact_baseline_digest=?,before_checkpoint_kind=?,"
             + "before_checkpoint_key=?,before_checkpoint_digest=?,"
+            + "before_checkpoint_storage_generation=?,"
+            + "before_checkpoint_size_bytes=?,before_checkpoint_crc32c=?,"
+            + "before_checkpoint_etag=?,"
             + "before_checkpoint_completed_at=NOW(),updated_at=NOW() WHERE id=?",
         beforeGeneration,
         repositoriesJson,
@@ -135,6 +248,10 @@ final class WorkspaceGenerationPostgresFixture {
         beforeCheckpointKind,
         beforeCheckpointKey,
         beforeCheckpointDigest,
+        storageGeneration,
+        sizeBytes,
+        crc32c,
+        etag,
         attemptId);
     return new OperationBinding(contextId, operationId, operationToken);
   }

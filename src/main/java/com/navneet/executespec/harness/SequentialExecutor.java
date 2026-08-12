@@ -898,8 +898,8 @@ to boot — skip it for those.""";
 
     ProviderModelOverride approvedRoute =
         resume == null ? null : providerModelOverrideFor(resume, runId, task.id());
-    java.util.function.Supplier<TaskOutcome> dispatch =
-        () -> {
+    java.util.function.Function<ExecutionContext, TaskOutcome> dispatch =
+        generationContext -> {
           TaskOutcome outcome;
           if (resumeAction.kind() == ResumeKind.RESUME_FROM_SNAPSHOT) {
             log.info(
@@ -914,9 +914,19 @@ to boot — skip it for those.""";
                     isFinalTask,
                     resumeAction.snapshot(),
                     approvedRoute,
-                    runJournal);
+                    runJournal,
+                    generationContext);
           } else {
-            outcome = executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
+            outcome =
+                executeOne(
+                    task,
+                    plan,
+                    req,
+                    isFinalTask,
+                    null,
+                    approvedRoute,
+                    runJournal,
+                    generationContext);
           }
           throwIfCancellationRequested(runId, task.id());
           return outcome;
@@ -1326,10 +1336,11 @@ to boot — skip it for those.""";
     // A different provider/model gets the current workspace plus a compact deterministic dossier,
     // never the previous model's full transcript. Replaying that transcript across models grows
     // every subsequent prompt and anchors the replacement model to the failed reasoning path.
-    java.util.function.Supplier<ProviderModelOverride> routeOverride =
-        () -> {
+    java.util.function.Function<ExecutionContext, ProviderModelOverride> routeOverride =
+        generationContext -> {
           String recoveryNote =
               ProviderHandoffDossier.writeAndReadRecoveryNote(
+                  generationContext,
                   req.runContext().workspaceRoot(),
                   runId,
                   task.id(),
@@ -1356,7 +1367,16 @@ to boot — skip it for those.""";
             candidate.model(),
             taskRecoveryAttempt(runId, task.id()),
             false,
-            () -> executeOne(task, plan, req, isFinalTask, null, routeOverride.get()),
+            generationContext ->
+                executeOne(
+                    task,
+                    plan,
+                    req,
+                    isFinalTask,
+                    null,
+                    routeOverride.apply(generationContext),
+                    null,
+                    generationContext),
             (status, statusReason) ->
                 BuildTaskStatusWriter.persist(
                     taskStatusPersistenceService,
@@ -1667,11 +1687,6 @@ to boot — skip it for those.""";
   private record ContinuationActionLimit(
       String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
 
-  private TaskOutcome executeOne(
-      PlannedTask task, Plan plan, ExecutionRequest req, boolean isFinalTask) {
-    return executeOne(task, plan, req, isFinalTask, null);
-  }
-
   /**
    * Resolves the route for a first worker attempt through the canonical candidate/ranking seam.
    * Retries and resumed workers deliberately bypass this method's selection path.
@@ -1789,44 +1804,14 @@ to boot — skip it for those.""";
       Plan plan,
       ExecutionRequest req,
       boolean isFinalTask,
-      com.navneet.executespec.context.SavedContext resumeFrom) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, null);
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      boolean isFinalTask,
-      com.navneet.executespec.context.SavedContext resumeFrom,
-      List<String> runJournal) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, runJournal);
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      boolean isFinalTask,
-      com.navneet.executespec.context.SavedContext resumeFrom,
-      ProviderModelOverride providerModelOverride) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, providerModelOverride, null);
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom,
       ProviderModelOverride providerModelOverride,
-      List<String> runJournal) {
+      List<String> runJournal,
+      ExecutionContext generationContext) {
     long taskStart = System.currentTimeMillis();
     rememberRecoveryAttempt(req.runContext().runId(), task.id());
     ExecutionContext taskCtx =
-        buildTaskGenerations == null
-            ? req.runContext().child(task.id())
-            : buildTaskGenerations.childContext(req.runContext(), task.id());
+        generationContext == null ? req.runContext().child(task.id()) : generationContext;
     String requestedProvider =
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
@@ -1880,8 +1865,9 @@ to boot — skip it for those.""";
             requestedProvider,
             requestedModel,
             req.localHandsMode());
-    if (buildTaskGenerations != null)
-      systemPrompt = buildTaskGenerations.withAcceptanceDirective(systemPrompt);
+    if (taskCtx.buildAcceptance() != null) {
+      systemPrompt = systemPrompt + taskCtx.buildAcceptance().systemDirective();
+    }
     String workerEvidence =
         PromptComposer.assembleWorkerEvidence(
             task,
@@ -1995,17 +1981,18 @@ to boot — skip it for those.""";
             .strictProvider(providerModelOverride != null || Boolean.TRUE.equals(req.routePinned()))
             .zeroWriteSalvageAllowed(providerModelOverride == null)
             .mutationChurnForceAfter(maxEditChurn())
-            .verifyBeforeComplete(sharedWorkerControl("worker.verify-before-complete.enabled"))
+            .verifyBeforeComplete(
+                sharedWorkerControl(taskCtx, "worker.verify-before-complete.enabled"))
             // progress-v2 (V255, default OFF): novelty-based progress + repetition-based force +
             // bounded text-only retries; the v1 write-only engine is byte-identical when off.
-            .progressV2(sharedWorkerControl("worker.progress-v2.enabled"))
+            .progressV2(sharedWorkerControl(taskCtx, "worker.progress-v2.enabled"))
             // auto-verify (V259, default ON): server-side edit-burst test runs with
             // failure-output injection (schema-free; supersedes V209/V217 on graduation).
-            .autoVerify(sharedWorkerControl("worker.auto-verify.enabled"))
+            .autoVerify(sharedWorkerControl(taskCtx, "worker.auto-verify.enabled"))
             .initialFailureSnapshot(
-                buildTaskGenerations == null
+                taskCtx.buildAcceptance() == null
                     ? null
-                    : buildTaskGenerations.activeInitialFailureSnapshot())
+                    : taskCtx.buildAcceptance().initialFailureSnapshot())
             .workerStartedAtEpochMs(taskStart)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
@@ -2156,7 +2143,8 @@ to boot — skip it for those.""";
     if (!req.enableSmokeTests()) {
       TaskOutcome.Status status =
           softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
-      String persistedStatus = softCompletion ? "PARTIAL" : acceptancePendingStatus("COMPLETE");
+      String persistedStatus =
+          softCompletion ? "PARTIAL" : acceptancePendingStatus(taskCtx, "COMPLETE");
       log.info(
           "Executor task={} {}{}",
           task.id(),
@@ -2185,7 +2173,8 @@ to boot — skip it for those.""";
     if (smoke.passed()) {
       TaskOutcome.Status status =
           softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
-      String persistedStatus = softCompletion ? "PARTIAL" : acceptancePendingStatus("COMPLETE");
+      String persistedStatus =
+          softCompletion ? "PARTIAL" : acceptancePendingStatus(taskCtx, "COMPLETE");
       log.info(
           "Executor task={} {} (smoke exit={}, took {}ms)",
           task.id(),
@@ -2418,7 +2407,7 @@ to boot — skip it for those.""";
     SmokeTestResult retrySmoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (retrySmoke.passed()) {
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
-      String persistedStatus = acceptancePendingStatus("COMPLETE");
+      String persistedStatus = acceptancePendingStatus(taskCtx, "COMPLETE");
       persistTaskStatus(runId, task.id(), persistedStatus);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
@@ -2551,7 +2540,7 @@ to boot — skip it for those.""";
         SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
         if (retry2Smoke.passed()) {
           log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
-          String persistedStatus = acceptancePendingStatus("COMPLETE");
+          String persistedStatus = acceptancePendingStatus(taskCtx, "COMPLETE");
           persistTaskStatus(runId, task.id(), persistedStatus);
           broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
           GoalTaskDecision goalDecision =
@@ -4089,11 +4078,13 @@ to boot — skip it for those.""";
     }
   }
 
-  private boolean sharedWorkerControl(String flag) {
+  private boolean sharedWorkerControl(ExecutionContext context, String flag) {
     boolean configured = featureFlagService != null && featureFlagService.isEnabled(flag);
-    return buildTaskGenerations == null
-        ? configured
-        : buildTaskGenerations.workerControlEnabled(flag, configured);
+    return context != null
+            && context.buildAcceptance() != null
+            && context.buildAcceptance().sharedWorkerControls()
+        ? true
+        : configured;
   }
 
   /**
@@ -4190,10 +4181,13 @@ to boot — skip it for those.""";
     persistTaskStatus(runId, taskIdShort, status, null);
   }
 
-  private String acceptancePendingStatus(String terminalStatus) {
-    return buildTaskGenerations == null
-        ? terminalStatus
-        : buildTaskGenerations.pendingStatus(terminalStatus);
+  private static String acceptancePendingStatus(ExecutionContext context, String terminalStatus) {
+    return "COMPLETE".equals(terminalStatus)
+            && context != null
+            && context.buildAcceptance() != null
+            && context.buildAcceptance().acceptancePending()
+        ? "VERIFYING"
+        : terminalStatus;
   }
 
   /**

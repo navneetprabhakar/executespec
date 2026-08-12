@@ -11,6 +11,7 @@ import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
+import com.navneet.executespec.smoketest.BuildVerificationResult;
 import com.navneet.executespec.testgen.BoundedProcess;
 
 import org.springframework.stereotype.Component;
@@ -143,7 +144,8 @@ public class BuildProjectTool implements Tool {
     String containerId = null;
     String workdir = null;
     boolean applyCompileCheckWrapper = false;
-    if (swebenchContainers != null) {
+    boolean verification = ctx.verificationSandboxAuthority() != null;
+    if (!verification && swebenchContainers != null) {
       String swCid = swebenchContainers.get(ctx.runId());
       if (swCid != null) {
         containerId = swCid;
@@ -151,7 +153,7 @@ public class BuildProjectTool implements Tool {
         applyCompileCheckWrapper = false;
       }
     }
-    if (containerId == null && programBenchContainers != null) {
+    if (!verification && containerId == null && programBenchContainers != null) {
       String pbCid = programBenchContainers.get(ctx.runId());
       if (pbCid != null) {
         containerId = pbCid;
@@ -201,6 +203,18 @@ public class BuildProjectTool implements Tool {
 
     // RR-282 / RR-1674 — sandbox dispatch, ahead of any host ProcessBuilder. Bench cleanrooms keep
     // their own container boundary and are left exactly as they were.
+    if (verification) {
+      if (sandboxRouting == null) {
+        return ToolResult.err(
+            ToolResult.ErrorKind.FORBIDDEN, "verification sandbox routing is unavailable");
+      }
+      SandboxExecResult sandboxed =
+          sandboxRouting.executeVerificationShell(
+              ctx.verificationSandboxAuthority(),
+              bc.command(),
+              Duration.ofSeconds(bc.timeoutSeconds()));
+      return sandboxResult(ctx, bc, sandboxed);
+    }
     if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
       SandboxExecResult sandboxed =
           sandboxRouting.executeShell(
@@ -208,32 +222,96 @@ public class BuildProjectTool implements Tool {
               ctx.workspaceRoot(),
               bc.command(),
               Duration.ofSeconds(bc.timeoutSeconds()));
-      return switch (sandboxed.status()) {
-        case COMPLETED ->
-            ToolResult.ok(
-                buildSummary(
-                    ctx,
-                    bc,
-                    sandboxed.exitCode(),
-                    SandboxCommandRoutingService.combinedOutput(sandboxed),
-                    SandboxCommandRoutingService.CONTAINER_WORKDIR));
-        case TIMED_OUT ->
-            ToolResult.err(
-                ToolResult.ErrorKind.TIMEOUT,
-                "build exceeded "
-                    + bc.timeoutSeconds()
-                    + "s timeout inside the sandbox: "
-                    + bc.command());
-          // Never a host retry: "the sandbox could not run this" is the containment working, and
-          // falling back would reinstate exactly the host execution this routing exists to remove.
-        case UNAVAILABLE, REFUSED ->
-            ToolResult.err(
-                ToolResult.ErrorKind.UNAVAILABLE,
-                "build unavailable — the sandbox could not run it ("
-                    + sandboxed.detail()
-                    + "). It was NOT executed on the application host.");
-      };
+      return sandboxResult(ctx, bc, sandboxed);
     }
+
+    // Existing host/benchmark execution continues below for non-verification callers only.
+    return executeOutsideVerification(ctx, bc, containerId, workdir, applyCompileCheckWrapper);
+  }
+
+  /**
+   * Typed deterministic-verification adapter. Tool errors retain their category instead of being
+   * converted to text and misparsed as a product build failure.
+   */
+  public BuildExecutionEvidence executeForVerification(ExecutionContext ctx) {
+    ToolResult result =
+        execute(com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode(), ctx);
+    String boundary =
+        ctx.verificationSandboxAuthority() == null ? "HOST_OR_CLEANROOM" : "VERIFICATION_SANDBOX";
+    if (result instanceof ToolResult.Ok ok) {
+      BuildVerificationResult parsed = BuildVerificationResult.parse(ok.content());
+      if (parsed.status() == BuildVerificationResult.Status.MALFORMED) {
+        return new BuildExecutionEvidence(
+            BuildExecutionEvidence.Disposition.MALFORMED_EVIDENCE,
+            parsed,
+            ok.content(),
+            "build result envelope was malformed",
+            boundary,
+            false);
+      }
+      if (parsed.status() == BuildVerificationResult.Status.UNAVAILABLE) {
+        return new BuildExecutionEvidence(
+            BuildExecutionEvidence.Disposition.UNAVAILABLE,
+            parsed,
+            ok.content(),
+            "server-resolved build command is unavailable",
+            boundary,
+            false);
+      }
+      return new BuildExecutionEvidence(
+          BuildExecutionEvidence.Disposition.EXECUTED, parsed, ok.content(), null, boundary, false);
+    }
+    ToolResult.Err error = (ToolResult.Err) result;
+    BuildExecutionEvidence.Disposition disposition =
+        switch (error.kind()) {
+          case FORBIDDEN -> BuildExecutionEvidence.Disposition.POLICY_DENIED;
+          case TIMEOUT -> BuildExecutionEvidence.Disposition.TIMED_OUT;
+          case UNAVAILABLE -> BuildExecutionEvidence.Disposition.UNAVAILABLE;
+          case IO_ERROR, INTERNAL -> BuildExecutionEvidence.Disposition.LAUNCH_FAILED;
+          default -> BuildExecutionEvidence.Disposition.MALFORMED_EVIDENCE;
+        };
+    boolean retryable =
+        error.kind() == ToolResult.ErrorKind.TIMEOUT
+            || error.kind() == ToolResult.ErrorKind.IO_ERROR;
+    return new BuildExecutionEvidence(
+        disposition, null, null, error.message(), boundary, retryable);
+  }
+
+  private ToolResult sandboxResult(
+      ExecutionContext ctx, BuildCommand bc, SandboxExecResult sandboxed) {
+    return switch (sandboxed.status()) {
+      case COMPLETED ->
+          ToolResult.ok(
+              buildSummary(
+                  ctx,
+                  bc,
+                  sandboxed.exitCode(),
+                  SandboxCommandRoutingService.combinedOutput(sandboxed),
+                  SandboxCommandRoutingService.CONTAINER_WORKDIR));
+      case TIMED_OUT ->
+          ToolResult.err(
+              ToolResult.ErrorKind.TIMEOUT,
+              "build exceeded "
+                  + bc.timeoutSeconds()
+                  + "s timeout inside the sandbox: "
+                  + bc.command());
+        // Never a host retry: "the sandbox could not run this" is the containment working, and
+        // falling back would reinstate exactly the host execution this routing exists to remove.
+      case UNAVAILABLE, REFUSED ->
+          ToolResult.err(
+              ToolResult.ErrorKind.UNAVAILABLE,
+              "build unavailable — the sandbox could not run it ("
+                  + sandboxed.detail()
+                  + "). It was NOT executed on the application host.");
+    };
+  }
+
+  private ToolResult executeOutsideVerification(
+      ExecutionContext ctx,
+      BuildCommand bc,
+      String containerId,
+      String workdir,
+      boolean applyCompileCheckWrapper) {
 
     String effectiveCmd =
         applyCompileCheckWrapper ? wrapForExecutableCompileCheck(bc.command()) : bc.command();

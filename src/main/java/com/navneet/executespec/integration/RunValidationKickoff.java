@@ -28,6 +28,7 @@ import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Component;
 
@@ -75,7 +76,7 @@ class RunValidationKickoff {
   java.util.Optional<ValidationReport> generateValidationReport(
       String runId, ExecutionResult execResult, ReviewerResult reviewResult, Plan plan) {
     return generateValidationReport(
-        runId, execResult, reviewResult, plan, java.util.List.of(), null, null);
+        null, runId, execResult, reviewResult, plan, java.util.List.of(), null, null);
   }
 
   /**
@@ -97,6 +98,7 @@ class RunValidationKickoff {
       return java.util.Optional.empty();
     }
     return generateValidationReport(
+        null,
         runId,
         execResult,
         reviewResult,
@@ -111,27 +113,30 @@ class RunValidationKickoff {
    * contract gate) to append to the report's issue list so they surface in the run Issues panel.
    * The 4-arg form delegates here with an empty list.
    */
+  /** Exact accepted-generation BUILD validation entrypoint. */
   java.util.Optional<ValidationReport> generateValidationReport(
-      String runId,
-      ExecutionResult execResult,
-      ReviewerResult reviewResult,
-      Plan plan,
-      java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues) {
-    return generateValidationReport(runId, execResult, reviewResult, plan, extraIssues, null, null);
-  }
-
-  java.util.Optional<ValidationReport> generateValidationReport(
-      String runId,
+      ExecutionContext context,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
       Plan plan,
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> extraIssues,
       String operationPhase) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      throw new IllegalStateException("VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
     return generateValidationReport(
-        runId, execResult, reviewResult, plan, extraIssues, operationPhase, null);
+        context,
+        context.runId(),
+        execResult,
+        reviewResult,
+        plan,
+        extraIssues,
+        operationPhase,
+        null);
   }
 
   private java.util.Optional<ValidationReport> generateValidationReport(
+      ExecutionContext context,
       String runId,
       ExecutionResult execResult,
       ReviewerResult reviewResult,
@@ -149,8 +154,11 @@ class RunValidationKickoff {
 
       // Resolve the baseline-to-final Git change set. The previous implementation walked the
       // final workspace and treated every pre-existing brownfield file as generated code.
-      Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
-      if (correctionWorkspaceGeneration == null) {
+      Path workspace =
+          context == null
+              ? Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize()
+              : context.workspaceRoot();
+      if (correctionWorkspaceGeneration == null && context == null) {
         workspaceGenerationRecovery.assertAcceptedFrontier(runId, workspace, "VALIDATION");
       }
       if (brownfieldHttpContractGuard.hasBaseline(runId)) {
@@ -164,7 +172,9 @@ class RunValidationKickoff {
               plan, run.getUserRequest(), workspace);
       List<WorkerReport> provenanceClaims = workerProvenanceClaims(execResult);
       RunChangeEvidenceService.ChangeEvidence changeEvidence =
-          runChangeEvidenceService.inspect(runId, provenanceClaims);
+          context == null
+              ? runChangeEvidenceService.inspect(runId, provenanceClaims)
+              : runChangeEvidenceService.inspect(runId, workspace, provenanceClaims);
       List<String> createdProductFiles =
           changeEvidence.productFiles().stream()
               .filter(f -> f.status().startsWith("A"))
@@ -292,10 +302,10 @@ class RunValidationKickoff {
       if (correctionWorkspaceGeneration != null
           || featureFlagService.isEnabled("scoring.real-test-exec")) {
         try {
-          Path testWorkspace =
-              Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
           workspaceTestEvidence =
-              workspaceTestRunner.runTestsDetailed(runId, testWorkspace).orElse(null);
+              context == null
+                  ? workspaceTestRunner.runTestsDetailed(runId, workspace).orElse(null)
+                  : workspaceTestRunner.executeTests(context).result();
           if (workspaceTestEvidence != null
               && (workspaceTestEvidence.summary().getFailed() > 0
                   || workspaceTestEvidence.summary().getErrors() > 0)) {

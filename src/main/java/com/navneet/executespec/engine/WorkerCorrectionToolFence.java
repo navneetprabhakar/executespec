@@ -7,6 +7,7 @@ import java.util.concurrent.Future;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 
@@ -18,22 +19,14 @@ final class WorkerCorrectionToolFence {
   static Future<?> submitCurrent(ExecutorService executor, Runnable dispatch) {
     RunWorkspaceAuthorityService.Lease correctionLease =
         RunWorkspaceAuthorityService.currentCorrectionToolLease();
-    RunWorkspaceAuthorityService.Lease generationLease =
-        RunWorkspaceAuthorityService.currentWorkspaceGenerationToolLease();
-    Runnable generationFence =
-        RunWorkspaceAuthorityService.currentWorkspaceGenerationDispatchFence();
     return executor.submit(
         () ->
             RunWorkspaceAuthorityService.withCorrectionToolLease(
                 correctionLease,
-                () ->
-                    RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-                        generationLease,
-                        generationFence,
-                        () -> {
-                          dispatch.run();
-                          return null;
-                        })));
+                () -> {
+                  dispatch.run();
+                  return null;
+                }));
   }
 
   static Future<?> submitRead(
@@ -53,7 +46,9 @@ final class WorkerCorrectionToolFence {
 
   static void assertAttemptAdmission(WorkerTaskRequest request) {
     if (request.changeMode() == CodeChangeMode.BUILD) {
-      RunWorkspaceAuthorityService.assertWorkspaceGenerationToolDispatch(request.context().runId());
+      request
+          .context()
+          .assertWorkspaceGenerationDispatch(WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
     }
   }
 

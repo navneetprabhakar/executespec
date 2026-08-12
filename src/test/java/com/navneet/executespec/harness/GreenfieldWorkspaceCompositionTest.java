@@ -19,6 +19,7 @@ import com.navneet.executespec.smoketest.WorkspaceTestRunner;
 import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.DisposableVerificationWorkspaceService;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselinePlan;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselineService;
 import com.navneet.executespec.workspacegeneration.PythonHttpRuntimeAcceptanceService;
@@ -117,7 +118,9 @@ class GreenfieldWorkspaceCompositionTest {
                 mock(BuildProjectTool.class),
                 mock(WorkspaceTestRunner.class),
                 mock(PythonHttpRuntimeAcceptanceService.class),
-                json)
+                json,
+                new com.navneet.executespec.workspacegeneration.TaskAcceptanceDisposableRunner(
+                    passthroughDisposable(), json))
             .probeInitial(new ExecutionContext("run-fastapi", "T1", root), contract);
 
     assertThat(contract.buildCommand().source()).isEqualTo("inferred:python");
@@ -243,5 +246,34 @@ class GreenfieldWorkspaceCompositionTest {
     int exit = process.waitFor();
     assertThat(exit).as("command=%s output=%s", command, output).isZero();
     return exit;
+  }
+
+  private static DisposableVerificationWorkspaceService passthroughDisposable() {
+    DisposableVerificationWorkspaceService disposable =
+        mock(DisposableVerificationWorkspaceService.class);
+    org.mockito.Mockito.when(
+            disposable.execute(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            invocation -> {
+              ExecutionContext context = invocation.getArgument(0);
+              @SuppressWarnings("unchecked")
+              java.util.function.Function<ExecutionContext, Object> command =
+                  invocation.getArgument(2);
+              return new DisposableVerificationWorkspaceService.Execution<>(
+                  command.apply(context),
+                  "generation",
+                  "generation",
+                  1,
+                  1,
+                  "before",
+                  "after",
+                  0,
+                  java.time.Duration.ZERO,
+                  true);
+            });
+    return disposable;
   }
 }

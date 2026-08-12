@@ -8,6 +8,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -63,6 +64,8 @@ class PublicationAdmissionServiceTest {
       mock(RunWorkspaceAuthorityService.Lease.class);
   private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery =
       mock(WorkspaceGenerationRecoveryService.class);
+  private final PublicationPreparationService publicationPreparations =
+      mock(PublicationPreparationService.class);
   private final PublicationAdmissionService service =
       new PublicationAdmissionService(
           reports,
@@ -74,7 +77,8 @@ class PublicationAdmissionServiceTest {
           effectiveRoutes,
           durableCorrections,
           workspaceAuthorities,
-          workspaceGenerationRecovery);
+          workspaceGenerationRecovery,
+          publicationPreparations);
 
   @BeforeEach
   void setUp() {
@@ -86,12 +90,52 @@ class PublicationAdmissionServiceTest {
         .thenReturn(GENERATION);
     when(tasks.findByRunId(RUN_ID)).thenReturn(List.of());
     when(brownfieldGuard.hasBaseline(RUN_ID)).thenReturn(false);
+    when(publicationPreparations.requirePrepared(any(PipelineRun.class)))
+        .thenReturn(
+            new PublicationPreparationService.RequiredPreparation(
+                new PublicationPreparationStore.PreparedPublication(
+                    java.util.UUID.randomUUID(),
+                    RUN_ID,
+                    GENERATION,
+                    "report-1",
+                    "c".repeat(64),
+                    java.time.Instant.now()),
+                List.of(
+                    new PublicationPreparationStore.PreparedRepository(
+                        java.util.UUID.randomUUID(),
+                        "GITHUB:owner/repo",
+                        "d".repeat(64),
+                        ".",
+                        "executespec/run",
+                        "1".repeat(40),
+                        "2".repeat(40),
+                        "3".repeat(40),
+                        true,
+                        false,
+                        "prepared commit",
+                        java.time.Instant.parse("2026-08-12T12:00:00Z")))));
   }
 
   @Test
   void admitsFreshBuildAndVerifiedTests() {
     assertThat(service.assertEligible(run()).workspaceGeneration()).isEqualTo(GENERATION);
-    verify(workspaceGenerationRecovery).assertAcceptedFrontier(RUN_ID, GENERATION, "PUBLICATION");
+    verify(workspaceGenerationRecovery, org.mockito.Mockito.times(2))
+        .assertAcceptedFrontier(RUN_ID, GENERATION, "PUBLICATION");
+  }
+
+  @Test
+  void unpinnedAndUnknownBuildHistoryCannotPublish() {
+    PipelineRun unpinned = run();
+    unpinned.setBuildProtocolVersion(null);
+    PipelineRun unknown = run();
+    unknown.setBuildProtocolVersion("LEGACY_UNKNOWN");
+    unknown.setBuildProtocolDisposition("MISSING_EVIDENCE");
+
+    assertThat(service.evaluate(unpinned).code())
+        .isEqualTo("BUILD_PROTOCOL_HISTORICAL_EVIDENCE_INCOMPLETE");
+    assertThat(service.evaluate(unknown).code())
+        .isEqualTo("BUILD_PROTOCOL_HISTORICAL_EVIDENCE_INCOMPLETE");
+    verifyNoInteractions(durableCorrections);
   }
 
   @Test
@@ -623,7 +667,11 @@ class PublicationAdmissionServiceTest {
   }
 
   private static PipelineRun run() {
-    return PipelineRun.builder().runId(RUN_ID).status("COMPLETE").build();
+    return PipelineRun.builder()
+        .runId(RUN_ID)
+        .status("COMPLETE")
+        .buildProtocolVersion("LEGACY_V1")
+        .build();
   }
 
   private static void bindApprovalIdentity(

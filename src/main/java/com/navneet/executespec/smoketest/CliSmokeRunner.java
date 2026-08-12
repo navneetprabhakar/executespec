@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -71,6 +72,34 @@ public class CliSmokeRunner {
     return invokeHost(workspaceRoot, cmd.get());
   }
 
+  /**
+   * Generation-bound BUILD entrypoint.
+   *
+   * <p>A verification capability is authoritative: the inferred command executes only in that
+   * separately mounted runtime. It never degrades to the ordinary RUN sandbox or host execution.
+   */
+  public Result run(ExecutionContext context) {
+    if (context == null) {
+      return new Result(Status.ERROR, -1, "verification context required", null, 0L);
+    }
+    Optional<List<String>> cmd = inferEntryCommand(context.workspaceRoot());
+    if (cmd.isEmpty()) {
+      log.info(
+          "CliSmokeRunner: no entry-point heuristic matched in {}, skipping",
+          context.workspaceRoot());
+      return Result.skipped();
+    }
+    if (context.verificationSandboxAuthority() == null) {
+      return new Result(
+          Status.ERROR, -1, "VERIFICATION_SANDBOX_AUTHORITY_REQUIRED", display(cmd.get()), 0L);
+    }
+    if (sandboxRouting == null) {
+      return new Result(
+          Status.ERROR, -1, "verification sandbox routing unavailable", display(cmd.get()), 0L);
+    }
+    return invokeVerification(context, cmd.get());
+  }
+
   private Optional<List<String>> inferEntryCommand(Path root) {
     if (root == null) return Optional.empty();
     if (Files.exists(root.resolve("main.py"))) return Optional.of(List.of("python3", "main.py"));
@@ -90,6 +119,31 @@ public class CliSmokeRunner {
         sandboxRouting.execute(
             runId,
             workspaceRoot.toAbsolutePath().normalize(),
+            command,
+            java.time.Duration.ofSeconds(TIMEOUT_SECONDS));
+    String output = SandboxCommandRoutingService.combinedOutput(result);
+    if (output.length() > OUTPUT_HEAD_BYTES) {
+      output = output.substring(0, OUTPUT_HEAD_BYTES);
+    }
+    Status status =
+        switch (result.status()) {
+          case COMPLETED -> result.exitCode() == 0 ? Status.PASSED : Status.FAILED;
+          case TIMED_OUT -> Status.TIMEOUT;
+          case UNAVAILABLE, REFUSED -> Status.ERROR;
+        };
+    return new Result(
+        status,
+        result.exitCode(),
+        result.unexecuted() ? result.detail() : output,
+        display(command),
+        System.currentTimeMillis() - start);
+  }
+
+  private Result invokeVerification(ExecutionContext context, List<String> command) {
+    long start = System.currentTimeMillis();
+    SandboxExecResult result =
+        sandboxRouting.executeVerification(
+            context.verificationSandboxAuthority(),
             command,
             java.time.Duration.ofSeconds(TIMEOUT_SECONDS));
     String output = SandboxCommandRoutingService.combinedOutput(result);

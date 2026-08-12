@@ -1,6 +1,7 @@
 package com.navneet.executespec.workspacegeneration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -47,11 +48,12 @@ class WorkspaceIgnoredArtifactGuardTest {
     Files.createDirectories(workspace.resolve("scratch"));
     Files.writeString(workspace.resolve("scratch/hidden.txt"), "hidden");
 
-    var removed = guard.cleanAttemptArtifacts(checkpoint, baseline.json(), () -> {});
+    var removed =
+        guard.cleanAttemptArtifacts(checkpoint, baseline.json(), baseline.digest(), () -> {});
 
     assertThat(workspace.resolve("dist")).doesNotExist();
     assertThat(workspace.resolve("scratch")).doesNotExist();
-    assertThat(removed).anyMatch(path -> path.endsWith(":scratch"));
+    assertThat(removed).anyMatch(path -> path.endsWith(":scratch/hidden.txt"));
   }
 
   @Test
@@ -101,9 +103,152 @@ class WorkspaceIgnoredArtifactGuardTest {
     Path cache = Files.createDirectories(workspace.resolve(".executespec/bootstrap/__pycache__"));
     Files.writeString(cache.resolve("test_acceptance.cpython-313.pyc"), "bytecode");
 
-    assertThat(guard.cleanAttemptArtifacts(checkpoint, baseline.json(), () -> {}))
-        .anyMatch(path -> path.endsWith(":.executespec"));
+    assertThat(
+            guard.cleanAttemptArtifacts(checkpoint, baseline.json(), baseline.digest(), () -> {}))
+        .anyMatch(
+            path ->
+                path.endsWith(
+                    ":.executespec/bootstrap/__pycache__/test_acceptance.cpython-313.pyc"));
     assertThat(cache).doesNotExist();
+  }
+
+  @Test
+  void exactIgnoredInventoryNeverDeletesTrackedSiblingBytes() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "*.pyc\n", StandardCharsets.UTF_8);
+    Path bootstrap = Files.createDirectories(workspace.resolve(".executespec/bootstrap"));
+    Path tracked = bootstrap.resolve("test_acceptance.py");
+    Files.writeString(tracked, "print('tracked')\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+    Path cache = Files.createDirectories(bootstrap.resolve("__pycache__"));
+    Files.writeString(cache.resolve("test_acceptance.pyc"), "ignored");
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        new CorrectionWorkspaceTransaction().begin(workspace);
+    new WorkspaceIgnoredArtifactGuard(new ObjectMapper()).prepare(checkpoint, () -> {});
+
+    assertThat(tracked).hasContent("print('tracked')\n");
+    assertThat(cache).doesNotExist();
+  }
+
+  @Test
+  void ignoredProductSourceIsAContractErrorInsteadOfSilentDeletion() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "generated/\n", StandardCharsets.UTF_8);
+    Files.writeString(workspace.resolve("source.txt"), "source\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+    Path generated = Files.createDirectories(workspace.resolve("generated"));
+    Path source = generated.resolve("ApiClient.java");
+    Files.writeString(source, "class ApiClient {}\n");
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        new CorrectionWorkspaceTransaction().begin(workspace);
+
+    assertThatThrownBy(
+            () ->
+                new WorkspaceIgnoredArtifactGuard(new ObjectMapper()).prepare(checkpoint, () -> {}))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("IGNORED_PRODUCT_PATH");
+    assertThat(source).exists();
+  }
+
+  @Test
+  void ignoredSymlinkIsUnlinkedWithoutTouchingItsExternalTarget() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "cache-link\n", StandardCharsets.UTF_8);
+    Files.writeString(workspace.resolve("source.txt"), "source\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+    Path external = Files.writeString(workspace.getParent().resolve("external-cache.bin"), "keep");
+    Path link = workspace.resolve("cache-link");
+    Files.createSymbolicLink(link, external);
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        new CorrectionWorkspaceTransaction().begin(workspace);
+    new WorkspaceIgnoredArtifactGuard(new ObjectMapper()).prepare(checkpoint, () -> {});
+
+    assertThat(link).doesNotExist();
+    assertThat(external).hasContent("keep");
+  }
+
+  @Test
+  void ignoredBrokenSymlinkIsStillRemoved() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "broken-cache\n", StandardCharsets.UTF_8);
+    Files.writeString(workspace.resolve("source.txt"), "source\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+    Path link = workspace.resolve("broken-cache");
+    Files.createSymbolicLink(link, Path.of("missing-target"));
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        new CorrectionWorkspaceTransaction().begin(workspace);
+    new WorkspaceIgnoredArtifactGuard(new ObjectMapper()).prepare(checkpoint, () -> {});
+
+    assertThat(Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS)).isFalse();
+  }
+
+  @Test
+  void rejectsCorruptedBaselineReceiptBeforeDeletingIgnoredBytes() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "scratch/\n", StandardCharsets.UTF_8);
+    Files.writeString(workspace.resolve("source.txt"), "source\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        new CorrectionWorkspaceTransaction().begin(workspace);
+    WorkspaceIgnoredArtifactGuard guard = new WorkspaceIgnoredArtifactGuard(new ObjectMapper());
+    WorkspaceIgnoredArtifactGuard.Baseline baseline = guard.capture(checkpoint, () -> {});
+    Path ignored = Files.createDirectories(workspace.resolve("scratch"));
+    Files.writeString(ignored.resolve("unattested.bin"), "keep-until-receipt-valid");
+    String corrupted =
+        (baseline.digest().startsWith("0") ? "1" : "0") + baseline.digest().substring(1);
+
+    assertThatThrownBy(
+            () -> guard.cleanAttemptArtifacts(checkpoint, baseline.json(), corrupted, () -> {}))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("WORKSPACE_IGNORED_BASELINE_DIGEST_MISMATCH");
+    assertThat(ignored.resolve("unattested.bin")).exists();
+  }
+
+  @Test
+  void acceptsJsonbEquivalentBaselineTextWithoutWeakeningDigestBinding() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "scratch/\n", StandardCharsets.UTF_8);
+    Files.writeString(workspace.resolve("source.txt"), "source\n", StandardCharsets.UTF_8);
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint =
+        new CorrectionWorkspaceTransaction().begin(workspace);
+    ObjectMapper mapper = new ObjectMapper();
+    WorkspaceIgnoredArtifactGuard guard = new WorkspaceIgnoredArtifactGuard(mapper);
+    WorkspaceIgnoredArtifactGuard.Baseline baseline = guard.capture(checkpoint, () -> {});
+    String normalizedByTransport =
+        mapper
+            .writerWithDefaultPrettyPrinter()
+            .writeValueAsString(mapper.readTree(baseline.json()));
+    Path ignored = Files.createDirectories(workspace.resolve("scratch"));
+    Files.writeString(ignored.resolve("unattested.bin"), "remove-after-valid-receipt");
+
+    guard.cleanAttemptArtifacts(checkpoint, normalizedByTransport, baseline.digest(), () -> {});
+
+    assertThat(ignored).doesNotExist();
   }
 
   private String git(String... args) throws Exception {

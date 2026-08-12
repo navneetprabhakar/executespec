@@ -39,6 +39,10 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 public class GcsWorkspaceStore {
 
+  /** Exact physical identity returned by an immutable artifact write. */
+  public record ArtifactReceipt(
+      String key, String storageGeneration, String crc32c, long sizeBytes, String etag) {}
+
   /** Legacy prefix for backward-compatible reads. */
   private static final String LEGACY_KEY_PREFIX = "workspaces/";
 
@@ -48,6 +52,7 @@ public class GcsWorkspaceStore {
   private final DeploymentProperties props;
   private final String environment;
 
+  @org.springframework.beans.factory.annotation.Autowired
   public GcsWorkspaceStore(
       DeploymentProperties props, @Value("${spring.profiles.active:dev}") String environment) {
     this.props = props;
@@ -92,6 +97,12 @@ public class GcsWorkspaceStore {
       s = null;
     }
     this.storage = s;
+  }
+
+  GcsWorkspaceStore(DeploymentProperties props, String environment, Storage storage) {
+    this.props = props;
+    this.environment = environment;
+    this.storage = storage;
   }
 
   /**
@@ -142,7 +153,7 @@ public class GcsWorkspaceStore {
    * Stream an already-built non-workspace artifact into the configured private bucket. The caller
    * owns the object key; credentials and signed URLs never enter the database.
    */
-  public String uploadArtifact(
+  public ArtifactReceipt uploadArtifactExact(
       String objectKey, Path source, String contentType, Map<String, String> metadata)
       throws IOException {
     if (storage == null) {
@@ -154,10 +165,85 @@ public class GcsWorkspaceStore {
             .setContentType(contentType)
             .setMetadata(metadata == null ? Map.of() : Map.copyOf(metadata))
             .build();
+    Blob blob;
     try (InputStream in = Files.newInputStream(source)) {
-      storage.createFrom(blobInfo, in);
+      try {
+        blob = storage.createFrom(blobInfo, in, Storage.BlobWriteOption.doesNotExist());
+      } catch (StorageException raced) {
+        if (raced.getCode() != 412) throw raced;
+        blob = storage.get(blobInfo.getBlobId());
+        if (blob == null) throw raced;
+      }
     }
-    return effectiveKey;
+    Map<String, String> expectedMetadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    if (!expectedMetadata.equals(blob.getMetadata())) {
+      throw new IOException("GCS_ARTIFACT_METADATA_MISMATCH");
+    }
+    return receipt(effectiveKey, blob);
+  }
+
+  /** Compatibility adapter for legacy non-generation artifact callers. */
+  public String uploadArtifact(
+      String objectKey, Path source, String contentType, Map<String, String> metadata)
+      throws IOException {
+    return uploadArtifactExact(objectKey, source, contentType, metadata).key();
+  }
+
+  /** Exact generation-artifact read. No legacy key fallback is permitted. */
+  public Path downloadArtifactToTempExact(
+      String objectKey,
+      String runId,
+      String storageGeneration,
+      long sizeBytes,
+      String crc32c,
+      String etag)
+      throws IOException {
+    if (storage == null) throw new IOException("GCS unavailable");
+    Blob blob = storage.get(BlobId.of(bucket(), objectKey));
+    if (blob == null) throw new IOException("GCS exact artifact not found: " + objectKey);
+    ArtifactReceipt actual = receipt(objectKey, blob);
+    if (!actual.storageGeneration().equals(storageGeneration)
+        || actual.sizeBytes() != sizeBytes
+        || !java.util.Objects.equals(actual.crc32c(), crc32c)
+        || !java.util.Objects.equals(actual.etag(), etag)) {
+      throw new IOException("GCS_ARTIFACT_IDENTITY_MISMATCH");
+    }
+    String shortId = runId.substring(0, Math.min(8, runId.length()));
+    Path temp = Files.createTempFile("gcs-generation-" + shortId, ".tar.gz");
+    try {
+      blob.downloadTo(temp);
+      if (Files.size(temp) != sizeBytes) throw new IOException("GCS_ARTIFACT_SIZE_MISMATCH");
+      return temp;
+    } catch (IOException failure) {
+      Files.deleteIfExists(temp);
+      throw failure;
+    }
+  }
+
+  /** Deletes only the exact immutable generation returned by the original create-only write. */
+  public void deleteArtifactExact(String objectKey, String storageGeneration) throws IOException {
+    if (storage == null) throw new IOException("GCS unavailable");
+    long generation;
+    try {
+      generation = Long.parseLong(storageGeneration);
+    } catch (NumberFormatException malformed) {
+      throw new IOException("GCS_ARTIFACT_GENERATION_INVALID", malformed);
+    }
+    try {
+      storage.delete(
+          BlobId.of(bucket(), objectKey), Storage.BlobSourceOption.generationMatch(generation));
+    } catch (StorageException failure) {
+      if (failure.getCode() != 404) throw failure;
+    }
+  }
+
+  private static ArtifactReceipt receipt(String key, Blob blob) {
+    return new ArtifactReceipt(
+        key,
+        String.valueOf(blob.getGeneration()),
+        blob.getCrc32c(),
+        blob.getSize(),
+        blob.getEtag());
   }
 
   /** Stream an object without materialising it as a byte array in the application heap. */

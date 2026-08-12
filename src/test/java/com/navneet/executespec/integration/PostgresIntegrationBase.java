@@ -6,8 +6,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Shared base for all Testcontainers integration tests. Spins up a single PostgreSQL container
@@ -17,15 +15,22 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Tag("integration")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("integration-test")
-@Testcontainers
 public abstract class PostgresIntegrationBase {
 
-  @Container
-  static final PostgreSQLContainer<?> POSTGRES =
-      new PostgreSQLContainer<>("pgvector/pgvector:pg16")
-          .withDatabaseName("executespec_test")
-          .withUsername("test")
-          .withPassword("test");
+  static final PostgreSQLContainer<?> POSTGRES;
+
+  static {
+    // This container is deliberately process-scoped. An inherited JUnit @Container is stopped
+    // after the first subclass while Spring can legally reuse that subclass's cached application
+    // context, leaving Hikari pinned to a dead random port for every later subclass in the same
+    // Surefire JVM. Testcontainers' resource reaper still owns cleanup when this JVM exits.
+    POSTGRES =
+        new PostgreSQLContainer<>("pgvector/pgvector:pg16")
+            .withDatabaseName("executespec_test")
+            .withUsername("test")
+            .withPassword("test");
+    POSTGRES.start();
+  }
 
   @DynamicPropertySource
   static void configureDataSource(DynamicPropertyRegistry registry) {

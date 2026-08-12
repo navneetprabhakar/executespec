@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.tool.ExecutionContext;
+
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +51,22 @@ public class CheckstyleAdapter implements LintAdapter {
 
   @Override
   public LintResult run(String runId, Path repoRoot, Path configPath, List<Path> changedFiles) {
+    return runInternal(runId, null, repoRoot, configPath, changedFiles);
+  }
+
+  @Override
+  public LintResult run(
+      ExecutionContext context, Path repoRoot, Path configPath, List<Path> changedFiles) {
+    return runInternal(
+        context == null ? null : context.runId(), context, repoRoot, configPath, changedFiles);
+  }
+
+  private LintResult runInternal(
+      String runId,
+      ExecutionContext context,
+      Path repoRoot,
+      Path configPath,
+      List<Path> changedFiles) {
     LintExecutionPolicy.Admission admission =
         policy.admit(tool(), repoRoot, configPath, changedFiles);
     if (!admission.allowed()) {
@@ -67,7 +85,10 @@ public class CheckstyleAdapter implements LintAdapter {
       argv.add(".");
     }
 
-    LintProcessRunner.Result res = runner.run(runId, repoRoot, argv, policy.timeoutSeconds());
+    LintProcessRunner.Result res =
+        context == null
+            ? runner.run(runId, repoRoot, argv, policy.timeoutSeconds())
+            : runner.run(context, repoRoot, argv, policy.timeoutSeconds());
     if (!res.executed()) {
       return new LintResult(
           tool(), LintResult.Status.UNAVAILABLE, List.of(), res.unavailableReason());

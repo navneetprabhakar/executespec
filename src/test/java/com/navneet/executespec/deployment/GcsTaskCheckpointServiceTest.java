@@ -10,6 +10,7 @@ import com.navneet.executespec.workspacegeneration.WorkspaceGenerationArchiveSer
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -23,9 +24,12 @@ class GcsTaskCheckpointServiceTest {
 
   @Mock private GcsWorkspaceStore gcsStore;
   @Mock private WorkspaceGenerationArchiveService generationArchives;
+  @Mock private LocalGenerationCheckpointStore localStore;
   @Mock private Environment environment;
+  @Mock private GcsTaskCheckpointService.PhysicalWriteObserver physicalWrites;
 
   @InjectMocks private GcsTaskCheckpointService service;
+  @TempDir Path temp;
 
   private void enable(boolean enabled) {
     ReflectionTestUtils.setField(service, "enabled", enabled);
@@ -44,18 +48,29 @@ class GcsTaskCheckpointServiceTest {
   }
 
   @Test
-  void strictGenerationCheckpointIsExplicitlyHostBoundOutsideProduction() {
+  void strictGenerationCheckpointCreatesRestorableLocalArchiveOutsideProduction() throws Exception {
     enable(true);
     when(gcsStore.isConfigured()).thenReturn(false);
     when(environment.acceptsProfiles(any(Profiles.class))).thenReturn(false);
+    Path archive = temp.resolve("candidate.tar.gz");
+    java.nio.file.Files.writeString(archive, "archive");
+    when(generationArchives.create(any())).thenReturn(archive);
+    String digest = org.apache.commons.codec.digest.DigestUtils.sha256Hex("archive");
+    when(localStore.store("run-1", checkpoint().generation(), digest, archive))
+        .thenReturn(
+            new GcsWorkspaceStore.ArtifactReceipt(
+                "local-generation://host/checkpoint", "sha256:" + digest, "crc", 7L, digest));
 
     GcsTaskCheckpointService.CheckpointReceipt receipt =
         service.checkpointGeneration("run-1", "T1", checkpoint());
 
-    org.assertj.core.api.Assertions.assertThat(receipt.kind()).isEqualTo("LOCAL_SAME_HOST");
-    org.assertj.core.api.Assertions.assertThat(receipt.key()).startsWith("local-same-host://");
+    org.assertj.core.api.Assertions.assertThat(receipt.kind()).isEqualTo("LOCAL_ARCHIVE");
+    org.assertj.core.api.Assertions.assertThat(receipt.key()).startsWith("local-generation://");
     org.assertj.core.api.Assertions.assertThat(receipt.generation())
         .isEqualTo(checkpoint().generation());
+    org.assertj.core.api.Assertions.assertThat(receipt.storageGeneration())
+        .isEqualTo("sha256:" + digest);
+    org.assertj.core.api.Assertions.assertThat(receipt.sizeBytes()).isEqualTo(7L);
   }
 
   private static CorrectionWorkspaceTransaction.Checkpoint checkpoint() {
