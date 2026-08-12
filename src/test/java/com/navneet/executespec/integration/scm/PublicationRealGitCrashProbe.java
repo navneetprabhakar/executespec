@@ -63,7 +63,7 @@ public final class PublicationRealGitCrashProbe {
                   args[3],
                   args[7],
                   args[8],
-                  "",
+                  System.getenv("ES_R17_GITHUB_PAT"),
                   repository.publicationBranch(),
                   repository.commitId(),
                   null);
