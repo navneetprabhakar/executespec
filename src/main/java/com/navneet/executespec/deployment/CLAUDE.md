@@ -50,20 +50,23 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   capture. `control-plane-graph-diff.mjs` separately compares the candidate with a Graphify extract
   of the source SHA currently serving the target VM. Graphify 0.9.13 emits `edges`; the workflow and
   diff tool accept that canonical collection, retain `links` only for legacy artifacts, and fail
-  closed on a missing or conflicting edge collection. Any control-plane node/edge change requires a
-  schema-v2 receipt bound to the deterministic filtered base/candidate control-subgraph hashes plus
-  exact diff digest, reviewer, timestamp, impacted areas, and rationale; whole-graph semantic and
-  raw artifact hashes remain retained provenance rather than review identity because unrelated
-  Graphify output is not deterministic across identical extractions. The workflow requires exactly
+  closed on a missing or conflicting edge collection. Any control-plane node/edge change produces
+  schema-v3 advisory evidence containing deterministic filtered base/candidate control-subgraph
+  hashes, the exact diff digest, and impacted areas; whole-graph semantic and raw artifact hashes
+  remain retained provenance because unrelated Graphify output is not deterministic across
+  identical extractions. Deployment does not require a manual graph-review receipt; malformed extraction
+  or release-identity evidence still fails closed. The workflow requires exactly
   one canonical source SHA in the atomic host marker, cross-checks it against the immutable deploy
   pointer captured before qualification, fetches it fail-closed when absent locally, and proves it
-  shares repository history with the candidate without prohibiting explicit rollback. A
-  missing/stale receipt fails before deployment and emits a
-  retained template. Pre-activation failures skip host-candidate reconciliation because no
-  activation attempt occurred. This endpoint/config
+  shares repository history with the candidate without prohibiting explicit rollback. Graph
+  evidence is retained for RCA. Pre-activation failures skip host-candidate reconciliation because
+  no activation attempt occurred. This endpoint/config
   proof does not replace the live container mount/containment matrix.
 
 - `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews owned by this process. **Distributed safety:** absence from the JVM-local `active` map is never treated as proof that a Docker/Cloud Run resource is orphaned unless the operator explicitly sets `PREVIEW_ORPHAN_DISCOVERY_ENABLED=true`; the default is false. JVM shutdown also preserves active previews by default so rolling deployment cannot destroy them (`PREVIEW_TEARDOWN_ON_SHUTDOWN=false`). **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
+- `PreviewServiceTest.freeTierLimit` pre-stubs both run/workspace paths before starting the virtual
+  preview worker. Mockito stubbing after the first `service.start` races worker invocations on the
+  same mocks and can intermittently produce `WrongTypeOfReturnValue`.
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings, and fail-safe cleanup gates. Docker/Cloud Run orphan discovery remains disabled until a durable cross-JVM resource registry is authoritative.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first via `DeclaredPreviewProjectTypeResolver`, then falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`. **Node toolchain bootstrap (2026-07-21, RR-385 partial):** the nine sites that grafted Node onto a JDK/Python/Rust base image used to run `curl -fsSL https://deb.nodesource.com/setup_20.x | bash -` — fetching a shell script at build time and executing it as root with no integrity check. They now emit `pinnedNodeInstall()`, which copies the interpreter out of the tagged `node:20-bookworm-slim` image via `COPY --from=<image>` (a direct image reference, so no `FROM` stage alias is needed). This is **tag-pinned, not digest-pinned**, and every call site's base is glibc — do not reuse the helper on an Alpine/musl base without switching to the matching source image. Proven by building all three generated full-stack Dockerfiles: node v20.20.2 / npm 10.8.2 present in each.
