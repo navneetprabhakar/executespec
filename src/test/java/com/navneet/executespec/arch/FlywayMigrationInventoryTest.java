@@ -153,6 +153,22 @@ class FlywayMigrationInventoryTest {
     assertThat(classpathFiles).containsExactlyElementsOf(sourceFiles);
   }
 
+  @Test
+  void v399SuspendsResolvedAttemptGuardBeforeBackfillAndRestoresItAfter() throws IOException {
+    String migration =
+        Files.readString(MIGRATION_DIR.resolve("V399__persist_generation_operation_intents.sql"));
+    int dropGuard =
+        migration.indexOf(
+            "DROP TRIGGER workspace_generation_attempt_transition ON"
+                + " workspace_generation_attempt;");
+    int terminalBackfill = migration.indexOf("UPDATE workspace_generation_attempt a");
+    int restoreGuard = migration.indexOf("CREATE TRIGGER workspace_generation_attempt_transition");
+
+    assertThat(dropGuard).isGreaterThanOrEqualTo(0);
+    assertThat(terminalBackfill).isGreaterThan(dropGuard);
+    assertThat(restoreGuard).isGreaterThan(terminalBackfill);
+  }
+
   private static List<MigrationFile> readMigrations() throws IOException {
     return readMigrations(MIGRATION_DIR);
   }
