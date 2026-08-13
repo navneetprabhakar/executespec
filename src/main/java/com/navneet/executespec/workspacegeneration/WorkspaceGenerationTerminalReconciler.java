@@ -96,6 +96,10 @@ public class WorkspaceGenerationTerminalReconciler {
     attempts.findByStateOrderByCreatedAtAsc(WorkspaceGenerationState.ROLLED_BACK).stream()
         .map(WorkspaceGenerationAttempt::getRunId)
         .forEach(runIds::add);
+    attempts.findByStateOrderByCreatedAtAsc(WorkspaceGenerationState.RECOVERY_FAILED).stream()
+        .filter(attempt -> attempt.getResolvedAt() != null)
+        .map(WorkspaceGenerationAttempt::getRunId)
+        .forEach(runIds::add);
     for (String runId : runIds) {
       try {
         reconcileRun(runId);

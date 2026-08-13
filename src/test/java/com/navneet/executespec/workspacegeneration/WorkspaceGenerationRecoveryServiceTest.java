@@ -3,11 +3,13 @@ package com.navneet.executespec.workspacegeneration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -384,6 +386,7 @@ class WorkspaceGenerationRecoveryServiceTest {
               eq(crashState),
               eq(WorkspaceGenerationState.ROLLING_BACK),
               eq(recoveryToken),
+              any(UUID.class),
               any()))
           .thenReturn(1);
       when(attempts.findById(attemptId)).thenReturn(Optional.of(claimed));
@@ -481,6 +484,7 @@ class WorkspaceGenerationRecoveryServiceTest {
               eq(crashState),
               eq(WorkspaceGenerationState.ROLLING_BACK),
               eq(recoveryToken),
+              any(UUID.class),
               any()))
           .thenReturn(1);
       when(attempts.findById(attemptId)).thenReturn(Optional.of(claimed), Optional.of(resolved));
@@ -544,6 +548,7 @@ class WorkspaceGenerationRecoveryServiceTest {
             eq(WorkspaceGenerationState.MUTATING),
             eq(WorkspaceGenerationState.ROLLING_BACK),
             eq(recoveryToken),
+            any(UUID.class),
             any()))
         .thenReturn(0);
     RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
@@ -561,13 +566,165 @@ class WorkspaceGenerationRecoveryServiceTest {
     assertThatThrownBy(() -> recovery.recover(stale, lease))
         .hasMessageContaining("RECOVERY_CLAIM_FAILED");
 
-    verify(attempts, never()).markRecoveredFailure(any(), any(), any(), any(), any(), any(), any());
+    verify(attempts, never())
+        .markRecoveryRetry(any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+    verify(attempts, never())
+        .markRecoveryExhausted(any(), any(), any(), any(), any(), any(), anyInt(), any());
     verify(lease).close();
     ArgumentCaptor<TransactionDefinition> definition =
         ArgumentCaptor.forClass(TransactionDefinition.class);
     verify(transactionManager).getTransaction(definition.capture());
     assertThat(definition.getValue().getPropagationBehavior())
         .isEqualTo(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+  }
+
+  @Test
+  void failedRecoveryIsScheduledForBoundedBackoffBeforeExhaustion() {
+    UUID attemptId = UUID.randomUUID();
+    UUID recoveryToken = UUID.randomUUID();
+    WorkspaceGenerationAttempt stale =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId("retryable-recovery")
+            .taskId("T1")
+            .state(WorkspaceGenerationState.OPERATION_CLAIMED)
+            .build();
+    WorkspaceGenerationAttempt claimed =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId(stale.getRunId())
+            .taskId("T1")
+            .state(WorkspaceGenerationState.ROLLING_BACK)
+            .recoveryAttemptCount(1)
+            .build();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    when(attempts.claimRecovery(
+            eq(attemptId),
+            eq(stale.getState()),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq(recoveryToken),
+            any(UUID.class),
+            any()))
+        .thenReturn(1);
+    when(attempts.findById(attemptId)).thenReturn(Optional.of(claimed));
+    when(attempts.markPreDispatchRolledBack(any(), any(), any(), any(), any())).thenReturn(0);
+    when(attempts.markRecoveryRetry(
+            any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+        .thenReturn(1);
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.ownerToken()).thenReturn(recoveryToken);
+    WorkspaceGenerationTerminalReconciler terminal =
+        mock(WorkspaceGenerationTerminalReconciler.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    WorkspaceGenerationRecoveryService recovery = recovery(attempts, terminal, runs);
+
+    assertThatThrownBy(() -> recovery.recover(stale, lease))
+        .hasMessageContaining("PRE_DISPATCH_RECOVERY_FAILED");
+
+    verify(attempts)
+        .markRecoveryRetry(
+            eq(attemptId),
+            eq(recoveryToken),
+            eq("ROLLBACK_PROOF_FAILED"),
+            contains("PRE_DISPATCH_RECOVERY_FAILED"),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq(WorkspaceGenerationState.RECOVERY_FAILED),
+            eq(WorkspaceGenerationRecoveryService.MAX_RECOVERY_ATTEMPTS),
+            any(),
+            any());
+    verify(attempts, never())
+        .markRecoveryExhausted(any(), any(), any(), any(), any(), any(), anyInt(), any());
+    verifyNoInteractions(terminal, runs);
+    verify(lease).close();
+  }
+
+  @Test
+  void thirdFailureExhaustsAfterLeaseReleaseThenReconcilesAndFailsParent() {
+    UUID attemptId = UUID.randomUUID();
+    UUID recoveryToken = UUID.randomUUID();
+    UUID supportId = UUID.randomUUID();
+    String runId = "exhausted-recovery";
+    WorkspaceGenerationAttempt stale =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId(runId)
+            .taskId("T1")
+            .state(WorkspaceGenerationState.OPERATION_CLAIMED)
+            .build();
+    WorkspaceGenerationAttempt claimed =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId(runId)
+            .taskId("T1")
+            .state(WorkspaceGenerationState.ROLLING_BACK)
+            .recoveryAttemptCount(3)
+            .recoverySupportId(supportId)
+            .build();
+    WorkspaceGenerationAttempt exhausted =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId(runId)
+            .taskId("T1")
+            .state(WorkspaceGenerationState.RECOVERY_FAILED)
+            .recoveryAttemptCount(3)
+            .recoverySupportId(supportId)
+            .resolvedAt(Instant.now())
+            .build();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    when(attempts.claimRecovery(any(), any(), any(), any(), any(), any())).thenReturn(1);
+    when(attempts.findById(attemptId)).thenReturn(Optional.of(claimed), Optional.of(exhausted));
+    when(attempts.markPreDispatchRolledBack(any(), any(), any(), any(), any())).thenReturn(0);
+    when(attempts.markRecoveryExhausted(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        .thenReturn(1);
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.ownerToken()).thenReturn(recoveryToken);
+    WorkspaceGenerationTerminalReconciler terminal =
+        mock(WorkspaceGenerationTerminalReconciler.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    WorkspaceGenerationRecoveryService recovery = recovery(attempts, terminal, runs);
+
+    assertThatThrownBy(() -> recovery.recover(stale, lease))
+        .hasMessageContaining("PRE_DISPATCH_RECOVERY_FAILED");
+
+    var order = inOrder(attempts, lease, terminal, runs);
+    order
+        .verify(attempts)
+        .markRecoveryExhausted(
+            eq(attemptId),
+            eq(recoveryToken),
+            eq("ROLLBACK_PROOF_FAILED"),
+            contains("PRE_DISPATCH_RECOVERY_FAILED"),
+            eq(WorkspaceGenerationState.ROLLING_BACK),
+            eq(WorkspaceGenerationState.RECOVERY_FAILED),
+            eq(WorkspaceGenerationRecoveryService.MAX_RECOVERY_ATTEMPTS),
+            any());
+    order.verify(lease).close();
+    order.verify(terminal).reconcileRun(runId);
+    order
+        .verify(runs)
+        .claimTerminalTransitionWithReasons(
+            eq(runId),
+            eq("FAILED"),
+            eq("WORKSPACE_GENERATION_RECOVERY_EXHAUSTED"),
+            contains(supportId.toString()),
+            any());
+  }
+
+  @Test
+  void cancelledRunTreatsResolvedQuarantineAsConvergedInsteadOfSchedulingAnotherRetry() {
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    PipelineRunRepository runs = mock(PipelineRunRepository.class);
+    WorkspaceGenerationRecoveryService recovery = spy(recovery(attempts, runs));
+    doThrow(new IllegalStateException("ROLLBACK_PROOF_FAILED"))
+        .when(recovery)
+        .recoverRunOrThrow("cancelled-quarantine");
+    when(attempts.findFirstUnresolvedByRunId("cancelled-quarantine")).thenReturn(Optional.empty());
+
+    assertThat(recovery.convergeCancelledRun("cancelled-quarantine"))
+        .isEqualTo(WorkspaceGenerationRecoveryService.CancellationConvergence.CONVERGED);
   }
 
   private WorkspaceGenerationRecoveryService recoveryService(
@@ -612,6 +769,32 @@ class WorkspaceGenerationRecoveryServiceTest {
             mock(GcsWorkspaceStore.class),
             mock(LocalGenerationCheckpointStore.class),
             new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions)),
+        runs,
+        mock(WorkspaceIgnoredArtifactGuard.class),
+        new AgentProperties(),
+        mock(WorkspaceGenerationTelemetry.class),
+        mock(WorkspaceGenerationRecoveryArtifactJanitor.class),
+        new WorkspaceGenerationFilesystemSaga(WorkspaceGenerationTestSteps.store(), transactions),
+        WorkspaceGenerationTestSteps.store(),
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
+  }
+
+  private WorkspaceGenerationRecoveryService recovery(
+      WorkspaceGenerationAttemptRepository attempts,
+      WorkspaceGenerationTerminalReconciler terminal,
+      PipelineRunRepository runs) {
+    CorrectionWorkspaceTransaction transactions = mock(CorrectionWorkspaceTransaction.class);
+    return new WorkspaceGenerationRecoveryService(
+        attempts,
+        transactions,
+        mock(RunWorkspaceAuthorityService.class),
+        new ObjectMapper(),
+        transactionManager(),
+        terminal,
+        new WorkspaceGenerationCheckpointRestorer(
+            mock(GcsWorkspaceStore.class),
+            mock(LocalGenerationCheckpointStore.class),
+            mock(WorkspaceGenerationArchiveService.class)),
         runs,
         mock(WorkspaceIgnoredArtifactGuard.class),
         new AgentProperties(),

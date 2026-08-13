@@ -152,7 +152,12 @@ public class TaskStatusPersistenceService {
     if (runRepo != null) {
       var run = runRepo.findByIdForTaskContinuation(runId);
       if (run.isEmpty()) return Result.ROW_NOT_FOUND;
-      if (!"WORKING".equals(run.get().getStatus())) return Result.CANCELLED_WINS;
+      if (!"WORKING".equals(run.get().getStatus())) {
+        if ("CANCELLED".equals(run.get().getStatus())) {
+          convergeCancelledTask(runId, taskIdShort);
+        }
+        return Result.CANCELLED_WINS;
+      }
     }
     String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
     var existing = taskRepo.findByIdForUpdate(key);
@@ -189,6 +194,22 @@ public class TaskStatusPersistenceService {
     }
     taskRepo.saveAndFlush(task);
     return Result.UPDATED;
+  }
+
+  private void convergeCancelledTask(String runId, String taskIdShort) {
+    String key = runId.substring(0, Math.min(8, runId.length())) + "_" + taskIdShort;
+    var existing = taskRepo.findByIdForUpdate(key);
+    if (existing.isEmpty()) return;
+    var task = existing.get();
+    if (isTerminalTaskStatus(task.getStatus())) return;
+    Instant now = Instant.now();
+    task.setStatus("CANCELLED");
+    task.setLastActivityAt(now);
+    task.setCompletedAt(now);
+    if (task.getStartedAt() != null && task.getDurationMs() == null) {
+      task.setDurationMs(Duration.between(task.getStartedAt(), now).toMillis());
+    }
+    taskRepo.saveAndFlush(task);
   }
 
   /**

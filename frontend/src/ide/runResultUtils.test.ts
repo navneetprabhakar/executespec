@@ -351,6 +351,9 @@ describe('publicationTrustFacts', () => {
           rejectedDiffDigest: 'c'.repeat(64),
           failureCode: 'TASK_VERIFICATION_REJECTED',
           recoveryFailureCode: 'ROLLBACK_PROOF_FAILED',
+          recoveryAttemptCount: 2,
+          recoveryNextAttemptAt: '2026-08-10T12:01:00Z',
+          recoverySupportId: 'support-retry',
           createdAt: '2026-08-10T12:00:00Z',
         },
       ],
@@ -358,11 +361,47 @@ describe('publicationTrustFacts', () => {
 
     expect(facts.find((fact) => fact.label === 'BUILD generation attempts')).toMatchObject({
       value:
-        '1 recent · 1 rejected · 1 unresolved · latest ROLLBACK_PROOF_FAILED · diff cccccccccccc',
+        '1 recent · 1 rejected · 1 unresolved · latest ROLLBACK_PROOF_FAILED · diff cccccccccccc · support support-retry',
       kind: 'bad',
     });
     expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
-      value: 'Rollback recovery failed · ROLLBACK_PROOF_FAILED',
+      value:
+        'Rollback recovery retry 2/3 pending at 2026-08-10T12:01:00Z · ROLLBACK_PROOF_FAILED · support support-retry',
+      kind: 'bad',
+    });
+  });
+
+  it('renders exhausted recovery as terminal quarantine with a stable support id', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-exhausted',
+          taskId: 'T2',
+          taskIndex: 1,
+          attemptNumber: 2,
+          attemptKind: 'BUILD_TASK',
+          state: 'RECOVERY_FAILED',
+          rejectedDiffDigest: 'd'.repeat(64),
+          recoveryFailureCode: 'ROLLBACK_PROOF_FAILED',
+          recoveryAttemptCount: 3,
+          recoverySupportId: 'support-exhausted',
+          recoveryExhaustedAt: '2026-08-10T12:03:00Z',
+          resolvedAt: '2026-08-10T12:03:00Z',
+          createdAt: '2026-08-10T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'BUILD generation attempts')).toMatchObject({
+      value:
+        '1 recent · 1 rejected · 0 unresolved · latest ROLLBACK_PROOF_FAILED · diff dddddddddddd · support support-exhausted',
+      kind: 'bad',
+    });
+    expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
+      value:
+        'Rollback recovery exhausted after 3 attempts · ROLLBACK_PROOF_FAILED · support support-exhausted',
       kind: 'bad',
     });
   });

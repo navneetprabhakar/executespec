@@ -3,6 +3,7 @@ package com.navneet.executespec.workspacegeneration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -58,6 +59,32 @@ class WorkspaceGenerationStepPostgresTest {
         attemptId,
         runId);
 
+    Map<String, Object> firstOrder = new LinkedHashMap<>();
+    firstOrder.put("runId", runId);
+    firstOrder.put("objectKey", "workspace-generations/v397/candidate.tar.gz");
+    Map<String, Object> reverseOrder = new LinkedHashMap<>();
+    reverseOrder.put("objectKey", "workspace-generations/v397/candidate.tar.gz");
+    reverseOrder.put("runId", runId);
+    var firstOrderedIntent =
+        store.recordIntent(
+            attemptId,
+            WorkspaceGenerationStepStore.Kind.CANDIDATE_ARCHIVE_UPLOAD,
+            "canonical-order",
+            "a".repeat(64),
+            null,
+            firstOrder);
+    var reverseOrderedReplay =
+        store.recordIntent(
+            attemptId,
+            WorkspaceGenerationStepStore.Kind.CANDIDATE_ARCHIVE_UPLOAD,
+            "canonical-order",
+            "a".repeat(64),
+            null,
+            reverseOrder);
+    assertThat(reverseOrderedReplay.id()).isEqualTo(firstOrderedIntent.id());
+    assertThat(reverseOrderedReplay.idempotencyKey())
+        .isEqualTo(firstOrderedIntent.idempotencyKey());
+
     String generation = "a".repeat(64);
     var first =
         store.recordIntent(
@@ -92,7 +119,7 @@ class WorkspaceGenerationStepPostgresTest {
                 "SELECT COUNT(*) FROM workspace_generation_step WHERE attempt_id=?",
                 Integer.class,
                 attemptId))
-        .isEqualTo(1);
+        .isEqualTo(2);
 
     store.markArchiveApplied(
         attemptId,
