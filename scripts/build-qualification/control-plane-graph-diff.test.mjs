@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  compareControlPlaneGraphs,
-  validateReview,
-} from "./control-plane-graph-diff.mjs";
+import { compareControlPlaneGraphs } from "./control-plane-graph-diff.mjs";
 
 const node = (id, sourceFile, label = id) => ({
   id,
@@ -25,7 +22,7 @@ const hashes = {
   candidateFullGraphSha256: "b".repeat(64),
 };
 
-test("unrelated source changes do not require a control-plane review", () => {
+test("unrelated source changes do not alter the control-plane graph", () => {
   const base = { nodes: [node("ui", "frontend/src/App.tsx")], edges: [] };
   const candidate = {
     nodes: [
@@ -37,14 +34,10 @@ test("unrelated source changes do not require a control-plane review", () => {
 
   const diff = compareControlPlaneGraphs(base, candidate, hashes);
 
-  assert.equal(diff.reviewRequired, false);
-  assert.deepEqual(validateReview(diff, null), {
-    accepted: true,
-    reason: "NO_CONTROL_PLANE_CHANGE",
-  });
+  assert.equal(diff.controlPlaneChanged, false);
 });
 
-test("a generation authority edge change requires exact review", () => {
+test("a generation authority edge change is recorded as evidence", () => {
   const path =
     "src/main/java/com/navneet/executespec/workspacegeneration/WorkspaceGenerationLifecycle.java";
   const base = {
@@ -58,19 +51,9 @@ test("a generation authority edge change requires exact review", () => {
 
   const diff = compareControlPlaneGraphs(base, candidate, hashes);
 
-  assert.equal(diff.reviewRequired, true);
+  assert.equal(diff.controlPlaneChanged, true);
   assert.equal(diff.changedEdgeCount, 1);
   assert.ok(diff.impactedAreas.includes("GENERATION"));
-  assert.deepEqual(validateReview(diff, null), {
-    accepted: false,
-    reason: "REVIEW_MISSING",
-  });
-
-  const review = approvedReview(diff);
-  assert.deepEqual(validateReview(diff, review), {
-    accepted: true,
-    reason: "EXACT_REVIEW_APPROVED",
-  });
 });
 
 test("a removed SQL trigger edge is schema-sensitive", () => {
@@ -87,7 +70,7 @@ test("a removed SQL trigger edge is schema-sensitive", () => {
 
   const diff = compareControlPlaneGraphs(base, candidate, hashes);
 
-  assert.equal(diff.reviewRequired, true);
+  assert.equal(diff.controlPlaneChanged, true);
   assert.equal(diff.changedNodeCount, 1);
   assert.equal(diff.changedEdgeCount, 1);
   assert.ok(diff.impactedAreas.includes("SCHEMA"));
@@ -101,26 +84,8 @@ test("qualification script changes are deployment-sensitive", () => {
     hashes,
   );
 
-  assert.equal(diff.reviewRequired, true);
+  assert.equal(diff.controlPlaneChanged, true);
   assert.ok(diff.impactedAreas.includes("DEPLOYMENT"));
-});
-
-test("stale identity and incomplete area coverage fail closed", () => {
-  const path =
-    "src/main/java/com/navneet/executespec/sandbox/RunSandboxStore.java";
-  const diff = compareControlPlaneGraphs(
-    { nodes: [], edges: [] },
-    { nodes: [node("sandbox", path)], edges: [] },
-    hashes,
-  );
-  const stale = { ...approvedReview(diff), diffSha256: "c".repeat(64) };
-  assert.equal(validateReview(diff, stale).reason, "REVIEW_IDENTITY_MISMATCH");
-
-  const incomplete = { ...approvedReview(diff), impactedAreas: [] };
-  assert.equal(
-    validateReview(diff, incomplete).reason,
-    "REVIEW_AREA_COVERAGE_INCOMPLETE",
-  );
 });
 
 test("Graphify edge schema cannot silently degrade to an empty graph", () => {
@@ -168,7 +133,7 @@ test("absolute extraction roots do not create semantic edge changes", () => {
     hashes,
   );
 
-  assert.equal(diff.reviewRequired, false);
+  assert.equal(diff.controlPlaneChanged, false);
   assert.equal(diff.changedNodeCount, 0);
   assert.equal(diff.changedEdgeCount, 0);
   assert.equal(diff.baseExtractionPrefixCount, 1);
@@ -176,7 +141,7 @@ test("absolute extraction roots do not create semantic edge changes", () => {
   assert.equal(diff.baseControlGraphSha256, diff.candidateControlGraphSha256);
 });
 
-test("review identity ignores nondeterministic nodes outside the control graph", () => {
+test("control identity ignores nondeterministic nodes outside the control graph", () => {
   const path =
     "src/main/java/com/navneet/executespec/workspacegeneration/WorkspaceGenerationLifecycle.java";
   const controlNodes = [node("lifecycle", path), node("store", path)];
@@ -219,23 +184,4 @@ test("review identity ignores nondeterministic nodes outside the control graph",
     second.candidateControlGraphSha256,
   );
   assert.equal(first.diffSha256, second.diffSha256);
-  assert.deepEqual(validateReview(second, approvedReview(first)), {
-    accepted: true,
-    reason: "EXACT_REVIEW_APPROVED",
-  });
 });
-
-function approvedReview(diff) {
-  return {
-    schemaVersion: 2,
-    baseControlGraphSha256: diff.baseControlGraphSha256,
-    candidateControlGraphSha256: diff.candidateControlGraphSha256,
-    diffSha256: diff.diffSha256,
-    decision: "APPROVED",
-    reviewer: "independent-reviewer",
-    reviewedAt: "2026-08-12T00:00:00Z",
-    impactedAreas: diff.impactedAreas,
-    rationale:
-      "Reviewed every changed control-plane node and edge against its owning invariant.",
-  };
-}
