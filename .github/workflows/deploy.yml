@@ -238,15 +238,41 @@ jobs:
         id: control_plane_graph_diff
         continue-on-error: true
         run: |
-          BASE_SHA=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+          BASE_MARKER_OUTPUT=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
-            --command="sudo awk -F= '/^source_sha=/{print \$2}' /opt/app/RUNNING_RELEASE" \
-            | tr -d '\r\n')
-          if ! [[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || ! git cat-file -e "$BASE_SHA^{commit}"; then
-            echo "::error::Running environment does not expose a source SHA present in repository history."
+            --command="sudo grep -E '^source_sha=[a-f0-9]{40}$' /opt/app/RUNNING_RELEASE || true" \
+            | tr -d '\r')
+          BASE_SHA_LINES=$(printf '%s\n' "$BASE_MARKER_OUTPUT" \
+            | sed -nE 's/^source_sha=([a-f0-9]{40})$/\1/p')
+          BASE_SHA_COUNT=$(printf '%s\n' "$BASE_SHA_LINES" | sed '/^$/d' | wc -l | tr -d ' ')
+          if [ "$BASE_SHA_COUNT" != "1" ]; then
+            echo "::error::Running release marker must expose exactly one canonical source_sha; found $BASE_SHA_COUNT."
+            exit 1
+          fi
+          BASE_SHA=$(printf '%s\n' "$BASE_SHA_LINES" | head -1)
+          if [ "$DEPLOY_ENV" != "benchmark" ]; then
+            if ! [[ "$PREVIOUS_CURRENT_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+              echo "::error::Immutable deploy pointer is missing or malformed."
+              exit 1
+            fi
+            if [ "$BASE_SHA" != "$PREVIOUS_CURRENT_SHA" ]; then
+              echo "::error::Host source SHA does not match the immutable deploy pointer captured before qualification."
+              echo "host=$BASE_SHA pointer=$PREVIOUS_CURRENT_SHA"
+              exit 1
+            fi
+          fi
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$BASE_SHA"
+          fi
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            echo "::error::Running source SHA $BASE_SHA is not a commit available from repository history."
+            exit 1
+          fi
+          if ! git merge-base "$BASE_SHA" "$TARGET_SHA" >/dev/null; then
+            echo "::error::Running source SHA $BASE_SHA and candidate $TARGET_SHA do not share repository history."
             exit 1
           fi
           BASE_DIR=$(mktemp -d)
@@ -633,7 +659,7 @@ jobs:
       # An SSH response is not activation authority: the connection can disappear after the host
       # switched. Re-read the atomic source/artifact/attempt tuple even when activation errored.
       - name: Reconcile host release candidate
-        if: always()
+        if: always() && steps.activate_release.outcome != 'skipped'
         run: |
           EXPECTED_MARKER=$(printf '%s\n' \
             'source_sha=${{ env.TARGET_SHA }}' \
