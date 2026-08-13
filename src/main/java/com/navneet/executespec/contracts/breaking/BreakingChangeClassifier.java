@@ -1,6 +1,7 @@
 package com.navneet.executespec.contracts.breaking;
 
 import com.navneet.executespec.contracts.ContractRegistry;
+import com.navneet.executespec.tool.ExecutionContext;
 
 /**
  * E2.7 — strategy interface for breaking-change classification. One implementation per {@link
@@ -31,4 +32,16 @@ public interface BreakingChangeClassifier {
    * @return typed {@link ContractDiff}; never null, never throws
    */
   ContractDiff classify(String oldContent, String newContent);
+
+  /** Exact-generation BUILD classification; pure-Java classifiers may use the default. */
+  default ContractDiff classify(ExecutionContext context, String oldContent, String newContent) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      return new ContractDiff(
+          "Verification authority unavailable",
+          java.util.List.of(),
+          ContractDiff.Confidence.UNCLASSIFIED,
+          name());
+    }
+    return classify(oldContent, newContent);
+  }
 }

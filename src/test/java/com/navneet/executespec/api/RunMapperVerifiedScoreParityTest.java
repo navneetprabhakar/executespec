@@ -181,14 +181,25 @@ class RunMapperVerifiedScoreParityTest {
     when(generationAttempts.findTop20ByRunIdOrderByCreatedAtDesc(RUN_ID))
         .thenReturn(List.of(attempt));
 
+    RunMapper mapper = mapper();
+    RunDetail detail = mapper.toDetail(run, List.of());
+    RunSummary summary = mapper.toSummary(run);
     RunDetail.WorkspaceGenerationAttemptEvidence evidence =
-        mapper().toDetail(run, List.of()).getWorkspaceGenerationAttempts().getFirst();
+        detail.getWorkspaceGenerationAttempts().getFirst();
 
     assertThat(evidence.attemptId()).isEqualTo(attemptId.toString());
     assertThat(evidence.state()).isEqualTo("RECOVERY_FAILED");
     assertThat(evidence.rejectedDiffDigest()).isEqualTo("c".repeat(64));
     assertThat(evidence.failureCode()).isEqualTo("TASK_VERIFICATION_REJECTED");
     assertThat(evidence.recoveryFailureCode()).isEqualTo("WORKSPACE_GENERATION_RECOVERY_FAILED");
+    assertThat(evidence.failureProjection().category())
+        .isEqualTo(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection
+                .Category.ROLLBACK_UNPROVEN);
+    assertThat(detail.getTerminalOutcome().code())
+        .isEqualTo("WORKSPACE_GENERATION_ROLLBACK_UNPROVEN");
+    assertThat(summary.terminalOutcome()).isEqualTo(detail.getTerminalOutcome());
+    assertThat(summary.terminalOutcome().automationExitCode()).isEqualTo(1);
     assertThat(evidence.toString())
         .doesNotContain("secret patch", "api_key", "Bearer secret", "failureReason");
   }

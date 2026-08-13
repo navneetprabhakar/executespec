@@ -7,6 +7,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 
+import com.navneet.executespec.tool.ExecutionContext;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -24,6 +26,9 @@ class WorkspaceTestRunnerTest {
     WorkspaceTestRunner runner =
         new WorkspaceTestRunner(new TestCommandResolver(), null, null, null, null);
     assertTrue(runner.runTests("run-1", emptyWorkspace).isEmpty());
+    assertEquals(
+        WorkspaceTestRunner.ExecutionStatus.UNSUPPORTED_FRAMEWORK,
+        runner.executeTests(new ExecutionContext("run-1", "T1", emptyWorkspace)).status());
   }
 
   @Test
@@ -57,6 +62,9 @@ class WorkspaceTestRunnerTest {
         com.navneet.executespec.testgen.model.TestExecutionSummary.EvidenceScope
             .WORKSPACE_TEST_SUITE,
         result.getEvidenceScope());
+    var typed = runner.executeTests(new ExecutionContext("run-red", "T1", workspace));
+    assertEquals(WorkspaceTestRunner.ExecutionStatus.PRODUCT_FAILED, typed.status());
+    assertTrue(typed.productFailure());
   }
 
   @Test

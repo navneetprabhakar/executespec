@@ -6,6 +6,9 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationAuthority;
 import com.navneet.executespec.executioncontext.LlmExecutionReference;
 import com.navneet.executespec.executioncontext.LlmExecutionScope;
+import com.navneet.executespec.sandboxroute.VerificationSandboxAuthority;
+import com.navneet.executespec.workspacegeneration.BuildAcceptanceExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 
 /**
  * Per-task execution context passed to every tool invocation.
@@ -21,6 +24,10 @@ import com.navneet.executespec.executioncontext.LlmExecutionScope;
  *     LLM are resolved against this
  * @param llmExecutionOperationAuthority optional process-local operation capability; never
  *     serialized, logged, or reconstructed from durable identity fields
+ * @param workspaceGenerationDispatchAuthority optional process-local BUILD-generation capability;
+ *     never serialized, logged, or reconstructed from durable identity fields
+ * @param buildAcceptance immutable failure-first prompt/control/status evidence for this BUILD
+ *     task; explicit execution context, never ambient thread state
  */
 public record ExecutionContext(
     String runId,
@@ -28,10 +35,35 @@ public record ExecutionContext(
     Path workspaceRoot,
     String llmExecutionContextId,
     LlmExecutionScope llmExecutionScope,
-    @JsonIgnore LlmExecutionOperationAuthority llmExecutionOperationAuthority) {
+    @JsonIgnore LlmExecutionOperationAuthority llmExecutionOperationAuthority,
+    @JsonIgnore WorkspaceGenerationDispatchAuthority workspaceGenerationDispatchAuthority,
+    @JsonIgnore VerificationSandboxAuthority verificationSandboxAuthority,
+    @JsonIgnore BuildAcceptanceExecutionContext buildAcceptance) {
+
+  /** Compatibility constructor retained for callers that bind the pre-acceptance authority set. */
+  public ExecutionContext(
+      String runId,
+      String taskId,
+      Path workspaceRoot,
+      String llmExecutionContextId,
+      LlmExecutionScope llmExecutionScope,
+      LlmExecutionOperationAuthority llmExecutionOperationAuthority,
+      WorkspaceGenerationDispatchAuthority workspaceGenerationDispatchAuthority,
+      VerificationSandboxAuthority verificationSandboxAuthority) {
+    this(
+        runId,
+        taskId,
+        workspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        llmExecutionOperationAuthority,
+        workspaceGenerationDispatchAuthority,
+        verificationSandboxAuthority,
+        null);
+  }
 
   public ExecutionContext(String runId, String taskId, Path workspaceRoot) {
-    this(runId, taskId, workspaceRoot, null, null, null);
+    this(runId, taskId, workspaceRoot, null, null, null, null, null, null);
   }
 
   /** Compatibility constructor for callers that carry only the durable context identity. */
@@ -41,7 +73,36 @@ public record ExecutionContext(
       Path workspaceRoot,
       String llmExecutionContextId,
       LlmExecutionScope llmExecutionScope) {
-    this(runId, taskId, workspaceRoot, llmExecutionContextId, llmExecutionScope, null);
+    this(
+        runId,
+        taskId,
+        workspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /** Compatibility constructor for tests/callers that bind only LLM operation authority. */
+  public ExecutionContext(
+      String runId,
+      String taskId,
+      Path workspaceRoot,
+      String llmExecutionContextId,
+      LlmExecutionScope llmExecutionScope,
+      LlmExecutionOperationAuthority llmExecutionOperationAuthority) {
+    this(
+        runId,
+        taskId,
+        workspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        llmExecutionOperationAuthority,
+        null,
+        null,
+        null);
   }
 
   public ExecutionContext(
@@ -67,7 +128,10 @@ public record ExecutionContext(
         workspaceRoot,
         reference == null ? null : reference.contextId(),
         reference == null ? null : reference.scope(),
-        llmExecutionOperationAuthority);
+        llmExecutionOperationAuthority,
+        null,
+        null,
+        null);
   }
 
   public ExecutionContext {
@@ -87,6 +151,83 @@ public record ExecutionContext(
     }
   }
 
+  /** Binds an exact process-local BUILD capability without changing durable LLM authority. */
+  public ExecutionContext withWorkspaceGenerationAuthority(
+      WorkspaceGenerationDispatchAuthority authority) {
+    return new ExecutionContext(
+        runId,
+        taskId,
+        workspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        llmExecutionOperationAuthority,
+        authority,
+        verificationSandboxAuthority,
+        buildAcceptance);
+  }
+
+  /**
+   * Derives an execution view over a framework-owned disposable tree while preserving the exact
+   * durable LLM and BUILD capabilities. Authority still fences the canonical generation; changing
+   * the path does not create authority and is intentionally explicit at the call site.
+   */
+  public ExecutionContext withWorkspaceRoot(Path derivedWorkspaceRoot) {
+    return new ExecutionContext(
+        runId,
+        taskId,
+        derivedWorkspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        llmExecutionOperationAuthority,
+        workspaceGenerationDispatchAuthority,
+        verificationSandboxAuthority,
+        buildAcceptance);
+  }
+
+  /** Binds a framework-minted physical verification capability and its exact owned workspace. */
+  public ExecutionContext withVerificationSandboxAuthority(VerificationSandboxAuthority authority) {
+    if (authority == null
+        || !runId.equals(authority.runId())
+        || !workspaceRoot.toAbsolutePath().normalize().equals(authority.workspaceRoot())) {
+      throw new IllegalArgumentException("verification sandbox authority does not match context");
+    }
+    return new ExecutionContext(
+        runId,
+        taskId,
+        workspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        llmExecutionOperationAuthority,
+        workspaceGenerationDispatchAuthority,
+        authority,
+        buildAcceptance);
+  }
+
+  /** Carries immutable acceptance semantics across thread/executor boundaries. */
+  public ExecutionContext withBuildAcceptance(BuildAcceptanceExecutionContext acceptance) {
+    if (acceptance == null) {
+      throw new IllegalArgumentException("build acceptance context is required");
+    }
+    return new ExecutionContext(
+        runId,
+        taskId,
+        workspaceRoot,
+        llmExecutionContextId,
+        llmExecutionScope,
+        llmExecutionOperationAuthority,
+        workspaceGenerationDispatchAuthority,
+        verificationSandboxAuthority,
+        acceptance);
+  }
+
+  public void assertWorkspaceGenerationDispatch(
+      WorkspaceGenerationDispatchAuthority.Phase requiredPhase) {
+    if (workspaceGenerationDispatchAuthority == null) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_AUTHORITY_REQUIRED");
+    }
+    workspaceGenerationDispatchAuthority.assertDispatch(runId, taskId, requiredPhase);
+  }
+
   /** Preserve the durable tenant boundary while deriving a per-task tool context. */
   public ExecutionContext child(String childTaskId) {
     return new ExecutionContext(
@@ -95,7 +236,10 @@ public record ExecutionContext(
         workspaceRoot,
         llmExecutionContextId,
         llmExecutionScope,
-        llmExecutionOperationAuthority);
+        llmExecutionOperationAuthority,
+        workspaceGenerationDispatchAuthority,
+        verificationSandboxAuthority,
+        buildAcceptance);
   }
 
   /**

@@ -52,6 +52,10 @@ class WorkspaceGenerationArchiveServiceTest {
         new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions);
     Path archive = archives.create(candidate);
     String digest = DigestUtils.sha256Hex(Files.readAllBytes(archive));
+    Path replayedArchive = archives.create(candidate);
+    assertThat(DigestUtils.sha256Hex(Files.readAllBytes(replayedArchive)))
+        .as("the same generation must replay to byte-identical archive content")
+        .isEqualTo(digest);
 
     Path restoredRoot = temp.resolve("restored");
     CorrectionWorkspaceTransaction.Checkpoint restored =

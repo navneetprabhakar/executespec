@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.navneet.executespec.contracts.ContractRegistry;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
 
@@ -46,6 +47,22 @@ public class BreakingChangeService {
           "(none)");
     }
     return classifier.classify(oldContent, newContent);
+  }
+
+  public ContractDiff classify(
+      ExecutionContext context,
+      ContractRegistry.ContractType type,
+      String oldContent,
+      String newContent) {
+    BreakingChangeClassifier classifier = byType.get(type);
+    if (classifier == null) {
+      return new ContractDiff(
+          "No classifier registered for type " + type,
+          List.of(),
+          ContractDiff.Confidence.UNCLASSIFIED,
+          "(none)");
+    }
+    return classifier.classify(context, oldContent, newContent);
   }
 
   /** Test seam — package-private; reveals which classifier handles each type. */

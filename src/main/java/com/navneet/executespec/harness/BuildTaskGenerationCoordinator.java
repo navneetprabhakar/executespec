@@ -2,30 +2,32 @@ package com.navneet.executespec.harness;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.deployment.GcsTaskCheckpointService;
 import com.navneet.executespec.engine.DeterministicFailureDelta;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.executioncontext.LlmExecutionOperationCoordinator;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.RunLlmOperationLifecycleService;
-import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.BuildAcceptanceExecutionContext;
+import com.navneet.executespec.workspacegeneration.BuildEnvironmentMaterializer;
+import com.navneet.executespec.workspacegeneration.BuildProtocolVersionService;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselinePlan;
 import com.navneet.executespec.workspacegeneration.GreenfieldBaselineService;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContractResolver;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceVerifier;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationConvergenceService;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationExecutionEvidenceRecorder;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationInitialFailureRecorder;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
-import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTaskTransitionService;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 
 import org.springframework.stereotype.Service;
@@ -37,7 +39,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class BuildTaskGenerationCoordinator {
 
-  static final String SHARED_LOOP_FLAG = "build.shared-code-change-loop.enabled";
   private final WorkspaceGenerationLifecycle generations;
   private final WorkspaceGenerationExecutionEvidenceRecorder executionEvidence;
   private final WorkspaceGenerationInitialFailureRecorder initialFailures;
@@ -47,17 +48,12 @@ public class BuildTaskGenerationCoordinator {
   private final GcsTaskCheckpointService checkpoints;
   private final SseBroadcaster broadcaster;
   private final GreenfieldBaselineService greenfieldBaselines;
-  private final FeatureFlagService featureFlags;
+  private final BuildProtocolVersionService protocolVersions;
   private final BuildTaskUsageEvidence usageEvidence;
   private final WorkspaceGenerationTelemetry telemetry;
-  private final WorkspaceGenerationTaskTransitionService taskTransitions;
+  private final WorkspaceGenerationConvergenceService convergence;
   private final BuildContinuationAdmissionService admissions;
-  private final ThreadLocal<Boolean> acceptancePending = new ThreadLocal<>();
-  private final ThreadLocal<ExecutionContext> activeTaskContext = new ThreadLocal<>();
-  private final ThreadLocal<TaskAcceptanceContract> activeContract = new ThreadLocal<>();
-  private final ThreadLocal<GreenfieldBaselinePlan> activeBaseline = new ThreadLocal<>();
-  private final ThreadLocal<TaskAcceptanceVerifier.InitialFailure> activeInitialFailure =
-      new ThreadLocal<>();
+  private final BuildEnvironmentMaterializer environments;
 
   public BuildTaskGenerationCoordinator(
       WorkspaceGenerationLifecycle generations,
@@ -69,11 +65,12 @@ public class BuildTaskGenerationCoordinator {
       GcsTaskCheckpointService checkpoints,
       SseBroadcaster broadcaster,
       GreenfieldBaselineService greenfieldBaselines,
-      FeatureFlagService featureFlags,
+      BuildProtocolVersionService protocolVersions,
       BuildTaskUsageEvidence usageEvidence,
       WorkspaceGenerationTelemetry telemetry,
-      WorkspaceGenerationTaskTransitionService taskTransitions,
-      BuildContinuationAdmissionService admissions) {
+      WorkspaceGenerationConvergenceService convergence,
+      BuildContinuationAdmissionService admissions,
+      BuildEnvironmentMaterializer environments) {
     this.generations = generations;
     this.executionEvidence = executionEvidence;
     this.initialFailures = initialFailures;
@@ -83,11 +80,12 @@ public class BuildTaskGenerationCoordinator {
     this.checkpoints = checkpoints;
     this.broadcaster = broadcaster;
     this.greenfieldBaselines = greenfieldBaselines;
-    this.featureFlags = featureFlags;
+    this.protocolVersions = protocolVersions;
     this.usageEvidence = usageEvidence;
     this.telemetry = telemetry;
-    this.taskTransitions = taskTransitions;
+    this.convergence = convergence;
     this.admissions = admissions;
+    this.environments = environments;
   }
 
   public TaskOutcome execute(
@@ -95,7 +93,7 @@ public class BuildTaskGenerationCoordinator {
       PlannedTask task,
       Plan plan,
       ExecutionRequest request,
-      Supplier<TaskOutcome> dispatch,
+      Function<ExecutionContext, TaskOutcome> dispatch,
       TaskStatusSink taskStatus) {
     return executeAttempt(
         taskIndex,
@@ -121,7 +119,7 @@ public class BuildTaskGenerationCoordinator {
       String requestedModel,
       Integer expectedRecoveryAttempt,
       boolean authorizedTerminal,
-      Supplier<TaskOutcome> dispatch,
+      Function<ExecutionContext, TaskOutcome> dispatch,
       TaskStatusSink taskStatus) {
     return executeAttempt(
         taskIndex,
@@ -147,11 +145,11 @@ public class BuildTaskGenerationCoordinator {
       boolean continuation,
       Integer expectedRecoveryAttempt,
       boolean authorizedTerminal,
-      Supplier<TaskOutcome> dispatch,
+      Function<ExecutionContext, TaskOutcome> dispatch,
       TaskStatusSink taskStatus) {
     requireServerOwnedWorkspace(request.localHandsMode());
     String runId = request.runContext().runId();
-    boolean sharedLoopEnabled = featureFlags != null && featureFlags.isEnabled(SHARED_LOOP_FLAG);
+    boolean sharedLoopEnabled = protocolVersions.requireExecutable(runId).sharedKernel();
     GreenfieldBaselinePlan baseline =
         sharedLoopEnabled
             ? greenfieldBaselines.plan(
@@ -203,9 +201,6 @@ public class BuildTaskGenerationCoordinator {
     }
     com.navneet.executespec.cost.RunCostTracker.Snapshot usageBefore =
         usageEvidence.snapshot(runId, task.id());
-    boolean acceptStarted = false;
-    boolean rollbackStarted = false;
-    boolean operationClosed = false;
     RunLlmOperationLifecycleService.PhaseLease operation = claimedAdmission.operation();
     LlmExecutionOperationCoordinator.LeaseIdentity identity = claimedAdmission.identity();
     WorkspaceGenerationLifecycle.Prepared prepared;
@@ -252,40 +247,56 @@ public class BuildTaskGenerationCoordinator {
           requestedModel,
           null,
           null);
-      activeTaskContext.set(operation.context());
-      activeContract.set(contract);
-      if (baseline != null) activeBaseline.set(baseline);
-      acceptancePending.set(true);
-      ExecutionContext operationContext = operation.context();
-      TaskOutcome outcome =
-          RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-              prepared.lease(),
-              () -> generations.assertMutationDispatch(prepared),
-              () -> {
-                if (baseline != null) {
-                  greenfieldBaselines.materialize(request.runContext().workspaceRoot(), baseline);
-                }
-                if (sharedLoopEnabled) {
-                  TaskAcceptanceVerifier.InitialFailure initialFailure =
-                      verifier.probeInitial(operationContext, contract);
-                  initialFailures.record(prepared, initialFailure);
-                  activeInitialFailure.set(initialFailure);
-                  telemetry.state(
-                      runId,
-                      task.id(),
-                      prepared,
-                      "INITIAL_FAILURE_" + initialFailure.outcome(),
-                      contract,
-                      requestedProvider,
-                      requestedModel,
-                      null,
-                      initialFailure.code());
-                  if (!initialFailure.observed()) {
-                    throw new InitialFailureUnavailableException(initialFailure);
-                  }
-                }
-                return dispatch.get();
-              });
+      WorkspaceGenerationDispatchAuthority mutationAuthority =
+          new WorkspaceGenerationDispatchAuthority(
+              runId,
+              task.id(),
+              prepared,
+              WorkspaceGenerationDispatchAuthority.Phase.MUTATION,
+              generations);
+      ExecutionContext operationContext =
+          operation.context().withWorkspaceGenerationAuthority(mutationAuthority);
+      if (baseline != null) {
+        mutationAuthority.assertDispatch(
+            runId, task.id(), WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
+        greenfieldBaselines.materialize(request.runContext().workspaceRoot(), baseline);
+      }
+      if (sharedLoopEnabled) {
+        TaskAcceptanceVerifier.InitialFailure initialFailure =
+            verifier.probeInitial(operationContext, contract);
+        initialFailures.record(prepared, initialFailure);
+        telemetry.state(
+            runId,
+            task.id(),
+            prepared,
+            "INITIAL_FAILURE_" + initialFailure.outcome(),
+            contract,
+            requestedProvider,
+            requestedModel,
+            null,
+            initialFailure.code());
+        if (!initialFailure.observed()) {
+          throw new InitialFailureUnavailableException(initialFailure);
+        }
+        operationContext =
+            operationContext.withBuildAcceptance(
+                buildAcceptance(contract, baseline, initialFailure, true));
+        // The initial probe above rematerializes only inside its disposable sandbox while the
+        // canonical tree is still free of ignored dependency bytes. Materialize the separate
+        // worker environment only after that proof, then freeze/clean it before final verification.
+        environments.materialize(
+            operationContext,
+            prepared.attemptId(),
+            BuildEnvironmentMaterializer.Phase.WORKER,
+            () ->
+                mutationAuthority.assertDispatch(
+                    runId, task.id(), WorkspaceGenerationDispatchAuthority.Phase.MUTATION));
+      } else {
+        operationContext =
+            operationContext.withBuildAcceptance(
+                new BuildAcceptanceExecutionContext("", null, false, true));
+      }
+      TaskOutcome outcome = dispatch.apply(operationContext);
       if (sharedLoopEnabled) {
         WorkerResult primary = outcome == null ? null : outcome.workerOutcome();
         WorkerResult retry = outcome == null ? null : outcome.retryWorkerOutcome();
@@ -314,8 +325,6 @@ public class BuildTaskGenerationCoordinator {
       if (outcome == null || outcome.status() == null) {
         throw new IllegalStateException("BUILD_TASK_DISPATCH_OUTCOME_INVALID");
       }
-      clearThreadState();
-
       // Worker termination is advisory after mutation. The frozen verifier alone accepts/rejects,
       // including warning/failure outcomes where the model forgot to call completeTask.
       String candidate = generations.beginVerification(prepared);
@@ -332,10 +341,19 @@ public class BuildTaskGenerationCoordinator {
       List<String> changedFiles = generations.changedFiles(prepared);
       long verificationStarted = System.nanoTime();
       WorkspaceGenerationLifecycle.Verification verification =
-          RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-              prepared.lease(),
-              () -> generations.assertVerificationDispatch(prepared),
-              () -> verifier.verify(request.runContext().child(task.id()), contract, changedFiles));
+          verifier.verify(
+              request
+                  .runContext()
+                  .child(task.id())
+                  .withWorkspaceGenerationAuthority(
+                      new WorkspaceGenerationDispatchAuthority(
+                          runId,
+                          task.id(),
+                          prepared,
+                          WorkspaceGenerationDispatchAuthority.Phase.VERIFICATION,
+                          generations)),
+              contract,
+              changedFiles);
       generations.recordVerification(prepared, verification);
       if (sharedLoopContract(contract)) {
         telemetry.verification(
@@ -360,7 +378,6 @@ public class BuildTaskGenerationCoordinator {
                 + verification.outcome().toLowerCase(Locale.ROOT)
                 + "; rejected generation "
                 + candidate;
-        rollbackStarted = true;
         rollback(
             prepared,
             runId,
@@ -371,11 +388,7 @@ public class BuildTaskGenerationCoordinator {
             candidate,
             "TASK_VERIFICATION_REJECTED",
             reason);
-        requireTaskStatus(taskStatus.persist("PARTIAL", reason), "PARTIAL");
-        taskTransitions.publish(prepared.attemptId());
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
-        operations.failBuildTask(operation, "BUILD_TASK_VERIFICATION_REJECTED");
-        operationClosed = true;
         return BuildTaskAcceptanceOutcomes.rejected(outcome, reason);
       }
 
@@ -383,15 +396,19 @@ public class BuildTaskGenerationCoordinator {
       CorrectionWorkspaceTransaction.Checkpoint candidateCheckpoint =
           generations.snapshotCandidate(prepared);
       GcsTaskCheckpointService.CheckpointReceipt checkpoint =
-          checkpoints.checkpointGeneration(runId, task.id(), candidateCheckpoint);
+          generations.checkpointCandidate(prepared, task.id(), candidateCheckpoint);
       generations.completeCheckpoint(
           prepared,
           checkpoint.kind(),
           checkpoint.key(),
           checkpoint.generation(),
-          checkpoint.artifactDigest());
-      acceptStarted = true;
+          checkpoint.artifactDigest(),
+          checkpoint.storageGeneration(),
+          checkpoint.sizeBytes(),
+          checkpoint.crc32c(),
+          checkpoint.etag());
       generations.accept(prepared);
+      convergence.reconcileTerminal(prepared);
       telemetry.state(
           runId,
           task.id(),
@@ -402,74 +419,43 @@ public class BuildTaskGenerationCoordinator {
           firstNonBlank(outcome.dispatchedModel(), requestedModel),
           candidate,
           "PASSED");
-      requireTaskStatus(taskStatus.persist("COMPLETE", null), "COMPLETE");
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      operations.complete(operation);
-      operationClosed = true;
       return BuildTaskAcceptanceOutcomes.accepted(task, outcome);
     } catch (RuntimeException failure) {
-      clearThreadState();
       if (failure.getMessage() != null
           && failure.getMessage().contains("WORKSPACE_GENERATION_FRONTIER_CAS_FAILED")) {
         telemetry.control(
             runId, task.id(), prepared.attemptId(), "ACCEPTED_FRONTIER_CAS", "CONFLICT", "ACCEPT");
       }
-      if (!acceptStarted && !rollbackStarted) {
-        try {
-          String code =
-              failure instanceof InitialFailureUnavailableException unavailable
-                  ? unavailable.evidence().code()
-                  : "TASK_GENERATION_EXCEPTION";
-          rollback(
-              prepared,
-              runId,
-              task.id(),
-              contract,
-              requestedProvider,
-              requestedModel,
-              null,
-              code,
-              failure.getMessage());
-        } catch (RuntimeException rollbackFailure) {
-          failure.addSuppressed(rollbackFailure);
-        }
-      }
-      if (operation != null && !operationClosed) {
-        try {
-          if (acceptStarted) operations.complete(operation);
-          else operations.failBuildTask(operation, "BUILD_TASK_GENERATION_FAILED");
-        } catch (RuntimeException operationFailure) {
-          failure.addSuppressed(operationFailure);
-        }
+      try {
+        String code =
+            failure instanceof InitialFailureUnavailableException unavailable
+                ? unavailable.evidence().code()
+                : "TASK_GENERATION_EXCEPTION";
+        convergence.convergeAfterFailure(prepared, code, failure.getMessage());
+      } catch (RuntimeException convergenceFailure) {
+        failure.addSuppressed(convergenceFailure);
       }
       throw failure;
     } finally {
-      clearThreadState();
       generations.release(prepared);
     }
   }
 
-  public ExecutionContext childContext(ExecutionContext fallback, String taskId) {
-    ExecutionContext active = activeTaskContext.get();
-    return (active == null ? fallback : active).child(taskId);
-  }
-
-  public String pendingStatus(String terminalStatus) {
-    return "COMPLETE".equals(terminalStatus) && Boolean.TRUE.equals(acceptancePending.get())
-        ? "VERIFYING"
-        : terminalStatus;
-  }
-
-  /** Exact server-owned failure-first evidence injected into BUILD's worker system contract. */
-  public String acceptanceSystemDirective() {
-    TaskAcceptanceContract contract = activeContract.get();
-    GreenfieldBaselinePlan baseline = activeBaseline.get();
-    TaskAcceptanceVerifier.InitialFailure initialFailure = activeInitialFailure.get();
+  /** Exact server-owned failure-first evidence carried explicitly with the worker dispatch. */
+  private static BuildAcceptanceExecutionContext buildAcceptance(
+      TaskAcceptanceContract contract,
+      GreenfieldBaselinePlan baseline,
+      TaskAcceptanceVerifier.InitialFailure initialFailure,
+      boolean sharedWorkerControls) {
     if (contract == null
         || contract.schemaVersion() < 2
         || baseline == null
-        || initialFailure == null) return "";
-    return """
+        || initialFailure == null) {
+      return new BuildAcceptanceExecutionContext("", null, sharedWorkerControls, true);
+    }
+    String directive =
+        """
 
 SERVER-OWNED BUILD ACCEPTANCE CONTRACT (immutable for this task)
 Contract digest: %s
@@ -490,36 +476,24 @@ Work in an inspect -> edit -> test -> diagnose loop. Do not claim completion unt
 required paths exist, the exact frozen build succeeds, and a required non-empty test suite
 succeeds. Planner text cannot replace or weaken these checks.
 """
-        .formatted(
-            contract.digest(),
-            contract.runtimeSurface(),
-            contract.requiredProofStrength(),
-            initialFailure.code() + ": " + initialFailure.detail(),
-            contract.requiredPaths(),
-            contract.buildCommand() == null ? "UNAVAILABLE" : contract.buildCommand().command(),
-            contract.testCommand() == null ? "UNAVAILABLE" : contract.testCommand().command());
-  }
-
-  /** Seed for the first post-edit deterministic comparison in the shared BUILD mutation loop. */
-  public DeterministicFailureDelta.Snapshot activeInitialFailureSnapshot() {
-    var failure = activeInitialFailure.get();
-    return failure == null || !failure.observed()
-        ? null
-        : DeterministicFailureDelta.snapshot(
-            failure.passed(),
-            failure.failed(),
-            failure.errors(),
-            failure.total(),
-            failure.detail());
-  }
-
-  String withAcceptanceDirective(String systemPrompt) {
-    return systemPrompt + acceptanceSystemDirective();
-  }
-
-  boolean workerControlEnabled(String flag, boolean configured) {
-    TaskAcceptanceContract contract = activeContract.get();
-    return (contract != null && contract.schemaVersion() >= 2) || configured;
+            .formatted(
+                contract.digest(),
+                contract.runtimeSurface(),
+                contract.requiredProofStrength(),
+                initialFailure.code() + ": " + initialFailure.detail(),
+                contract.requiredPaths(),
+                contract.buildCommand() == null ? "UNAVAILABLE" : contract.buildCommand().command(),
+                contract.testCommand() == null ? "UNAVAILABLE" : contract.testCommand().command());
+    DeterministicFailureDelta.Snapshot snapshot =
+        initialFailure.observed()
+            ? DeterministicFailureDelta.snapshot(
+                initialFailure.passed(),
+                initialFailure.failed(),
+                initialFailure.errors(),
+                initialFailure.total(),
+                initialFailure.detail())
+            : null;
+    return new BuildAcceptanceExecutionContext(directive, snapshot, sharedWorkerControls, true);
   }
 
   public static boolean acceptanceFailed(TaskOutcome outcome) {
@@ -541,14 +515,6 @@ succeeds. Planner text cannot replace or weaken these checks.
     }
   }
 
-  private void clearThreadState() {
-    acceptancePending.remove();
-    activeTaskContext.remove();
-    activeContract.remove();
-    activeBaseline.remove();
-    activeInitialFailure.remove();
-  }
-
   private static String firstNonBlank(String preferred, String fallback) {
     return preferred == null || preferred.isBlank() ? fallback : preferred;
   }
@@ -565,7 +531,7 @@ succeeds. Planner text cannot replace or weaken these checks.
       String reason) {
     long started = System.nanoTime();
     try {
-      generations.rollback(prepared, code, reason);
+      convergence.convergeAfterFailure(prepared, code, reason);
       if (sharedLoopContract(contract)) {
         telemetry.rollback("ROLLED_BACK", java.time.Duration.ofNanos(System.nanoTime() - started));
       }
@@ -586,13 +552,5 @@ succeeds. Planner text cannot replace or weaken these checks.
   @FunctionalInterface
   public interface TaskStatusSink {
     TaskStatusPersistenceService.Result persist(String status, String reason);
-  }
-
-  private static void requireTaskStatus(
-      TaskStatusPersistenceService.Result result, String expectedStatus) {
-    if (result != TaskStatusPersistenceService.Result.UPDATED) {
-      throw new IllegalStateException(
-          "BUILD_TASK_STATUS_RECONCILIATION_FAILED:" + expectedStatus + ":" + result);
-    }
   }
 }

@@ -127,9 +127,10 @@ public class TaskStatusPersistenceService {
   }
 
   /**
-   * Publishes a rollback outbox transition only against the exact task status and recovery
-   * generation snapshotted when rollback became terminal. Replaying after the task commit but
-   * before outbox acknowledgement is idempotent; any other intervening task transition is fenced.
+   * Publishes a generation-terminal outbox transition only against the exact task status and
+   * recovery generation snapshotted when ACCEPTED or ROLLED_BACK committed. Replaying after the
+   * task commit but before outbox acknowledgement is idempotent; any other intervening task
+   * transition is fenced.
    */
   @Transactional
   @Retryable(
@@ -175,12 +176,12 @@ public class TaskStatusPersistenceService {
     if ("PENDING".equals(targetStatus)) {
       task.setCompletedAt(null);
       task.setDurationMs(null);
-    } else if ("PARTIAL".equals(targetStatus)) {
+    } else if ("PARTIAL".equals(targetStatus) || "COMPLETE".equals(targetStatus)) {
       if (task.getCompletedAt() == null) task.setCompletedAt(now);
       if (task.getStartedAt() != null && task.getDurationMs() == null) {
         task.setDurationMs(Duration.between(task.getStartedAt(), now).toMillis());
       }
-      if (failureReason != null && !failureReason.isBlank()) {
+      if ("PARTIAL".equals(targetStatus) && failureReason != null && !failureReason.isBlank()) {
         task.setLastLlmFailure(truncate(failureReason, 4000, "… [truncated]"));
       }
     } else {

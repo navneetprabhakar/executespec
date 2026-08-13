@@ -10,7 +10,6 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
 import com.navneet.executespec.smoketest.BuildVerificationResult;
@@ -18,10 +17,12 @@ import com.navneet.executespec.smoketest.TestCommandResolver;
 import com.navneet.executespec.smoketest.TestCommandResolver.TestCommand;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner;
 import com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult;
+import com.navneet.executespec.smoketest.WorkspaceTestRunner.ExecutionEvidence;
+import com.navneet.executespec.smoketest.WorkspaceTestRunner.ExecutionStatus;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.tool.BuildExecutionEvidence;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
-import com.navneet.executespec.tool.ToolResult;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.stereotype.Component;
@@ -41,6 +42,7 @@ public class TaskAcceptanceVerifier {
   private final WorkspaceTestRunner testRunner;
   private final PythonHttpRuntimeAcceptanceService pythonHttpRuntime;
   private final ObjectMapper objectMapper;
+  private final TaskAcceptanceDisposableRunner disposableRunner;
 
   /**
    * Produces the deterministic red signal that must exist before a schema-v2 worker can dispatch.
@@ -48,6 +50,12 @@ public class TaskAcceptanceVerifier {
    * frozen build/test surface; a green workspace is not silently relabelled as failure-first.
    */
   public InitialFailure probeInitial(ExecutionContext context, TaskAcceptanceContract contract) {
+    return disposableRunner.probe(
+        context, disposable -> probeInitialInDisposable(disposable, contract));
+  }
+
+  private InitialFailure probeInitialInDisposable(
+      ExecutionContext context, TaskAcceptanceContract contract) {
     BuildCommand build = buildCommands.resolve(context.workspaceRoot(), null);
     Optional<TestCommand> test = testCommands.resolve(context.workspaceRoot());
     if (!matches(contract.buildCommand(), build)
@@ -92,15 +100,19 @@ public class TaskAcceptanceVerifier {
           null,
           missing);
     }
-    com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
-        context.runId());
-    ToolResult buildResult = buildProjectTool.execute(objectMapper.createObjectNode(), context);
+    context.assertWorkspaceGenerationDispatch(WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
+    BuildExecutionEvidence buildEvidence = buildProjectTool.executeForVerification(context);
     String buildOutput =
-        buildResult instanceof ToolResult.Ok ok
-            ? ok.content()
-            : "tool error: "
-                + (buildResult instanceof ToolResult.Err err ? err.message() : "unknown");
-    BuildVerificationResult parsed = BuildVerificationResult.parse(buildOutput);
+        buildEvidence.output() == null ? buildEvidence.detail() : buildEvidence.output();
+    BuildVerificationResult parsed = buildEvidence.verification();
+    if (buildEvidence.environmentFailure()) {
+      return new InitialFailure(
+          "UNAVAILABLE",
+          "INITIAL_BUILD_" + buildEvidence.disposition().name(),
+          bounded(buildOutput),
+          build.command(),
+          List.of());
+    }
     if (!parsed.passed()) {
       return new InitialFailure(
           parsed.status() == BuildVerificationResult.Status.UNAVAILABLE
@@ -121,19 +133,17 @@ public class TaskAcceptanceVerifier {
           null,
           List.of());
     }
-    com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
-        context.runId());
-    Optional<DetailedResult> tested =
-        testRunner.runTestsDetailed(context.runId(), context.workspaceRoot());
-    if (tested.isEmpty()) {
+    context.assertWorkspaceGenerationDispatch(WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
+    ExecutionEvidence tested = testRunner.executeTests(context);
+    if (tested.result() == null) {
       return new InitialFailure(
           "UNAVAILABLE",
-          "INITIAL_TEST_EVIDENCE_UNAVAILABLE",
-          "The frozen test command produced no trustworthy deterministic evidence",
-          test.get().command(),
+          "INITIAL_TEST_" + tested.status().name(),
+          tested.detail(),
+          tested.command(),
           List.of());
     }
-    DetailedResult detail = tested.get();
+    DetailedResult detail = tested.result();
     TestExecutionSummary summary = detail.summary();
     boolean red = detail.exitCode() != 0 || summary.getFailed() > 0 || summary.getErrors() > 0;
     return new InitialFailure(
@@ -149,6 +159,14 @@ public class TaskAcceptanceVerifier {
   }
 
   public WorkspaceGenerationLifecycle.Verification verify(
+      ExecutionContext context, TaskAcceptanceContract contract, List<String> actualChangedFiles) {
+    return disposableRunner.verify(
+        context,
+        contract,
+        disposable -> verifyInDisposable(disposable, contract, actualChangedFiles));
+  }
+
+  private WorkspaceGenerationLifecycle.Verification verifyInDisposable(
       ExecutionContext context, TaskAcceptanceContract contract, List<String> actualChangedFiles) {
     Instant started = Instant.now();
     BuildCommand build = buildCommands.resolve(context.workspaceRoot(), null);
@@ -170,6 +188,7 @@ public class TaskAcceptanceVerifier {
     Map<String, Object> commandContract = new LinkedHashMap<>();
     commandContract.put("schemaVersion", contract.schemaVersion());
     commandContract.put("commandClass", "BROAD_VERIFICATION");
+    commandContract.put("executionBoundary", "DISPOSABLE_EXACT_GENERATION");
     commandContract.put("policy", contract.verificationPolicy());
     commandContract.put("buildSource", build.sourceDescription());
     commandContract.put("buildCommand", build.command());
@@ -189,22 +208,19 @@ public class TaskAcceptanceVerifier {
     commandContract.put("testCommand", test.map(TestCommand::command).orElse(null));
     commandContract.put("testTimeoutSeconds", test.map(TestCommand::timeoutSeconds).orElse(null));
 
-    ObjectNode noPlannerCommand = objectMapper.createObjectNode();
-    com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
-        context.runId());
-    ToolResult buildResult = buildProjectTool.execute(noPlannerCommand, context);
+    context.assertWorkspaceGenerationDispatch(
+        WorkspaceGenerationDispatchAuthority.Phase.VERIFICATION);
+    BuildExecutionEvidence buildEvidence = buildProjectTool.executeForVerification(context);
     String buildOutput =
-        buildResult instanceof ToolResult.Ok ok
-            ? ok.content()
-            : "tool error: "
-                + (buildResult instanceof ToolResult.Err err ? err.message() : "unknown");
-    BuildVerificationResult parsed = BuildVerificationResult.parse(buildOutput);
+        buildEvidence.output() == null ? buildEvidence.detail() : buildEvidence.output();
+    BuildVerificationResult parsed = buildEvidence.verification();
     boolean noOp = "fallback:no-op".equals(build.sourceDescription());
     boolean exactResolvedBuild =
         buildOutput.contains("command=" + build.command() + "\n")
             && buildOutput.contains("source=" + build.sourceDescription());
     boolean buildPassed =
-        parsed.passed()
+        buildEvidence.disposition() == BuildExecutionEvidence.Disposition.EXECUTED
+            && parsed.passed()
             && !noOp
             && exactResolvedBuild
             && frozenBuildMatches
@@ -218,16 +234,17 @@ public class TaskAcceptanceVerifier {
             && !contract.endpointExpectations().isEmpty();
     Optional<PythonHttpRuntimeAcceptanceService.Result> runtimeResult = Optional.empty();
     Optional<DetailedResult> testResult = Optional.empty();
+    ExecutionEvidence testEvidence = null;
     if (buildPassed && test.isPresent() && bootstrapArtifactsMatch) {
-      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
-          context.runId());
-      testResult = testRunner.runTestsDetailed(context.runId(), context.workspaceRoot());
+      context.assertWorkspaceGenerationDispatch(
+          WorkspaceGenerationDispatchAuthority.Phase.VERIFICATION);
+      testEvidence = testRunner.executeTests(context);
+      testResult = Optional.ofNullable(testEvidence.result());
     }
     if (buildPassed && pythonHttpRuntimeRequired && bootstrapArtifactsMatch) {
-      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
-          context.runId());
-      runtimeResult =
-          Optional.of(pythonHttpRuntime.verify(context.runId(), context.workspaceRoot()));
+      context.assertWorkspaceGenerationDispatch(
+          WorkspaceGenerationDispatchAuthority.Phase.VERIFICATION);
+      runtimeResult = Optional.of(pythonHttpRuntime.verify(context));
     }
     TestExecutionSummary summary = testResult.map(DetailedResult::summary).orElse(null);
     boolean workspaceTestsExecuted = testResult.isPresent();
@@ -291,7 +308,9 @@ public class TaskAcceptanceVerifier {
       outcome = "UNAVAILABLE";
     } else if (!mutationPresent) {
       outcome = "FAILED";
-    } else if (noOp || parsed.status() == BuildVerificationResult.Status.UNAVAILABLE) {
+    } else if (buildEvidence.environmentFailure()
+        || noOp
+        || parsed.status() == BuildVerificationResult.Status.UNAVAILABLE) {
       outcome = "UNAVAILABLE";
     } else if (!buildPassed) {
       outcome = "FAILED";
@@ -307,11 +326,45 @@ public class TaskAcceptanceVerifier {
       outcome = "PASSED";
     }
 
+    String failureCategory = null;
+    String environmentCode = null;
+    if ("UNAVAILABLE".equals(outcome)) {
+      if (buildEvidence.environmentFailure()) {
+        failureCategory =
+            buildEvidence.disposition() == BuildExecutionEvidence.Disposition.MALFORMED_EVIDENCE
+                ? "INTERNAL_PROTOCOL"
+                : "ENVIRONMENT";
+        environmentCode = "BUILD_" + buildEvidence.disposition().name();
+      } else if (testEvidence != null && testEvidence.result() == null) {
+        failureCategory =
+            testEvidence.status() == ExecutionStatus.MALFORMED_EVIDENCE
+                ? "INTERNAL_PROTOCOL"
+                : "ENVIRONMENT";
+        environmentCode = "TEST_" + testEvidence.status().name();
+      } else if (runtimeResult
+          .map(result -> result.status() == PythonHttpRuntimeAcceptanceService.Status.UNAVAILABLE)
+          .orElse(false)) {
+        failureCategory = "ENVIRONMENT";
+        environmentCode = "RUNTIME_UNAVAILABLE";
+      } else {
+        failureCategory = "INTERNAL_PROTOCOL";
+        environmentCode = "ACCEPTANCE_PROOF_UNAVAILABLE";
+      }
+    } else if ("FAILED".equals(outcome)) {
+      failureCategory = "PRODUCT";
+    }
+
     Map<String, Object> evidence = new LinkedHashMap<>();
     evidence.put("schemaVersion", contract.schemaVersion());
     evidence.put("commandClass", "BROAD_VERIFICATION");
+    evidence.put("executionBoundary", "DISPOSABLE_EXACT_GENERATION");
+    evidence.put("canonicalFallbackUsed", false);
     evidence.put("taskContractDigest", contract.digest());
-    evidence.put("buildStatus", parsed.status().name());
+    evidence.put("buildStatus", parsed == null ? null : parsed.status().name());
+    evidence.put("buildExecutionDisposition", buildEvidence.disposition().name());
+    evidence.put("buildEnvironmentDetail", buildEvidence.detail());
+    evidence.put("buildExecutionBoundary", buildEvidence.executionBoundary());
+    evidence.put("buildRetryable", buildEvidence.retryable());
     evidence.put("exactResolvedBuild", exactResolvedBuild);
     evidence.put("frozenBuildMatches", frozenBuildMatches);
     evidence.put("frozenTestMatches", frozenTestMatches);
@@ -320,9 +373,14 @@ public class TaskAcceptanceVerifier {
     evidence.put("actualChangedFiles", changedFiles);
     evidence.put("actualCodeChanged", actualCodeChanged);
     evidence.put("candidateTestsPresent", candidateTestsPresent);
-    evidence.put("buildExitCode", parsed.exitCode());
+    evidence.put("buildExitCode", parsed == null ? null : parsed.exitCode());
     evidence.put("buildOutput", bounded(buildOutput));
     evidence.put("testsExecuted", testsExecuted);
+    evidence.put("testExecutionStatus", testEvidence == null ? null : testEvidence.status().name());
+    evidence.put("testEnvironmentDetail", testEvidence == null ? null : testEvidence.detail());
+    evidence.put(
+        "productVerificationFailure",
+        testEvidence != null && testEvidence.status() == ExecutionStatus.PRODUCT_FAILED);
     evidence.put("testExitCode", testResult.map(DetailedResult::exitCode).orElse(null));
     evidence.put(
         "testOutput",
@@ -358,6 +416,9 @@ public class TaskAcceptanceVerifier {
         testsExecuted ? "BUILD_AND_TEST" : "BUILD_ONLY",
         json(commandContract),
         outcome,
+        failureCategory,
+        environmentCode,
+        "DISPOSABLE_EXACT_GENERATION",
         buildPassed,
         testsExecuted,
         summary == null ? 0 : summary.getPassed(),

@@ -284,8 +284,25 @@ public class DataRetentionService {
             graceCutoff, PipelineRunRepository.TERMINAL_STATUSES);
 
     if (!toHardDelete.isEmpty()) {
-      runRepository.deleteAll(toHardDelete);
-      log.info("[DataRetention] Hard-deleted {} runs past grace period", toHardDelete.size());
+      int deleted = 0;
+      for (PipelineRun run : toHardDelete) {
+        try {
+          // V387: a quarantined legacy BUILD row can be under a database-enforced evidence hold.
+          // Delete one row per repository transaction so that hold (or any other broken FK) cannot
+          // roll back and starve unrelated eligible rows in the same retention batch.
+          runRepository.delete(run);
+          deleted++;
+        } catch (Exception e) {
+          log.warn(
+              "[DataRetention] Failed to hard-delete graced run {}: {}",
+              run.getRunId(),
+              e.getMessage());
+        }
+      }
+      log.info(
+          "[DataRetention] Hard-deleted {} of {} runs past grace period",
+          deleted,
+          toHardDelete.size());
     }
   }
 

@@ -50,6 +50,27 @@ export interface WorkspaceGenerationAttemptEvidence {
   verificationTestsExecuted?: boolean | null;
   verificationTestsPassed?: number | null;
   verificationTestsFailed?: number | null;
+  verificationFailureCategory?: 'PRODUCT' | 'ENVIRONMENT' | 'INTERNAL_PROTOCOL' | null;
+  verificationEnvironmentCode?: string | null;
+  verificationExecutionBoundary?: string | null;
+  failureProjection?: {
+    category:
+      | 'NO_CANDIDATE'
+      | 'VERIFICATION_REJECTED'
+      | 'VERIFICATION_ENVIRONMENT_UNAVAILABLE'
+      | 'CHECKPOINT_FAILED'
+      | 'FRONTIER_CONFLICT'
+      | 'ROLLBACK_PROVEN'
+      | 'ROLLBACK_UNPROVEN'
+      | 'AUTHORITY_LOST'
+      | 'INTERNAL_PROTOCOL_CONFLICT';
+    stage: string;
+    retryable: boolean;
+    candidatePresent: boolean;
+    rollbackProven: boolean;
+    publicationBlocked: boolean;
+    recommendedAction: string;
+  } | null;
   verificationEvidenceDigest?: string | null;
   rejectedDiffDigest?: string | null;
   failureCode?: string | null;

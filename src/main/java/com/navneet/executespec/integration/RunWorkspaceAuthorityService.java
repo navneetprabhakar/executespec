@@ -28,8 +28,6 @@ public class RunWorkspaceAuthorityService {
 
   private static final Duration LEASE_TTL = Duration.ofMinutes(3);
   private static final ThreadLocal<Lease> CORRECTION_TOOL_LEASE = new ThreadLocal<>();
-  private static final ThreadLocal<Lease> GENERATION_TOOL_LEASE = new ThreadLocal<>();
-  private static final ThreadLocal<Runnable> GENERATION_DISPATCH_FENCE = new ThreadLocal<>();
 
   private final JdbcTemplate jdbc;
   private final AgentProperties agentProperties;
@@ -95,38 +93,10 @@ public class RunWorkspaceAuthorityService {
   public static void assertCorrectionToolDispatch(String runId) {
     Lease correction = CORRECTION_TOOL_LEASE.get();
     assertToolLease(runId, correction, "CORRECTION_TOOL_LEASE_RUN_MISMATCH");
-    Lease generation = GENERATION_TOOL_LEASE.get();
-    assertToolLease(runId, generation, "WORKSPACE_GENERATION_TOOL_LEASE_RUN_MISMATCH");
-    Runnable generationFence = GENERATION_DISPATCH_FENCE.get();
-    if (generationFence != null) generationFence.run();
-  }
-
-  /**
-   * Fail-closed BUILD dispatch boundary; PATCH and bounded read-only agents use the permissive API.
-   */
-  public static void assertWorkspaceGenerationToolDispatch(String runId) {
-    Lease generation = GENERATION_TOOL_LEASE.get();
-    if (generation == null) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_TOOL_LEASE_REQUIRED");
-    }
-    assertToolLease(runId, generation, "WORKSPACE_GENERATION_TOOL_LEASE_RUN_MISMATCH");
-    Runnable generationFence = GENERATION_DISPATCH_FENCE.get();
-    if (generationFence == null) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_DISPATCH_FENCE_REQUIRED");
-    }
-    generationFence.run();
   }
 
   public static Lease currentCorrectionToolLease() {
     return CORRECTION_TOOL_LEASE.get();
-  }
-
-  public static Lease currentWorkspaceGenerationToolLease() {
-    return GENERATION_TOOL_LEASE.get();
-  }
-
-  public static Runnable currentWorkspaceGenerationDispatchFence() {
-    return GENERATION_DISPATCH_FENCE.get();
   }
 
   /** Binds the exact attempt lease, never the latest per-run lease, to a worker dispatch thread. */
@@ -139,29 +109,6 @@ public class RunWorkspaceAuthorityService {
     } finally {
       if (prior == null) CORRECTION_TOOL_LEASE.remove();
       else CORRECTION_TOOL_LEASE.set(prior);
-    }
-  }
-
-  /** Binds one exact BUILD generation lease to provider-adjacent worker tool dispatch. */
-  public static <T> T withWorkspaceGenerationToolLease(Lease lease, Supplier<T> work) {
-    return withWorkspaceGenerationToolLease(lease, null, work);
-  }
-
-  public static <T> T withWorkspaceGenerationToolLease(
-      Lease lease, Runnable dispatchFence, Supplier<T> work) {
-    Lease prior = GENERATION_TOOL_LEASE.get();
-    Runnable priorFence = GENERATION_DISPATCH_FENCE.get();
-    if (lease == null) GENERATION_TOOL_LEASE.remove();
-    else GENERATION_TOOL_LEASE.set(lease);
-    if (dispatchFence == null) GENERATION_DISPATCH_FENCE.remove();
-    else GENERATION_DISPATCH_FENCE.set(dispatchFence);
-    try {
-      return work.get();
-    } finally {
-      if (prior == null) GENERATION_TOOL_LEASE.remove();
-      else GENERATION_TOOL_LEASE.set(prior);
-      if (priorFence == null) GENERATION_DISPATCH_FENCE.remove();
-      else GENERATION_DISPATCH_FENCE.set(priorFence);
     }
   }
 
@@ -214,6 +161,36 @@ public class RunWorkspaceAuthorityService {
       localLeases.remove(lease.ownerToken());
       throw new IllegalStateException("RUN_WORKSPACE_AUTHORITY_LOST");
     }
+  }
+
+  /**
+   * Releases only the exact BUILD authority whose durable terminal generation, task receipt, and
+   * physical LLM operation have converged. This is restart-safe and cannot delete a newer or
+   * non-generation authority.
+   */
+  public boolean releaseConvergedGeneration(String runId) {
+    int deleted =
+        jdbc.update(
+            """
+            DELETE FROM run_workspace_authority w
+             WHERE w.run_id=? AND w.authority_type='BUILD_GENERATION'
+               AND EXISTS (
+                 SELECT 1
+                   FROM workspace_generation_attempt a
+                   JOIN llm_execution_operation o ON o.id=a.llm_operation_id
+                  WHERE a.run_id=w.run_id AND a.workspace_lease_token=w.owner_token
+                    AND a.state IN ('ACCEPTED','ROLLED_BACK')
+                    AND a.task_transition_state='COMPLETED'
+                    AND a.operation_transition_state='COMPLETED'
+                    AND ((a.state='ACCEPTED' AND o.status='SUCCEEDED')
+                      OR (a.state='ROLLED_BACK' AND o.status='FAILED'))
+               )
+            """,
+            runId);
+    if (deleted > 1) {
+      throw new IllegalStateException("RUN_WORKSPACE_TERMINAL_AUTHORITY_DELETE_INVALID");
+    }
+    return deleted == 1;
   }
 
   private void release(Lease lease) {
@@ -278,6 +255,7 @@ public class RunWorkspaceAuthorityService {
     BUILD_GENERATION,
     CORRECTION,
     RECOVERY,
+    PUBLICATION_PREPARE,
     PUBLICATION
   }
 

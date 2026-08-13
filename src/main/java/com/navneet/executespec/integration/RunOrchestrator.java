@@ -131,8 +131,7 @@ public class RunOrchestrator implements RunControlPort {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
 
-  /** RR-034 — bounded final-commit of the run workspace (extracted from this god class). */
-  private final WorkspaceGitCommitService workspaceGitCommitService;
+  private final LegacyWorkspaceGitCommitService legacyWorkspaceGitCommitService;
 
   private final OutlinePlannerAgent outlinePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
@@ -140,6 +139,7 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.harness.TaskStatusPersistenceService taskStatusPersistence;
   private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
       workspaceGenerationRecovery;
+  private final AcceptedGenerationVerificationRunner acceptedVerification;
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
@@ -175,7 +175,7 @@ public class RunOrchestrator implements RunControlPort {
   private final RunContextComposer contextComposer;
   private final RunPlanningCoordinator planningCoordinator;
   private final RunStandardsEnforcer standardsEnforcer;
-  private final RunInvariantEnforcer invariantEnforcer;
+  private final RunEnterpriseVerificationService enterpriseVerification;
   private final RunValidationKickoff validationKickoff;
   private final RunResourceCleaner resourceCleaner;
   private final TestGenOrchestrator testGenOrchestrator;
@@ -202,6 +202,8 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+  private final com.navneet.executespec.workspacegeneration.BuildProtocolVersionService
+      buildProtocolVersions;
 
   /**
    * Enterprise-knowledge planner injection (flag {@code enterprise.inject.enabled}, default OFF).
@@ -225,8 +227,6 @@ public class RunOrchestrator implements RunControlPort {
    * com.navneet.executespec.contracts.gate.PlanContractGateService} is the one that can actually
    * refuse: it fires at the plan gate, before worker spend or publication.
    */
-  private final RunBreakingChangeDetector runBreakingChangeDetector;
-
   private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
   private final RunPublicationFence publicationFence;
@@ -1048,6 +1048,10 @@ public class RunOrchestrator implements RunControlPort {
     // whose project, quota and audit trail it actually belongs to. The actor stays on
     // createdByUserId.
     RunSubmitAuthority submitAuthority = RunSubmitAuthority.resolve(policy, orgId, runId);
+    String normalizedRunMode =
+        runMode == null || runMode.isBlank()
+            ? com.navneet.executespec.state.RunMode.BUILD
+            : runMode;
 
     PipelineRun run =
         PipelineRun.builder()
@@ -1055,10 +1059,8 @@ public class RunOrchestrator implements RunControlPort {
             .userRequest(userRequest)
             .status("PLANNING")
             .harnessVersion("v2")
-            .runMode(
-                runMode == null || runMode.isBlank()
-                    ? com.navneet.executespec.state.RunMode.BUILD
-                    : runMode)
+            .runMode(normalizedRunMode)
+            .buildProtocolVersion(buildProtocolVersions.selectForSubmission(normalizedRunMode))
             .sourceType(source != null ? source : "MANUAL")
             .repoUrl(repoUrl)
             .repoMode(repoMode)
@@ -2280,27 +2282,33 @@ public class RunOrchestrator implements RunControlPort {
               reviewerRoute.provider(),
               reviewerRoute.model());
         }
+        Plan acceptedReviewPlan = plan;
         reviewResult =
-            reviewer.review(
-                InitialReviewerRequestPolicy.builder()
-                    .provider(reviewerRoute.provider())
-                    .model(reviewerRoute.model())
-                    .context(reviewRootCtx)
-                    .buildCommand(plan.buildCommand())
-                    .skipWiringPass(skipWiring)
-                    .maxIterationsPerPass(reviewerMaxIter)
-                    .brownfield(linkedRepoCount > 0)
-                    .allowedRepoRoots(
-                        RunReviewerScope.repoRoots(projectRepoService, projectId, selectedRepoIds))
-                    .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
-                    .allowBuildManifestCreation(false)
-                    .readOnly(true)
-                    .originalGoal(userRequest)
-                    .requirements(plan.requirements())
-                    .planAdvisories(
-                        com.navneet.executespec.agent.TaskExpanderAgent
-                            .advisoryPlanContractViolations(plan))
-                    .build());
+            acceptedVerification.execute(
+                reviewRootCtx,
+                "REVIEWER",
+                disposableReviewContext ->
+                    reviewer.review(
+                        InitialReviewerRequestPolicy.builder()
+                            .provider(reviewerRoute.provider())
+                            .model(reviewerRoute.model())
+                            .context(disposableReviewContext)
+                            .buildCommand(acceptedReviewPlan.buildCommand())
+                            .skipWiringPass(skipWiring)
+                            .maxIterationsPerPass(reviewerMaxIter)
+                            .brownfield(linkedRepoCount > 0)
+                            .allowedRepoRoots(
+                                RunReviewerScope.repoRoots(
+                                    projectRepoService, projectId, selectedRepoIds))
+                            .approvedNewFiles(RunReviewerScope.approvedNewFiles(acceptedReviewPlan))
+                            .allowBuildManifestCreation(false)
+                            .readOnly(true)
+                            .originalGoal(userRequest)
+                            .requirements(acceptedReviewPlan.requirements())
+                            .planAdvisories(
+                                com.navneet.executespec.agent.TaskExpanderAgent
+                                    .advisoryPlanContractViolations(acceptedReviewPlan))
+                            .build()));
         workspaceGenerationRecovery.assertAcceptedFrontier(
             runId, reviewRootCtx.workspaceRoot(), "REVIEWER");
         persistenceWriter.persistReview(runId, reviewResult);
@@ -2358,70 +2366,8 @@ public class RunOrchestrator implements RunControlPort {
         brownfieldHttpContractGuard.assertCompatible(runId);
       }
 
-      // 3b. Enterprise enforcement (project runs only) — make the formerly
-      // "decorative" engines real (RL-2026-05-037). StandardsRunner persists
-      // standards violations so /standards/report is populated; the breaking-
-      // change classifier surfaces touched-contract breaks as report-only run
-      // issues. Both project-gated + flag-gated (default OFF) + non-fatal.
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> contractBreakingIssues =
-          new java.util.ArrayList<>();
-      if (projectId != null) {
-        if (featureFlagService.isEnabled("standards.enforcement.enabled")) {
-          try {
-            var standardsReport =
-                standardsEnforcer.runStandardsEnforcement(
-                    runId, projectId, reviewRootCtx.workspaceRoot(), selectedRepoIds);
-            contractBreakingIssues.addAll(RunStandardsEnforcer.toReviewIssues(standardsReport));
-          } catch (Exception e) {
-            log.warn(
-                "RunOrchestrator run={} standards enforcement unavailable: {}",
-                runId,
-                e.getClass().getSimpleName());
-            contractBreakingIssues.add(
-                com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                    .id("SYNTH-STANDARD-UNAVAILABLE-RUN")
-                    .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-                    .category(com.navneet.executespec.reviewer.model.IssueCategory.CODE_QUALITY)
-                    .description("Configured engineering standards could not be verified.")
-                    .fixInstruction("Restore standards enforcement and rerun.")
-                    .autoFixed(false)
-                    .fixSucceeded(false)
-                    .build());
-          }
-        }
-        try {
-          contractBreakingIssues.addAll(
-              invariantEnforcer.enforce(runId, projectId, reviewRootCtx.workspaceRoot()));
-        } catch (Exception e) {
-          log.warn(
-              "RunOrchestrator run={} architecture invariant enforcement unavailable: {}",
-              runId,
-              e.getClass().getSimpleName());
-          contractBreakingIssues.add(
-              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                  .id("SYNTH-INVARIANT-UNAVAILABLE-RUN")
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-                  .category(
-                      com.navneet.executespec.reviewer.model.IssueCategory.CROSS_TASK_MISMATCH)
-                  .description("Configured architecture invariants could not be verified.")
-                  .fixInstruction("Restore invariant enforcement and rerun.")
-                  .autoFixed(false)
-                  .fixSucceeded(false)
-                  .build());
-        }
-        if (featureFlagService.isEnabled("contracts.breaking-change.enabled")) {
-          try {
-            contractBreakingIssues.addAll(
-                runBreakingChangeDetector.detect(
-                    runId, projectId, reviewRootCtx.workspaceRoot(), selectedRepoIds));
-          } catch (Exception e) {
-            log.warn(
-                "RunOrchestrator run={} breaking-change detection skipped: {}",
-                runId,
-                e.getMessage());
-          }
-        }
-      }
+          enterpriseVerification.verify(reviewRootCtx, projectId, selectedRepoIds);
 
       // 4. Pre-resolve terminal status BEFORE the validation report.
       // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
@@ -2458,9 +2404,21 @@ public class RunOrchestrator implements RunControlPort {
 
       // 5. Generate validation report + kick off test generation
       op = runOperationLifecycle.finishReviewAndClear(op, reviewerErrored);
+      ExecutionResult validationExecResult = execResult;
+      ReviewerResult validationReviewResult = reviewResult;
+      Plan validationPlan = plan;
       Optional<ValidationReport> validationReport =
-          validationKickoff.generateValidationReport(
-              runId, execResult, reviewResult, plan, contractBreakingIssues, "validation");
+          acceptedVerification.execute(
+              baseRootCtx,
+              "VALIDATION",
+              disposableContext ->
+                  validationKickoff.generateValidationReport(
+                      disposableContext,
+                      validationExecResult,
+                      validationReviewResult,
+                      validationPlan,
+                      contractBreakingIssues,
+                      "validation"));
       Optional<PostReviewContinuation> postValidationContinuation =
           maybeEmitPostValidationContinuationDecision(
               runId,
@@ -2498,14 +2456,21 @@ public class RunOrchestrator implements RunControlPort {
                 : new StatusAndReason(
                     mapOverallToV1Status(execResult.overall()), srDerived.reason());
         stampRunStatusReason(runId, sr);
+        ExecutionResult rerunValidationExecResult = execResult;
+        ReviewerResult rerunValidationReviewResult = reviewResult;
+        Plan rerunValidationPlan = plan;
         Optional<ValidationReport> rerunValidationReport =
-            validationKickoff.generateValidationReport(
-                runId,
-                execResult,
-                reviewResult,
-                plan,
-                contractBreakingIssues,
-                "post-validation-revalidation");
+            acceptedVerification.execute(
+                baseRootCtx,
+                "POST_VALIDATION",
+                disposableContext ->
+                    validationKickoff.generateValidationReport(
+                        disposableContext,
+                        rerunValidationExecResult,
+                        rerunValidationReviewResult,
+                        rerunValidationPlan,
+                        contractBreakingIssues,
+                        "post-validation-revalidation"));
         ValidationReport effectiveValidationReport =
             rerunValidationReport.orElse(validationReport.orElse(null));
         if (validationReportProvenanceFailed(effectiveValidationReport)) {
@@ -2539,7 +2504,7 @@ public class RunOrchestrator implements RunControlPort {
         // Baseline CLI smoke: invoke the inferred entry point with no stdin,
         // record exit code + head of stdout. Full stdin/stdout fixture harness
         // (planner-emitted cliTestCases with expected stdout) is follow-up work.
-        var cliResult = cliSmokeRunner.run(runId, workspace);
+        var cliResult = acceptedVerification.execute(baseRootCtx, "CLI_SMOKE", cliSmokeRunner::run);
         log.info(
             "RunOrchestrator run={} CLI smoke status={} exit={} cmd='{}' dur={}ms",
             runId,
@@ -2554,8 +2519,17 @@ public class RunOrchestrator implements RunControlPort {
             plan.runtimeSurface());
       }
 
-      // 6. Final workspace commit so `/push-github` has refs to push
-      commitWorkspaceOutputs(runId, workspace);
+      // Rolling-deployment compatibility only. V2 never enters this host Git path; it constructs
+      // exact immutable commit objects under PUBLICATION_PREPARE authority at publication time.
+      PipelineRun publicationCompatibilityRun = runRepo.findById(runId).orElse(null);
+      if (publicationCompatibilityRun != null
+          && com.navneet.executespec.state.RunMode.BUILD.equals(
+              publicationCompatibilityRun.getRunMode())
+          && com.navneet.executespec.workspacegeneration.BuildProtocolVersion.LEGACY_V1
+              .name()
+              .equals(publicationCompatibilityRun.getBuildProtocolVersion())) {
+        legacyWorkspaceGitCommitService.commit(runId, workspace);
+      }
 
       // 6b. Project memory: append compressed ledger entry for project-scoped runs.
       // Non-fatal — any failure is swallowed inside the agent.
@@ -3004,20 +2978,6 @@ public class RunOrchestrator implements RunControlPort {
             pushEx.getMessage());
       }
     }
-  }
-
-  /**
-   * Stages and commits every change in the workspace as a single "V2 run output" commit after
-   * execution + review complete. Required so {@code /push-github} has concrete refs to push — V2
-   * workers use {@code writeFile/editFile} tools directly on the filesystem and don't always commit
-   * per task.
-   *
-   * <p>Best-effort — a failed commit (e.g. nothing to commit, user had a .git/index.lock problem)
-   * is logged but doesn't fail the run.
-   */
-  /** RR-034 — bounded, kill-on-timeout final commit delegated out of this orchestrator. */
-  private void commitWorkspaceOutputs(String runId, Path workspace) {
-    workspaceGitCommitService.commitWorkspaceOutputs(runId, workspace);
   }
 
   // cancel(runId) moved to RunLifecycleService (god-class split inc-6, audit #43).
@@ -3817,29 +3777,39 @@ public class RunOrchestrator implements RunControlPort {
       ProviderModel reviewerRoute = new ProviderModel(candidate.provider(), candidate.model());
       ReviewerResult rerunReviewResult = null;
       try {
+        String postReviewRunId = runId;
+        ExecutionContext acceptedPostReviewContext = rootCtx;
         rerunReviewResult =
-            reviewer.review(
-                InitialReviewerRequestPolicy.builder()
-                    .provider(reviewerRoute.provider())
-                    .model(reviewerRoute.model())
-                    .strictProvider(true)
-                    .context(rootCtx)
-                    .buildCommand(plan.buildCommand())
-                    .skipWiringPass(skipWiring)
-                    .maxIterationsPerPass(reviewerMaxIter)
-                    .brownfield(selectedRepoIds != null && !selectedRepoIds.isEmpty())
-                    .allowedRepoRoots(
-                        RunReviewerScope.repoRoots(projectRepoService, projectId, selectedRepoIds))
-                    .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
-                    .allowBuildManifestCreation(false)
-                    .readOnly(true)
-                    .originalGoal(
-                        runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
-                    .requirements(plan.requirements())
-                    .planAdvisories(
-                        com.navneet.executespec.agent.TaskExpanderAgent
-                            .advisoryPlanContractViolations(plan))
-                    .build());
+            acceptedVerification.execute(
+                acceptedPostReviewContext,
+                "POST_CONTINUATION_REVIEWER",
+                disposableReviewContext ->
+                    reviewer.review(
+                        InitialReviewerRequestPolicy.builder()
+                            .provider(reviewerRoute.provider())
+                            .model(reviewerRoute.model())
+                            .strictProvider(true)
+                            .context(disposableReviewContext)
+                            .buildCommand(plan.buildCommand())
+                            .skipWiringPass(skipWiring)
+                            .maxIterationsPerPass(reviewerMaxIter)
+                            .brownfield(selectedRepoIds != null && !selectedRepoIds.isEmpty())
+                            .allowedRepoRoots(
+                                RunReviewerScope.repoRoots(
+                                    projectRepoService, projectId, selectedRepoIds))
+                            .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
+                            .allowBuildManifestCreation(false)
+                            .readOnly(true)
+                            .originalGoal(
+                                runRepo
+                                    .findById(runId)
+                                    .map(PipelineRun::getUserRequest)
+                                    .orElse(null))
+                            .requirements(plan.requirements())
+                            .planAdvisories(
+                                com.navneet.executespec.agent.TaskExpanderAgent
+                                    .advisoryPlanContractViolations(plan))
+                            .build()));
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
         long reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
         long reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();

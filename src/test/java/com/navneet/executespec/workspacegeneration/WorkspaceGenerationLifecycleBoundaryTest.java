@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -23,6 +24,7 @@ import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.state.repository.PipelineRunMutationRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -82,7 +84,8 @@ class WorkspaceGenerationLifecycleBoundaryTest {
         .thenReturn(1);
     org.mockito.Mockito.doThrow(new IllegalStateException("disk restore failed"))
         .when(workspaces)
-        .rollback(eq(checkpoint), any(Runnable.class));
+        .rollbackRepository(
+            eq(checkpoint), eq(checkpoint.repositories().getFirst()), any(Runnable.class));
     when(attempts.markRollbackFailed(
             eq(attemptId),
             eq(workspaceToken),
@@ -113,7 +116,10 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             eq("TASK_VERIFICATION_REJECTED"),
             any(String.class),
             any(Instant.class));
-    order.verify(workspaces).rollback(eq(checkpoint), any(Runnable.class));
+    order
+        .verify(workspaces)
+        .rollbackRepository(
+            eq(checkpoint), eq(checkpoint.repositories().getFirst()), any(Runnable.class));
     order
         .verify(attempts)
         .markRollbackFailed(
@@ -157,6 +163,7 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             .state(WorkspaceGenerationState.VERIFIED)
             .candidateGeneration(candidate)
             .ignoredArtifactBaselineJson("{}")
+            .ignoredArtifactBaselineDigest(DigestUtils.sha256Hex("{}"))
             .build();
     when(attempts.countCurrentAuthority(
             attemptId, workspaceToken, WorkspaceGenerationState.VERIFIED.name()))
@@ -174,7 +181,15 @@ class WorkspaceGenerationLifecycleBoundaryTest {
     lifecycle.beginCheckpoint(prepared);
 
     InOrder order = inOrder(ignored, workspaces, attempts);
-    order.verify(ignored).cleanAttemptArtifacts(eq(checkpoint), eq("{}"), any(Runnable.class));
+    order
+        .verify(ignored)
+        .cleanAttemptArtifacts(
+            eq(attemptId),
+            eq("CHECKPOINT_CLEANUP"),
+            eq(checkpoint),
+            eq("{}"),
+            eq(DigestUtils.sha256Hex("{}")),
+            any(Runnable.class));
     order.verify(workspaces).currentGeneration(eq(checkpoint), any(Runnable.class));
     order
         .verify(attempts)
@@ -187,7 +202,7 @@ class WorkspaceGenerationLifecycleBoundaryTest {
   }
 
   @Test
-  void enteringVerificationDoesNotDeleteTaskLocalIgnoredDependencies() {
+  void enteringVerificationCleansTaskLocalIgnoredDependenciesBeforeFreezingCandidate() {
     UUID attemptId = UUID.randomUUID();
     UUID workspaceToken = UUID.randomUUID();
     String candidate = "b".repeat(64);
@@ -201,6 +216,17 @@ class WorkspaceGenerationLifecycleBoundaryTest {
     WorkspaceGenerationLifecycle lifecycle = lifecycle(attempts, workspaces, ignored);
     WorkspaceGenerationLifecycle.Prepared prepared =
         new WorkspaceGenerationLifecycle.Prepared(attemptId, checkpoint, lease);
+    when(attempts.findById(attemptId))
+        .thenReturn(
+            java.util.Optional.of(
+                WorkspaceGenerationAttempt.builder()
+                    .id(attemptId)
+                    .runId("run-verifying")
+                    .taskIndex(1)
+                    .state(WorkspaceGenerationState.MUTATING)
+                    .ignoredArtifactBaselineJson("[]")
+                    .ignoredArtifactBaselineDigest(DigestUtils.sha256Hex("[]"))
+                    .build()));
     when(attempts.countCurrentAuthority(
             attemptId, workspaceToken, WorkspaceGenerationState.MUTATING.name()))
         .thenReturn(1);
@@ -216,7 +242,62 @@ class WorkspaceGenerationLifecycleBoundaryTest {
 
     assertThat(lifecycle.beginVerification(prepared)).isEqualTo(candidate);
 
-    verify(ignored, never()).cleanAttemptArtifacts(any(), any(), any());
+    verify(ignored)
+        .cleanAttemptArtifacts(
+            eq(attemptId),
+            eq("CANDIDATE_CLEANUP"),
+            eq(checkpoint),
+            eq("[]"),
+            eq(DigestUtils.sha256Hex("[]")),
+            any(Runnable.class));
+  }
+
+  @Test
+  void sharedProtocolCannotFreezeCandidateBeforeProbeAndWorkerEnvironmentReceipts() {
+    UUID attemptId = UUID.randomUUID();
+    UUID workspaceToken = UUID.randomUUID();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    CorrectionWorkspaceTransaction workspaces = mock(CorrectionWorkspaceTransaction.class);
+    WorkspaceIgnoredArtifactGuard ignored = mock(WorkspaceIgnoredArtifactGuard.class);
+    BuildEnvironmentReceiptStore environmentReceipts = mock(BuildEnvironmentReceiptStore.class);
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.ownerToken()).thenReturn(workspaceToken);
+    CorrectionWorkspaceTransaction.Checkpoint checkpoint = checkpoint("run-environment-gate");
+    WorkspaceGenerationLifecycle lifecycle =
+        lifecycle(
+            attempts,
+            workspaces,
+            ignored,
+            mock(PipelineRunMutationRepository.class),
+            mock(PlatformTransactionManager.class),
+            environmentReceipts);
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(attemptId, checkpoint, lease);
+    when(attempts.countCurrentAuthority(
+            attemptId, workspaceToken, WorkspaceGenerationState.MUTATING.name()))
+        .thenReturn(1);
+    when(attempts.findById(attemptId))
+        .thenReturn(
+            java.util.Optional.of(
+                WorkspaceGenerationAttempt.builder()
+                    .id(attemptId)
+                    .state(WorkspaceGenerationState.MUTATING)
+                    .buildProtocolVersion(BuildProtocolVersion.SHARED_KERNEL_V2.name())
+                    .build()));
+    doThrow(new IllegalStateException("BUILD_ENVIRONMENT_PASSED_RECEIPT_REQUIRED"))
+        .when(environmentReceipts)
+        .requirePassed(
+            attemptId,
+            BuildEnvironmentMaterializer.Phase.INITIAL_PROBE.name(),
+            BuildEnvironmentMaterializer.Phase.WORKER.name());
+
+    assertThatThrownBy(() -> lifecycle.beginVerification(prepared))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("BUILD_ENVIRONMENT_PASSED_RECEIPT_REQUIRED");
+    verify(ignored, never())
+        .cleanAttemptArtifacts(any(), any(), any(), any(), any(), any(Runnable.class));
+    verify(workspaces, never()).currentGeneration(any(), any(Runnable.class));
   }
 
   @Test
@@ -313,9 +394,30 @@ class WorkspaceGenerationLifecycleBoundaryTest {
       WorkspaceIgnoredArtifactGuard ignored,
       PipelineRunMutationRepository runMutations,
       PlatformTransactionManager transactionManager) {
+    return lifecycle(
+        attempts,
+        workspaces,
+        ignored,
+        runMutations,
+        transactionManager,
+        mock(BuildEnvironmentReceiptStore.class));
+  }
+
+  private static WorkspaceGenerationLifecycle lifecycle(
+      WorkspaceGenerationAttemptRepository attempts,
+      CorrectionWorkspaceTransaction workspaces,
+      WorkspaceIgnoredArtifactGuard ignored,
+      PipelineRunMutationRepository runMutations,
+      PlatformTransactionManager transactionManager,
+      BuildEnvironmentReceiptStore environmentReceipts) {
     WorkspaceGenerationRollbackService rollbackService =
         new WorkspaceGenerationRollbackService(
-            attempts, workspaces, ignored, new ObjectMapper(), transactionManager);
+            attempts,
+            workspaces,
+            new WorkspaceGenerationFilesystemSaga(WorkspaceGenerationTestSteps.store(), workspaces),
+            ignored,
+            new ObjectMapper(),
+            transactionManager);
     return new WorkspaceGenerationLifecycle(
         attempts,
         mock(WorkspaceGenerationVerificationReceiptRepository.class),
@@ -328,6 +430,9 @@ class WorkspaceGenerationLifecycleBoundaryTest {
         mock(WorkspaceGenerationRecoveryService.class),
         rollbackService,
         ignored,
+        environmentReceipts,
+        WorkspaceGenerationTestSteps.store(),
+        mock(com.navneet.executespec.sandbox.SandboxCommandJournalStore.class),
         transactionManager);
   }
 

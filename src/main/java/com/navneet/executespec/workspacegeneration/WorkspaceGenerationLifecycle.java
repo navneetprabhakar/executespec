@@ -1,6 +1,5 @@
 package com.navneet.executespec.workspacegeneration;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -8,17 +7,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService.Authority;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService.Lease;
+import com.navneet.executespec.sandbox.SandboxCommandJournalStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunMutationRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
-import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +50,9 @@ public class WorkspaceGenerationLifecycle {
   private final WorkspaceGenerationRecoveryService recoveryService;
   private final WorkspaceGenerationRollbackService rollbackService;
   private final WorkspaceIgnoredArtifactGuard ignoredArtifacts;
+  private final BuildEnvironmentReceiptStore environmentReceipts;
+  private final WorkspaceGenerationStepStore generationSteps;
+  private final SandboxCommandJournalStore commandJournal;
   private final PlatformTransactionManager transactionManager;
 
   /**
@@ -90,18 +91,41 @@ public class WorkspaceGenerationLifecycle {
               WorkspaceGenerationState.AUTHORITY_ACQUIRED,
               Instant.now()),
           "WORKSPACE_GENERATION_AUTHORITY_ACQUIRE_CAS_FAILED");
-      Path canonicalRoot = realPath(workspaceRoot);
-      if (!canonicalRoot.equals(realPath(Path.of(admitted.getWorkspaceRoot())))) {
+      Path canonicalRoot = WorkspaceGenerationEvidenceCodec.realPath(workspaceRoot);
+      if (!canonicalRoot.equals(
+          WorkspaceGenerationEvidenceCodec.realPath(Path.of(admitted.getWorkspaceRoot())))) {
         throw new IllegalStateException("WORKSPACE_GENERATION_ROOT_MISMATCH");
       }
       CorrectionWorkspaceTransaction.Checkpoint checkpoint =
-          canonicalCheckpoint(canonicalRoot, workspaces.begin(canonicalRoot));
+          WorkspaceGenerationEvidenceCodec.canonicalCheckpoint(
+              canonicalRoot, workspaces.begin(canonicalRoot));
       WorkspaceIgnoredArtifactGuard.Baseline ignoredBaseline =
-          ignoredArtifacts.prepare(checkpoint, lease::assertOwned);
+          ignoredArtifacts.prepare(attemptId, checkpoint, lease::assertOwned);
       String beforeGeneration = checkpoint.generation();
+      String beforeStepKey = "before:" + beforeGeneration;
+      String beforeObjectKey =
+          WorkspaceGenerationEvidenceCodec.archiveObjectKey(
+              runId, attemptId, "before", beforeGeneration);
+      generationSteps.recordIntent(
+          attemptId,
+          WorkspaceGenerationStepStore.Kind.BEFORE_ARCHIVE_UPLOAD,
+          beforeStepKey,
+          beforeGeneration,
+          null,
+          Map.of(
+              "runId", runId,
+              "taskId", taskId,
+              "objectKey", beforeObjectKey,
+              "generation", beforeGeneration));
       com.navneet.executespec.deployment.GcsTaskCheckpointService.CheckpointReceipt
           beforeCheckpoint =
-              checkpointService.checkpointGeneration(runId, taskId + ":before", checkpoint);
+              checkpointService.checkpointGeneration(
+                  runId, taskId + ":before", checkpoint, beforeObjectKey);
+      generationSteps.markArchiveApplied(
+          attemptId,
+          WorkspaceGenerationStepStore.Kind.BEFORE_ARCHIVE_UPLOAD,
+          beforeStepKey,
+          WorkspaceGenerationEvidenceCodec.archiveReceipt(beforeCheckpoint));
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
       transaction.executeWithoutResult(
           ignored -> {
@@ -111,18 +135,32 @@ public class WorkspaceGenerationLifecycle {
                     attemptId,
                     lease.ownerToken(),
                     beforeGeneration,
-                    writeRepositories(canonicalRoot, checkpoint),
+                    WorkspaceGenerationEvidenceCodec.repositories(
+                        objectMapper, canonicalRoot, checkpoint),
                     ignoredBaseline.json(),
                     ignoredBaseline.digest(),
                     beforeCheckpoint.kind(),
                     beforeCheckpoint.key(),
                     beforeCheckpoint.artifactDigest(),
+                    beforeCheckpoint.storageGeneration(),
+                    beforeCheckpoint.sizeBytes(),
+                    beforeCheckpoint.crc32c(),
+                    beforeCheckpoint.etag(),
                     beforeCheckpoint.completedAt(),
                     WorkspaceGenerationState.AUTHORITY_ACQUIRED,
                     WorkspaceGenerationState.PREPARED,
                     Instant.now()),
                 "WORKSPACE_GENERATION_PREPARE_CAS_FAILED");
           });
+      generationSteps.markVerified(
+          attemptId,
+          WorkspaceGenerationStepStore.Kind.BEFORE_ARCHIVE_UPLOAD,
+          beforeStepKey,
+          Map.of(
+              "attemptState", WorkspaceGenerationState.PREPARED.name(),
+              "generation", beforeGeneration,
+              "objectKey", beforeCheckpoint.key(),
+              "artifactDigest", beforeCheckpoint.artifactDigest()));
       return new Prepared(attemptId, checkpoint, lease);
     } catch (RuntimeException failure) {
       lease.close();
@@ -182,6 +220,23 @@ public class WorkspaceGenerationLifecycle {
     // A provider return is not acceptance authority. Repeat the exact run/workspace/operation
     // join after the worker exits so an expired or terminal LLM lease cannot advance its bytes.
     assertMutationDispatch(prepared);
+    WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
+    if (BuildProtocolVersion.SHARED_KERNEL_V2.name().equals(attempt.getBuildProtocolVersion())) {
+      environmentReceipts.requirePassed(
+          attempt.getId(),
+          BuildEnvironmentMaterializer.Phase.INITIAL_PROBE.name(),
+          BuildEnvironmentMaterializer.Phase.WORKER.name());
+    }
+    // Ignored dependencies and build output are not generation evidence and cannot cross into the
+    // verifier. Remove them before freezing the candidate; the disposable verifier must
+    // deterministically rematerialize what it needs from accepted manifests/runtime kits.
+    ignoredArtifacts.cleanAttemptArtifacts(
+        prepared.attemptId(),
+        "CANDIDATE_CLEANUP",
+        prepared.checkpoint(),
+        attempt.getIgnoredArtifactBaselineJson(),
+        attempt.getIgnoredArtifactBaselineDigest(),
+        prepared.lease()::assertOwned);
     String candidate =
         workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);
     requireHash(candidate, "WORKSPACE_GENERATION_CANDIDATE_INVALID");
@@ -225,7 +280,20 @@ public class WorkspaceGenerationLifecycle {
     if (!Objects.equals(attempt.getCandidateGeneration(), current)) {
       throw new IllegalStateException("WORKSPACE_GENERATION_CHANGED_DURING_VERIFICATION");
     }
-    String evidenceJson = canonicalJson(result.evidenceJson());
+    String evidenceJson =
+        WorkspaceGenerationEvidenceCodec.canonicalJson(objectMapper, result.evidenceJson());
+    List<UUID> commandReceiptIds =
+        WorkspaceGenerationEvidenceCodec.commandReceiptIds(objectMapper, evidenceJson);
+    if ("PASSED".equals(result.outcome())
+        && attempt.getVerificationCommandProtocolVersion() != null
+        && attempt.getVerificationCommandProtocolVersion() >= 2) {
+      commandJournal.requireSuccessfulReceipts(attempt.getId(), current, commandReceiptIds);
+    }
+    if ("PASSED".equals(result.outcome())
+        && BuildProtocolVersion.SHARED_KERNEL_V2.name().equals(attempt.getBuildProtocolVersion())) {
+      environmentReceipts.requirePassed(
+          attempt.getId(), BuildEnvironmentMaterializer.Phase.FINAL_VERIFICATION.name());
+    }
     Instant now = Instant.now();
     UUID receiptId = UUID.randomUUID();
     WorkspaceGenerationVerificationReceipt receipt =
@@ -237,8 +305,12 @@ public class WorkspaceGenerationLifecycle {
             .taskContractDigest(attempt.getTaskContractDigest())
             .verifierKind(result.verifierKind())
             .commandSource("SERVER_RESOLVED_CONTRACT")
-            .commandDigest(sha256(result.serverResolvedCommandContract()))
+            .commandDigest(
+                WorkspaceGenerationEvidenceCodec.sha256(result.serverResolvedCommandContract()))
             .outcome(result.outcome())
+            .failureCategory(result.failureCategory())
+            .environmentCode(result.environmentCode())
+            .executionBoundary(result.executionBoundary())
             .buildPassed(result.buildPassed())
             .testsExecuted(result.testsExecuted())
             .testsPassed(nonNegative(result.testsPassed(), "testsPassed"))
@@ -246,12 +318,14 @@ public class WorkspaceGenerationLifecycle {
             .testsErrors(nonNegative(result.testsErrors(), "testsErrors"))
             .testsSkipped(nonNegative(result.testsSkipped(), "testsSkipped"))
             .evidenceJson(evidenceJson)
-            .evidenceDigest(sha256(evidenceJson))
+            .evidenceDigest(WorkspaceGenerationEvidenceCodec.sha256(evidenceJson))
+            .commandReceiptIds(
+                WorkspaceGenerationEvidenceCodec.write(objectMapper, commandReceiptIds))
             .startedAt(result.startedAt())
             .completedAt(result.completedAt())
             .createdAt(now)
             .build();
-    validateReceipt(result);
+    WorkspaceGenerationVerificationValidator.validate(result);
     receipts.saveAndFlush(receipt);
     if ("PASSED".equals(result.outcome()) && result.buildPassed()) {
       requireCas(
@@ -271,8 +345,11 @@ public class WorkspaceGenerationLifecycle {
     assertAuthority(prepared, WorkspaceGenerationState.VERIFIED);
     WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
     ignoredArtifacts.cleanAttemptArtifacts(
+        prepared.attemptId(),
+        "CHECKPOINT_CLEANUP",
         prepared.checkpoint(),
         attempt.getIgnoredArtifactBaselineJson(),
+        attempt.getIgnoredArtifactBaselineDigest(),
         prepared.lease()::assertOwned);
     String current =
         workspaces.currentGeneration(prepared.checkpoint(), prepared.lease()::assertOwned);
@@ -304,16 +381,68 @@ public class WorkspaceGenerationLifecycle {
     return candidate;
   }
 
+  /** Journals and performs the exact candidate archive write outside any database transaction. */
+  public com.navneet.executespec.deployment.GcsTaskCheckpointService.CheckpointReceipt
+      checkpointCandidate(
+          Prepared prepared, String taskId, CorrectionWorkspaceTransaction.Checkpoint candidate) {
+    assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
+    WorkspaceGenerationAttempt attempt = require(prepared.attemptId());
+    if (!Objects.equals(attempt.getCandidateGeneration(), candidate.generation())) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_CHANGED_BEFORE_CHECKPOINT");
+    }
+    String stepKey = "candidate:" + candidate.generation();
+    String objectKey =
+        WorkspaceGenerationEvidenceCodec.archiveObjectKey(
+            attempt.getRunId(), attempt.getId(), "candidate", candidate.generation());
+    generationSteps.recordIntent(
+        attempt.getId(),
+        WorkspaceGenerationStepStore.Kind.CANDIDATE_ARCHIVE_UPLOAD,
+        stepKey,
+        candidate.generation(),
+        null,
+        Map.of(
+            "runId",
+            attempt.getRunId(),
+            "taskId",
+            taskId,
+            "objectKey",
+            objectKey,
+            "generation",
+            candidate.generation()));
+    var receipt =
+        checkpointService.checkpointGeneration(attempt.getRunId(), taskId, candidate, objectKey);
+    generationSteps.markArchiveApplied(
+        attempt.getId(),
+        WorkspaceGenerationStepStore.Kind.CANDIDATE_ARCHIVE_UPLOAD,
+        stepKey,
+        WorkspaceGenerationEvidenceCodec.archiveReceipt(receipt));
+    return receipt;
+  }
+
   /** Records acknowledgement from the checkpoint transport for this exact candidate tree. */
   @Transactional
   public void completeCheckpoint(
-      Prepared prepared, String kind, String key, String generation, String artifactDigest) {
+      Prepared prepared,
+      String kind,
+      String key,
+      String generation,
+      String artifactDigest,
+      String storageGeneration,
+      long sizeBytes,
+      String crc32c,
+      String etag) {
     assertAuthority(prepared, WorkspaceGenerationState.CHECKPOINTING);
-    if (!List.of("GCS", "LOCAL_SAME_HOST").contains(kind)) {
+    if (!List.of("GCS", "LOCAL_ARCHIVE").contains(kind)) {
       throw new IllegalArgumentException("WORKSPACE_GENERATION_CHECKPOINT_KIND_INVALID");
     }
     requireHash(generation, "WORKSPACE_GENERATION_CHECKPOINT_GENERATION_INVALID");
     requireHash(artifactDigest, "WORKSPACE_GENERATION_CHECKPOINT_DIGEST_INVALID");
+    requireText(storageGeneration, "WORKSPACE_GENERATION_CHECKPOINT_STORAGE_GENERATION_INVALID");
+    if (sizeBytes <= 0) {
+      throw new IllegalArgumentException("WORKSPACE_GENERATION_CHECKPOINT_SIZE_INVALID");
+    }
+    requireText(crc32c, "WORKSPACE_GENERATION_CHECKPOINT_CRC32C_INVALID");
+    requireText(etag, "WORKSPACE_GENERATION_CHECKPOINT_ETAG_INVALID");
     requireCas(
         attempts.completeCheckpoint(
             prepared.attemptId(),
@@ -322,9 +451,22 @@ public class WorkspaceGenerationLifecycle {
             requireText(key, "WORKSPACE_GENERATION_CHECKPOINT_KEY_INVALID"),
             generation,
             artifactDigest,
+            storageGeneration,
+            sizeBytes,
+            crc32c,
+            etag,
             WorkspaceGenerationState.CHECKPOINTING,
             Instant.now()),
         "WORKSPACE_GENERATION_CHECKPOINT_CAS_FAILED");
+    generationSteps.markVerified(
+        prepared.attemptId(),
+        WorkspaceGenerationStepStore.Kind.CANDIDATE_ARCHIVE_UPLOAD,
+        "candidate:" + generation,
+        Map.of(
+            "attemptState", WorkspaceGenerationState.CHECKPOINTING.name(),
+            "generation", generation,
+            "objectKey", key,
+            "artifactDigest", artifactDigest));
   }
 
   /** Atomically accepts the attempt and advances the run's accepted-generation frontier. */
@@ -400,116 +542,9 @@ public class WorkspaceGenerationLifecycle {
     prepared.lease().assertOwned();
   }
 
-  private static void validateReceipt(Verification result) {
-    if (!List.of("BUILD_AND_TEST", "BUILD_ONLY", "TEST_ONLY").contains(result.verifierKind())) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_VERIFIER_KIND_INVALID");
-    }
-    if (!List.of("PASSED", "FAILED", "UNAVAILABLE").contains(result.outcome())) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_VERIFIER_OUTCOME_INVALID");
-    }
-    boolean buildOnly = "BUILD_ONLY".equals(result.verifierKind());
-    if (buildOnly == result.testsExecuted()) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_VERIFIER_KIND_INCONSISTENT");
-    }
-    if (!result.testsExecuted()
-        && (result.testsPassed() != 0
-            || result.testsFailed() != 0
-            || result.testsErrors() != 0
-            || result.testsSkipped() != 0)) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_VERIFIER_COUNTS_INCONSISTENT");
-    }
-    if ("PASSED".equals(result.outcome())
-        && (!result.buildPassed()
-            || result.testsFailed() != 0
-            || result.testsErrors() != 0
-            || (result.testsExecuted() && result.testsPassed() <= 0))) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_PASSING_RECEIPT_INVALID");
-    }
-    AcceptanceProofStrength required = proofStrength(result.requiredProofStrength());
-    AcceptanceProofStrength achieved = proofStrength(result.achievedProofStrength());
-    if ("PASSED".equals(result.outcome()) && !achieved.satisfies(required)) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_PROOF_STRENGTH_INSUFFICIENT");
-    }
-    if (result.startedAt() == null
-        || result.completedAt() == null
-        || result.completedAt().isBefore(result.startedAt())) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_VERIFIER_TIME_INVALID");
-    }
-    requireText(
-        result.serverResolvedCommandContract(),
-        "WORKSPACE_GENERATION_SERVER_COMMAND_CONTRACT_INVALID");
-  }
-
   private static int nonNegative(int value, String label) {
     if (value < 0) throw new IllegalArgumentException(label + " must be non-negative");
     return value;
-  }
-
-  private static AcceptanceProofStrength proofStrength(String value) {
-    try {
-      return AcceptanceProofStrength.valueOf(value);
-    } catch (RuntimeException invalid) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_PROOF_STRENGTH_INVALID", invalid);
-    }
-  }
-
-  private String writeRepositories(
-      Path workspaceRoot, CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    return write(
-        checkpoint.repositories().stream()
-            .map(
-                repository ->
-                    Map.of(
-                        "repository", workspaceRoot.relativize(repository.repository()).toString(),
-                        "head", repository.head(),
-                        "tree", repository.tree()))
-            .toList());
-  }
-
-  private static CorrectionWorkspaceTransaction.Checkpoint canonicalCheckpoint(
-      Path canonicalRoot, CorrectionWorkspaceTransaction.Checkpoint checkpoint) {
-    return new CorrectionWorkspaceTransaction.Checkpoint(
-        canonicalRoot,
-        checkpoint.repositories().stream()
-            .map(
-                repository -> {
-                  Path canonicalRepository = realPath(repository.repository());
-                  if (!canonicalRepository.startsWith(canonicalRoot)) {
-                    throw new IllegalStateException("WORKSPACE_GENERATION_REPOSITORY_ESCAPES_ROOT");
-                  }
-                  return new CorrectionWorkspaceTransaction.RepositoryCheckpoint(
-                      canonicalRepository, repository.head(), repository.tree());
-                })
-            .toList());
-  }
-
-  private static Path realPath(Path path) {
-    try {
-      return path.toRealPath();
-    } catch (java.io.IOException unavailable) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_PATH_UNAVAILABLE", unavailable);
-    }
-  }
-
-  private String canonicalJson(String value) {
-    try {
-      return objectMapper.writeValueAsString(
-          objectMapper.readTree(requireText(value, "JSON_EMPTY")));
-    } catch (JsonProcessingException malformed) {
-      throw new IllegalArgumentException("WORKSPACE_GENERATION_JSON_INVALID", malformed);
-    }
-  }
-
-  private String write(Object value) {
-    try {
-      return objectMapper.writeValueAsString(value);
-    } catch (JsonProcessingException impossible) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_JSON_WRITE_FAILED", impossible);
-    }
-  }
-
-  private static String sha256(String value) {
-    return DigestUtils.sha256Hex(value.getBytes(StandardCharsets.UTF_8));
   }
 
   private static void requireHash(String value, String code) {
@@ -546,6 +581,9 @@ public class WorkspaceGenerationLifecycle {
       String verifierKind,
       String serverResolvedCommandContract,
       String outcome,
+      String failureCategory,
+      String environmentCode,
+      String executionBoundary,
       boolean buildPassed,
       boolean testsExecuted,
       int testsPassed,

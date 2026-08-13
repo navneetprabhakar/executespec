@@ -12,6 +12,7 @@ import com.navneet.executespec.standards.ProjectStandardsYamlLoader;
 import com.navneet.executespec.standards.StandardsPromptComposer;
 import com.navneet.executespec.standards.StandardsRunner;
 import com.navneet.executespec.standards.StandardsViolationRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Component;
 
@@ -74,7 +75,12 @@ class RunStandardsEnforcer {
    * no standards defined (resolver returns empty → early return).
    */
   StandardsRunner.RunReport runStandardsEnforcement(
-      String runId, String projectId, Path workspaceRoot, List<UUID> selectedRepoIds) {
+      ExecutionContext context, String projectId, List<UUID> selectedRepoIds) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      throw new IllegalStateException("VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    String runId = context.runId();
+    Path workspaceRoot = context.workspaceRoot();
     UUID runUuid;
     try {
       runUuid = UUID.fromString(runId);
@@ -103,7 +109,7 @@ class RunStandardsEnforcer {
     boolean inventoryComplete = collectWorkspaceFiles(workspaceRoot, repoFilePaths, sourceFiles);
     var report =
         standardsRunner.run(
-            runId, effective, workspaceRoot, repoFilePaths, sourceFiles, inventoryComplete);
+            context, effective, workspaceRoot, repoFilePaths, sourceFiles, inventoryComplete);
     java.util.List<com.navneet.executespec.standards.StandardsViolation> rows =
         toStandardsViolationRows(runUuid, projectId, report, STANDARDS_MAX_VIOLATIONS_PERSIST);
     int persisted = 0;

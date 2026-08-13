@@ -51,6 +51,8 @@ import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ToolResult;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,20 +124,17 @@ class SequentialExecutorSoftCompletionTest {
   private BuildTaskGenerationCoordinator passThroughBuildSupervisor() {
     BuildTaskGenerationCoordinator coordinator = mock(BuildTaskGenerationCoordinator.class);
     lenient()
-        .when(coordinator.pendingStatus(anyString()))
-        .thenAnswer(invocation -> invocation.getArgument(0));
-    lenient()
-        .when(coordinator.childContext(any(ExecutionContext.class), anyString()))
-        .thenAnswer(
-            invocation ->
-                ((ExecutionContext) invocation.getArgument(0)).child(invocation.getArgument(1)));
-    lenient()
         .when(
             coordinator.execute(
-                anyInt(), any(), any(), any(), any(java.util.function.Supplier.class), any()))
+                anyInt(), any(), any(), any(), any(java.util.function.Function.class), any()))
         .thenAnswer(
-            invocation ->
-                ((java.util.function.Supplier<TaskOutcome>) invocation.getArgument(4)).get());
+            invocation -> {
+              ExecutionRequest request = invocation.getArgument(3);
+              PlannedTask task = invocation.getArgument(1);
+              return ((java.util.function.Function<ExecutionContext, TaskOutcome>)
+                      invocation.getArgument(4))
+                  .apply(authorizedContext(request.runContext(), task.id()));
+            });
     lenient()
         .when(
             coordinator.executeContinuation(
@@ -147,18 +146,15 @@ class SequentialExecutorSoftCompletionTest {
                 anyString(),
                 any(),
                 org.mockito.ArgumentMatchers.anyBoolean(),
-                any(java.util.function.Supplier.class),
+                any(java.util.function.Function.class),
                 any()))
         .thenAnswer(
             invocation -> {
               ExecutionRequest request = invocation.getArgument(3);
-              var lease = mock(RunWorkspaceAuthorityService.Lease.class);
-              when(lease.runId()).thenReturn(request.runContext().runId());
-              return RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-                  lease,
-                  () -> {},
-                  () ->
-                      ((java.util.function.Supplier<TaskOutcome>) invocation.getArgument(8)).get());
+              PlannedTask task = invocation.getArgument(1);
+              return ((java.util.function.Function<ExecutionContext, TaskOutcome>)
+                      invocation.getArgument(8))
+                  .apply(authorizedContext(request.runContext(), task.id()));
             });
     return coordinator;
   }
@@ -561,18 +557,14 @@ class SequentialExecutorSoftCompletionTest {
         .thenReturn(workerCompleted(1), workerCompleted(1));
     when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
     BuildTaskGenerationCoordinator generations = mock(BuildTaskGenerationCoordinator.class);
-    when(generations.childContext(any(ExecutionContext.class), anyString()))
-        .thenAnswer(
-            invocation ->
-                ((ExecutionContext) invocation.getArgument(0))
-                    .child(invocation.getArgument(1, String.class)));
-    when(generations.pendingStatus(anyString()))
-        .thenAnswer(invocation -> invocation.getArgument(0));
     when(generations.execute(anyInt(), any(), any(), any(), any(), any()))
         .thenAnswer(
             invocation -> {
-              java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(4);
-              return dispatch.get();
+              java.util.function.Function<ExecutionContext, TaskOutcome> dispatch =
+                  invocation.getArgument(4);
+              ExecutionRequest request = invocation.getArgument(3);
+              PlannedTask task = invocation.getArgument(1);
+              return dispatch.apply(authorizedContext(request.runContext(), task.id()));
             });
     RunWorkspaceAuthorityService.Lease correction = mock(RunWorkspaceAuthorityService.Lease.class);
     when(correction.runId()).thenReturn("run-soft");
@@ -2308,18 +2300,14 @@ class SequentialExecutorSoftCompletionTest {
                 Optional.empty(),
                 List.of("goal satisfied with validation evidence and required outputs present")));
     BuildTaskGenerationCoordinator generations = mock(BuildTaskGenerationCoordinator.class);
-    when(generations.childContext(any(ExecutionContext.class), anyString()))
-        .thenAnswer(
-            invocation ->
-                ((ExecutionContext) invocation.getArgument(0))
-                    .child(invocation.getArgument(1, String.class)));
-    when(generations.pendingStatus(anyString()))
-        .thenAnswer(invocation -> invocation.getArgument(0));
     when(generations.execute(anyInt(), any(), any(), any(), any(), any()))
         .thenAnswer(
             invocation -> {
-              java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(4);
-              return dispatch.get();
+              java.util.function.Function<ExecutionContext, TaskOutcome> dispatch =
+                  invocation.getArgument(4);
+              ExecutionRequest request = invocation.getArgument(3);
+              PlannedTask task = invocation.getArgument(1);
+              return dispatch.apply(authorizedContext(request.runContext(), task.id()));
             });
     when(generations.executeContinuation(
             anyInt(),
@@ -2338,12 +2326,11 @@ class SequentialExecutorSoftCompletionTest {
               assertEquals("gpt-5.4", invocation.getArgument(5));
               replacementAttemptActive.set(true);
               try {
-                java.util.function.Supplier<TaskOutcome> dispatch = invocation.getArgument(8);
+                java.util.function.Function<ExecutionContext, TaskOutcome> dispatch =
+                    invocation.getArgument(8);
                 ExecutionRequest request = invocation.getArgument(3);
-                var lease = mock(RunWorkspaceAuthorityService.Lease.class);
-                when(lease.runId()).thenReturn(request.runContext().runId());
-                return RunWorkspaceAuthorityService.withWorkspaceGenerationToolLease(
-                    lease, () -> {}, dispatch::get);
+                PlannedTask task = invocation.getArgument(1);
+                return dispatch.apply(authorizedContext(request.runContext(), task.id()));
               } finally {
                 replacementAttemptActive.set(false);
               }
@@ -2519,6 +2506,21 @@ class SequentialExecutorSoftCompletionTest {
         && "LOG".equals(event.type())
         && event.payload() != null
         && event.payload().startsWith("Goal decision:");
+  }
+
+  private static ExecutionContext authorizedContext(ExecutionContext parent, String taskId) {
+    ExecutionContext child = parent.child(taskId);
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.runId()).thenReturn(child.runId());
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(java.util.UUID.randomUUID(), null, lease);
+    return child.withWorkspaceGenerationAuthority(
+        new WorkspaceGenerationDispatchAuthority(
+            child.runId(),
+            child.taskId(),
+            prepared,
+            WorkspaceGenerationDispatchAuthority.Phase.MUTATION,
+            mock(WorkspaceGenerationLifecycle.class)));
   }
 
   private static boolean isGoalDecisionEvent(RunEvent event) {

@@ -12,8 +12,11 @@ import java.util.Optional;
 import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.notification.pref.NotificationPrefService;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeProjectionService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttemptRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationVerificationReceiptRepository;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -24,9 +27,13 @@ class RunCompletionNotifierTest {
   private final NotificationRepository notificationRepository = mock(NotificationRepository.class);
   private final StateStore stateStore = mock(StateStore.class);
   private final NotificationPrefService prefService = mock(NotificationPrefService.class);
+  private final RunTerminalOutcomeProjectionService outcomeProjection =
+      new RunTerminalOutcomeProjectionService(
+          mock(WorkspaceGenerationAttemptRepository.class),
+          mock(WorkspaceGenerationVerificationReceiptRepository.class));
   private final RunCompletionNotifier notifier =
       new RunCompletionNotifier(
-          notificationService, notificationRepository, stateStore, prefService);
+          notificationService, notificationRepository, stateStore, prefService, outcomeProjection);
 
   @Test
   void disabledInAppPreferencePreventsCompletedAndFailedNotifications() {

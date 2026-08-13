@@ -59,6 +59,7 @@ public class WorkspaceGenerationTaskTransitionService {
         switch (attempt.getTaskTransitionKind()) {
           case "MARK_PARTIAL" -> "PARTIAL";
           case "REOPEN_PENDING" -> "PENDING";
+          case "MARK_COMPLETE" -> "COMPLETE";
           default ->
               throw new IllegalStateException("WORKSPACE_GENERATION_TRANSITION_KIND_INVALID");
         };

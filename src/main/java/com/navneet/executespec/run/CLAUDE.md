@@ -1,5 +1,17 @@
 # Run admission, idempotency, and iteration
 
+## Durable BUILD failure projection (2026-08-12)
+
+`RunTerminalOutcomeProjectionService` joins only the newest physical workspace-generation attempt
+and verification receipt to `WorkspaceGenerationFailureProjection`; it never walks backward to let
+an obsolete rollback override a later accepted attempt. `RunTerminalOutcomeContract` applies that
+causality only to `PARTIAL`, `FAILED`, or `ERROR`, preserving completed and user-stopped semantics.
+The same server-owned title, message, next action, automation disposition, and exit code now feed
+run summary/detail (including CLI consumers), the Web primary recovery card, in-app notification,
+email, and project activity. Evidence-read failure degrades to the existing leak-safe terminal
+contract rather than disrupting terminal publication. Web keeps the structured attempt projection
+as technical evidence only; it must not maintain a second category-to-copy policy.
+
 ## Run-DTO truthfulness batch (2026-08-05)
 
 - `RunTerminalOutcome.Impact` gains additive `creditsRefunded` (Boolean, three-valued): the new

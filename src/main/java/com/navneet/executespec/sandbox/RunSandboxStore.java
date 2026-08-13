@@ -56,9 +56,9 @@ public class RunSandboxStore {
             INSERT INTO run_sandbox
               (id, run_id, project_id, session_id, requested_by_user_id, org_id,
                source_revision, repository_set, isolation_profile,
-               isolation_profile_version, config_digest, network_policy,
+               isolation_profile_version, purpose, config_digest, network_policy,
                secret_policy, expires_at, idempotency_key)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS JSONB), ?, ?, ?, ?, ?, ?, ?, ?)
             -- Scoped to the idempotency key deliberately. An unscoped DO NOTHING would also
             -- swallow the uq_run_sandbox_active_run conflict, turning "this run already has a
             -- live sandbox" into an indistinguishable silent no-op. That conflict must surface
@@ -75,6 +75,7 @@ public class RunSandboxStore {
             request.repositorySet(),
             request.isolationProfile().name(),
             request.isolationProfile().version(),
+            request.purpose().name(),
             request.configDigest(),
             request.networkPolicy().name(),
             request.secretPolicy().name(),
@@ -112,6 +113,7 @@ public class RunSandboxStore {
         || !java.util.Objects.equals(existing.requestedByUserId(), request.requestedByUserId())
         || !java.util.Objects.equals(existing.sessionId(), request.sessionId())
         || !java.util.Objects.equals(existing.sourceRevision(), request.sourceRevision())
+        || existing.purpose() != request.purpose()
         || !java.util.Objects.equals(existing.configDigest(), request.configDigest())
         || existing.isolationProfile() != request.isolationProfile()
         || existing.networkPolicy() != request.networkPolicy()
@@ -132,7 +134,15 @@ public class RunSandboxStore {
   }
 
   public Optional<RunSandbox> findActiveForRun(String runId) {
-    return query(ALL + "WHERE run_id=? AND state NOT IN (" + terminalList() + ")", runId).stream()
+    return findActiveForRun(runId, SandboxPurpose.RUN);
+  }
+
+  public Optional<RunSandbox> findActiveForRun(String runId, SandboxPurpose purpose) {
+    return query(
+            ALL + "WHERE run_id=? AND purpose=? AND state NOT IN (" + terminalList() + ")",
+            runId,
+            purpose.name())
+        .stream()
         .findFirst();
   }
 

@@ -9,6 +9,7 @@ import com.navneet.executespec.notification.pref.NotificationPrefService;
 import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome;
 import com.navneet.executespec.run.outcome.RunTerminalOutcomeContract;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeProjectionService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -43,6 +44,7 @@ public class RunCompletionEmailListener {
   private final ValidationReportRepository validationReportRepo;
   private final MailService mailService;
   private final NotificationPrefService prefService;
+  private final RunTerminalOutcomeProjectionService outcomeProjection;
 
   @Value("${app.mail.base-url:http://localhost:5173}")
   private String baseUrl;
@@ -119,16 +121,7 @@ public class RunCompletionEmailListener {
               : failureReason;
       // Prefer the SCM-agnostic PR URL; legacy rows fall back to githubPrUrl.
       String prUrl = run.getScmPrUrl() != null ? run.getScmPrUrl() : run.getGithubPrUrl();
-      RunTerminalOutcome terminalOutcome =
-          RunTerminalOutcomeContract.project(
-              runId,
-              run.getStatus(),
-              statusReason,
-              persistedFailureReason,
-              run.getActualCostUsd(),
-              run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
-              prUrl,
-              RunTerminalOutcomeContract.autoPublicationExpected(run));
+      RunTerminalOutcome terminalOutcome = outcomeProjection.project(run, persistedFailureReason);
       // Use the projected customer impact, not merely the bus event. A PARTIAL run may arrive on
       // RunCompleted while still requiring user action; that must honor RUN_FAILED preferences.
       if (!prefService.shouldNotify(

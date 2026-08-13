@@ -395,6 +395,83 @@ describe('publicationTrustFacts', () => {
     });
   });
 
+  it('reports verification infrastructure unavailability without calling it product failure', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-environment',
+          taskId: 'T1',
+          taskIndex: 0,
+          attemptNumber: 1,
+          attemptKind: 'BUILD_TASK',
+          state: 'ROLLED_BACK',
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          verificationReceiptId: 'receipt-environment',
+          verificationOutcome: 'UNAVAILABLE',
+          verificationFailureCategory: 'ENVIRONMENT',
+          verificationEnvironmentCode: 'BUILD_POLICY_DENIED',
+          verificationExecutionBoundary: 'DISPOSABLE_EXACT_GENERATION',
+          createdAt: '2026-08-12T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Latest candidate verification')).toMatchObject({
+      value: expect.stringContaining('environment unavailable (BUILD_POLICY_DENIED)'),
+      kind: 'warn',
+    });
+  });
+
+  it.each([
+    ['ROLLBACK_PROVEN', true, true, 'REVIEW_FAILED_CHECKS'],
+    ['ROLLBACK_UNPROVEN', true, false, 'CONTACT_SUPPORT'],
+    ['NO_CANDIDATE', false, false, 'RETRY_GENERATION'],
+    ['VERIFICATION_ENVIRONMENT_UNAVAILABLE', true, true, 'RETRY_AFTER_ENVIRONMENT_RECOVERY'],
+    ['CHECKPOINT_FAILED', true, true, 'CONTACT_SUPPORT'],
+    ['FRONTIER_CONFLICT', true, false, 'WAIT_FOR_RECONCILIATION'],
+    ['INTERNAL_PROTOCOL_CONFLICT', true, false, 'CONTACT_SUPPORT'],
+  ] as const)(
+    'renders %s as explicit technical causality',
+    (category, candidatePresent, rollbackProven, recommendedAction) => {
+      const facts = publicationTrustFacts({
+        runMode: 'BUILD',
+        tasks: [],
+        workspaceGenerationAttempts: [
+          {
+            attemptId: `attempt-${category}`,
+            taskId: 'T1',
+            taskIndex: 0,
+            attemptNumber: 1,
+            attemptKind: 'BUILD_TASK',
+            state: rollbackProven ? 'ROLLED_BACK' : 'VERIFYING',
+            beforeGeneration: 'a'.repeat(64),
+            candidateGeneration: candidatePresent ? 'b'.repeat(64) : null,
+            failureProjection: {
+              category,
+              stage: category === 'CHECKPOINT_FAILED' ? 'CHECKPOINT' : 'VERIFICATION',
+              retryable: rollbackProven,
+              candidatePresent,
+              rollbackProven,
+              publicationBlocked: true,
+              recommendedAction,
+            },
+            createdAt: '2026-08-12T12:00:00Z',
+          },
+        ],
+      } as unknown as RunDetail);
+
+      expect(facts.find((fact) => fact.label === 'Generation failure causality')).toMatchObject({
+        value: expect.stringContaining(category),
+      });
+      expect(facts.find((fact) => fact.label === 'Generation failure causality')?.value).toContain(
+        `action ${recommendedAction}`,
+      );
+    },
+  );
+
   it('treats a verified green suite with explicit skips as passing evidence', () => {
     const facts = publicationTrustFacts({
       tasks: [],

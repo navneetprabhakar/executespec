@@ -155,4 +155,179 @@ describe('IdeRunResult terminal report loading', () => {
     expect(primary[0].textContent).toBe('Start new run');
     expect(primary[0].getAttribute('href')).toBe('/compose');
   });
+
+  it('renders recovery copy and action from the server-owned terminal outcome', async () => {
+    apiMocks.getRun.mockResolvedValue({
+      runId: 'run-1',
+      status: 'FAILED',
+      runTitle: 'Rejected generation',
+      userRequest: 'Make a change',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          failureProjection: {
+            // Deliberately conflicts with terminalOutcome. Web must not own a second copy policy.
+            category: 'NO_CANDIDATE',
+            stage: 'GENERATION',
+            retryable: true,
+            candidatePresent: false,
+            rollbackProven: false,
+            publicationBlocked: true,
+            recommendedAction: 'RETRY_GENERATION',
+          },
+        },
+      ],
+      terminalOutcome: {
+        schemaVersion: 1,
+        code: 'WORKSPACE_GENERATION_ROLLBACK_PROVEN',
+        category: 'ACTION_REQUIRED',
+        customerTitle: 'Generated code was rejected safely',
+        customerMessage:
+          'Code was generated, deterministic verification did not pass, and the accepted workspace was restored.',
+        impact: {
+          actualCostUsd: 0.1,
+          capUsd: 5,
+          codeChanged: false,
+          publication: 'NOT_CREATED',
+          prUrl: null,
+        },
+        retryable: true,
+        nextAction: {
+          type: 'REVIEW_EVIDENCE',
+          label: 'Review the failed deterministic checks',
+          href: null,
+        },
+        supportCode: null,
+        automationDisposition: 'ACTION_REQUIRED',
+        automationExitCode: 3,
+      },
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={['/result/run-1']}>
+          <Routes>
+            <Route path='/result/:runId' element={<IdeRunResult />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain('Generated code was rejected safely');
+    expect(host.textContent).toContain('accepted workspace was restored');
+    expect(host.textContent).toContain('Review the failed deterministic checks');
+    expect(host.textContent).not.toContain('Generation did not produce a candidate');
+  });
+
+  it.each([
+    [
+      'ROLLBACK_UNPROVEN',
+      'Workspace recovery is unresolved',
+      'restoration to the accepted workspace is not proven',
+      'CONTACT_SUPPORT',
+      'Review the run evidence and contact support with the support code.',
+    ],
+    [
+      'NO_CANDIDATE',
+      'Generation did not produce a candidate',
+      'No candidate generation was frozen',
+      'RETRY_RUN',
+      'Retry generation from the accepted workspace.',
+    ],
+    [
+      'VERIFICATION_ENVIRONMENT_UNAVAILABLE',
+      'Verification environment unavailable',
+      'This is not a product-code failure',
+      'RETRY_RUN',
+      'Retry after the verification environment is available.',
+    ],
+    [
+      'CHECKPOINT_FAILED',
+      'Candidate checkpoint was not proven',
+      'durable checkpoint was not acknowledged',
+      'CONTACT_SUPPORT',
+      'Review the run evidence and contact support with the support code.',
+    ],
+    [
+      'FRONTIER_CONFLICT',
+      'Accepted workspace frontier changed',
+      'could not be reconciled with the current accepted workspace',
+      'CONTACT_SUPPORT',
+      'Review the run evidence and contact support with the support code.',
+    ],
+    [
+      'INTERNAL_PROTOCOL_CONFLICT',
+      'Generation protocol conflict',
+      'durable generation evidence is internally inconsistent',
+      'CONTACT_SUPPORT',
+      'Review the run evidence and contact support with the support code.',
+    ],
+  ] as const)(
+    'renders %s primary recovery from the server contract',
+    async (category, title, message, actionType, actionLabel) => {
+      apiMocks.getRun.mockResolvedValue({
+        runId: 'run-1',
+        status: 'FAILED',
+        runTitle: 'Generation failure',
+        userRequest: 'Make a change',
+        tasks: [],
+        workspaceGenerationAttempts: [
+          {
+            failureProjection: {
+              category,
+              stage: 'VERIFICATION',
+              retryable: actionType === 'RETRY_RUN',
+              candidatePresent: category !== 'NO_CANDIDATE',
+              rollbackProven: false,
+              publicationBlocked: true,
+              recommendedAction:
+                actionType === 'RETRY_RUN' ? 'RETRY_GENERATION' : 'CONTACT_SUPPORT',
+            },
+          },
+        ],
+        terminalOutcome: {
+          schemaVersion: 1,
+          code: `WORKSPACE_GENERATION_${category}`,
+          category: actionType === 'RETRY_RUN' ? 'ACTION_REQUIRED' : 'PLATFORM_FAILURE',
+          customerTitle: title,
+          customerMessage: message,
+          impact: {
+            actualCostUsd: 0.1,
+            capUsd: 5,
+            codeChanged: false,
+            publication: 'NOT_CREATED',
+            prUrl: null,
+          },
+          retryable: actionType === 'RETRY_RUN',
+          nextAction: {type: actionType, label: actionLabel, href: null},
+          supportCode: actionType === 'CONTACT_SUPPORT' ? 'ES-RUN-R10' : null,
+          automationDisposition: actionType === 'RETRY_RUN' ? 'ACTION_REQUIRED' : 'FAILED',
+          automationExitCode: actionType === 'RETRY_RUN' ? 3 : 1,
+        },
+      });
+
+      await act(async () => {
+        root.render(
+          <MemoryRouter initialEntries={['/result/run-1']}>
+            <Routes>
+              <Route path='/result/:runId' element={<IdeRunResult />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(host.textContent).toContain(title);
+      expect(host.textContent).toContain(message);
+      expect(host.textContent).toContain(actionLabel);
+      expect(host.querySelectorAll('[aria-label="Primary outcome action"] .ide-btn')).toHaveLength(
+        1,
+      );
+    },
+  );
 });

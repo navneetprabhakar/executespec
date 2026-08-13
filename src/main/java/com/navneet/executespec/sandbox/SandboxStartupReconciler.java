@@ -45,12 +45,15 @@ public class SandboxStartupReconciler {
     try {
       int orphans = lifecycle.reconcile(owner);
       int expired = lifecycle.expire();
-      if (orphans > 0 || expired > 0) {
+      int workspaces = lifecycle.cleanupVerificationWorkspaces();
+      if (orphans > 0 || expired > 0 || workspaces > 0) {
         log.info(
-            "{} sandbox sweep settled {} orphans and {} expired sandboxes",
+            "{} sandbox sweep settled {} orphans, {} expired sandboxes, and {} verification"
+                + " workspaces",
             trigger,
             orphans,
-            expired);
+            expired,
+            workspaces);
       }
     } catch (RuntimeException failure) {
       // A sweep failure must not take down the scheduler thread, and must never be silent.

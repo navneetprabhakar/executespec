@@ -145,6 +145,7 @@ class ContainerStrictV1RuntimeFenceTest {
         "org-1",
         "abc1234",
         "[]",
+        SandboxPurpose.RUN,
         SandboxState.PROVISIONING,
         SandboxIsolationProfile.CONTAINER_STRICT_V1,
         1,
