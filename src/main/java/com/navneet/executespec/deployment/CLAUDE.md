@@ -34,6 +34,28 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   different running binary. Candidate evidence retains the tuple, canonical authority and read
   timestamp for independent validation.
 
+- `ControlPlaneReleaseAttestationService.java` / `ControlPlaneSchemaEvidenceExporter.java` /
+  `ControlPlaneReleaseAttestationController.java` — R12's SUPER_ADMIN/no-store release bundle.
+  Under one repeatable-read transaction it combines the startup source/JAR tuple, complete applied
+  Flyway history (including checksums), full definitions plus independent digests for all required
+  BUILD indexes/triggers, persisted-versus-process flag parity, admitted protocol/config mode,
+  digest-pinned strict-sandbox configuration, and Graphify SQL/HCL provenance. The stable bundle
+  digest excludes observation timestamps but includes every authoritative value. Missing evidence
+  is returned as explicit reasons; it is never coerced into readiness. `evidenceComplete` is
+  separate from `safeDarkState`, which additionally requires shared BUILD admission to be false.
+  The deploy workflow generates a code-only graph from the exact checkout with pinned Graphify
+  0.9.13 SQL/HCL extras, retains the graph artifact, stamps hashes/parser versions into both the
+  atomic host marker and JVM environment, and verifies that process tuple after health. Use
+  `scripts/build-qualification/capture-control-plane-release-attestation.sh` for exact deployed
+  capture. `control-plane-graph-diff.mjs` separately compares the candidate with a Graphify extract
+  of the source SHA currently serving the target VM. Graphify 0.9.13 emits `edges`; the workflow and
+  diff tool accept that canonical collection, retain `links` only for legacy artifacts, and fail
+  closed on a missing or conflicting edge collection. Any control-plane node/edge change requires a
+  receipt bound to the semantic base/candidate graph hashes plus exact diff digest, reviewer,
+  timestamp, impacted areas, and rationale; raw graph hashes remain in the retained evidence. A
+  missing/stale receipt fails before deployment and emits a retained template. This endpoint/config
+  proof does not replace the live container mount/containment matrix.
+
 - `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews owned by this process. **Distributed safety:** absence from the JVM-local `active` map is never treated as proof that a Docker/Cloud Run resource is orphaned unless the operator explicitly sets `PREVIEW_ORPHAN_DISCOVERY_ENABLED=true`; the default is false. JVM shutdown also preserves active previews by default so rolling deployment cannot destroy them (`PREVIEW_TEARDOWN_ON_SHUTDOWN=false`). **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings, and fail-safe cleanup gates. Docker/Cloud Run orphan discovery remains disabled until a durable cross-JVM resource registry is authoritative.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).

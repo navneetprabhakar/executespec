@@ -34,8 +34,29 @@ Task COMPLETE is reconciled from immutable acceptance after a crash, never used 
 authority itself. `workspacegeneration/CLAUDE.md` owns the full attempt/receipt/recovery contract.
 V375 adds a separate first-write `recovery_failure_*` tuple and database immutability for original
 failure/rejected-diff evidence, preventing recovery from overwriting the attempt's causal record.
+V385 adds nullable-for-history `pipeline_run.build_protocol_version`. Every candidate BUILD writes
+an explicit immutable `LEGACY_V1` or `SHARED_KERNEL_V2` in its initial INSERT; PATCH remains null.
+Candidate execution refuses null/unknown identity and every generation attempt must copy the exact
+parent value. Historical disposition remains a separate Phase 0A operation, never a current-flag
+inference.
+V386 converts that nullable pre-pin BUILD history to `LEGACY_UNKNOWN` and persists immutable
+`build_protocol_disposition` / attempt `historical_disposition` values. It never changes product,
+generation, task, or physical-operation terminal evidence. Unknown history is non-executable and
+blocked from publication. V387 adds append-only, monotonic dry-run/apply
+receipts over a minimized causal snapshot. Closing a record as non-executable retains its evidence;
+deletion requires a separate applied release receipt and never grants execution or publication.
+V388 gives RUN and VERIFICATION sandboxes distinct durable identities and owned-workspace cleanup.
+V389 adds immutable per-attempt command-protocol identity plus durable verification-command
+admission, dispatch, terminal receipts and stale-dispatch reconciliation. Protocol-v2 passing
+generation receipts cite only successful physical-command receipts; stale dispatched work becomes
+`INDETERMINATE`, never inferred success. Previous-writer attempts retain protocol v1.
+V390 adds the publication state below SCM: one accepted-generation/validation-bound preparation,
+immutable per-repository parent/tree/commit receipts, exact repository-provision intents, and exact
+prepared-commit push attempts. New-repository mode is frozen in the receipt, so replay cannot
+reinterpret a provisioned greenfield repository as brownfield. Stale external dispatches become
+`INDETERMINATE`; no recovery path writes `PROVISIONED` or `PUBLISHED`.
 
-> Last reviewed: 2026-08-10 against the V375 worktree contract.
+> Last reviewed: 2026-08-12 against the V395 worktree contract.
 
 Persistence layer for pipeline runs, tasks, and all mutable state.
 
@@ -102,7 +123,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - **V347 atomic plan-gate open:** `PipelineRunRepository.findByIdForPlanGateOpen()` takes the pessimistic run-row lock that serializes the gate row, WAITING continuation outbox, and `PLANNING -> AWAITING_APPROVAL` transition in one transaction.
 - **V348 atomic plan-gate decision + leased handoff:** `PlanGateDecisionService` supersedes the older `claimApprovalResume()` compatibility query as the production approval/cancellation boundary. It locks run → gate → outbox → optional contract report → RequirementIR/policy rows and persists a byte-stable APPROVE/REJECT/CANCEL receipt plus canonical request fingerprint with the state transition. The receipt cross-binds provider/mode/fixed-six-decimal `estimateHighUsd`/separate nullable `hardCapUsd`/credits/payer/continuation/report and exact typed-ack fields. New acknowledgements persist uppercase `BREAKING`; complete pre-V348 tuples remain byte-exact and are semantically checked case-insensitively after trimming, with REJECT/CANCEL recorded as `NOT_EVALUATED`. Missing legacy client plan fingerprints remain absent with a null match result; supplied values must match and ENFORCED approval requires one. APPROVE creates `APPROVAL_RESUMING` + READY; REJECT/CANCEL create coherent `CANCELLED` states. `PlanGateResumeStore` owns fenced READY/PROCESSING leases, preflights identity before workspace restore, and repeats the fence while committing `APPROVAL_RESUMING → WORKING` with outbox `PROCESSING → COMPLETED`; COMPLETED means durable WORKING handoff. Startup and scheduled recovery read only this outbox for APPROVAL_RESUMING. Direct child evidence deletion is rejected while parent-run cascade is retained; the report→run FK is `NOT VALID` for historical orphans but enforced on new rows.
 - **V349 payer/tenant gate correction:** the immutable plan-gate payer organization may differ from the host-project run tenant for an external collaborator; all other V348 coherence checks remain.
-- **V350 execution identity split (committed at `13ead3f40`; deterministic verification green at that checkpoint):** adds and backfills `pipeline_run.billing_org_id`, adds and backfills CUSTOMER `llm_execution_context.credential_org_id`, and requires CUSTOMER contexts to retain the credential organization. Separate PostgreSQL triggers reject later payer/credential-org updates, while application admission and dispatch guards independently enforce the same immutable binding. The current worktree head is V375, next V376, with 361 source files; V372 adds exact physical-route and task-complexity fingerprints to historical cost cohorts; V373 separates checkout intent from immutable exact-PR publication authority; V374 adds the accepted BUILD workspace-generation frontier and immutable verification receipts; `requirement.ir.gate.mode` remains LEGACY.
+- **V350 execution identity split (committed at `13ead3f40`; deterministic verification green at that checkpoint):** adds and backfills `pipeline_run.billing_org_id`, adds and backfills CUSTOMER `llm_execution_context.credential_org_id`, and requires CUSTOMER contexts to retain the credential organization. Separate PostgreSQL triggers reject later payer/credential-org updates, while application admission and dispatch guards independently enforce the same immutable binding. The current worktree head is V395, next V396, with 381 migration files; V372 adds exact physical-route and task-complexity fingerprints to historical cost cohorts; V373 separates checkout intent from immutable exact-PR publication authority; V374 adds the accepted BUILD workspace-generation frontier and immutable verification receipts; V385 pins BUILD protocol identity; V386 quarantines unpinned history; V387 adds append-only adjudication and retention release; V388 separates verification sandbox identity; V389 journals physical verification commands and receipts; V390 binds exact publication preparation and remote dispatch attempts; V391 recovers unsettled verification commands and fences late settlement; V392 distinguishes safe pre-dispatch external-effect retry from terminal post-dispatch uncertainty and fences terminal publication settlement; V393 makes recovery-artifact cleanup durable and non-authoritative; V394 binds exact checkpoint storage identity; V395 classifies deterministic verification failure and records its physical boundary; `requirement.ir.gate.mode` remains LEGACY.
 
 - V1–V44: Core schema through report improvements
 - V45: Widened `plan_version` columns (VARCHAR(255) for IDs, VARCHAR(64) for source)

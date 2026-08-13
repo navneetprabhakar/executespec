@@ -219,6 +219,33 @@ class TaskStatusPersistenceServiceTest {
   }
 
   @Test
+  void workspaceAcceptancePublicationCompletesTheExactWorkingTaskIdempotently() {
+    AgentTaskRepository repository = mock(AgentTaskRepository.class);
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId("12345678-aaaa-bbbb-cccc-123456789012")
+            .status("WORKING")
+            .recoveryAttempt(2)
+            .startedAt(Instant.now().minusSeconds(2))
+            .build();
+    when(repository.findByIdForUpdate(task.getTaskId())).thenReturn(Optional.of(task));
+    TaskStatusPersistenceService service = transactionalProxy(repository);
+
+    assertEquals(
+        TaskStatusPersistenceService.Result.UPDATED,
+        service.publishWorkspaceGenerationTransition(
+            task.getRunId(), "T1", "COMPLETE", "WORKING", 2, null));
+    assertEquals("COMPLETE", task.getStatus());
+    assertTrue(task.getCompletedAt() != null);
+    assertTrue(task.getDurationMs() != null && task.getDurationMs() >= 0);
+    assertEquals(
+        TaskStatusPersistenceService.Result.UPDATED,
+        service.publishWorkspaceGenerationTransition(
+            task.getRunId(), "T1", "COMPLETE", "WORKING", 2, null));
+  }
+
+  @Test
   void workspaceRollbackPublicationFencesRecoveryGeneration() {
     AgentTaskRepository repository = mock(AgentTaskRepository.class);
     AgentTask task =

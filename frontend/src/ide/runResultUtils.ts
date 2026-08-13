@@ -363,6 +363,25 @@ export function publicationTrustFacts(
                 : 'bad',
     },
     {
+      label: 'Generation failure causality',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration?.failureProjection
+            ? 'No structured generation failure on the latest attempt'
+            : `${latestGeneration.failureProjection.category} · stage ${latestGeneration.failureProjection.stage} · candidate ${latestGeneration.failureProjection.candidatePresent ? 'present' : 'absent'} · rollback ${latestGeneration.failureProjection.rollbackProven ? 'proven' : 'unproven'} · publication ${latestGeneration.failureProjection.publicationBlocked ? 'blocked' : 'eligible'} · action ${latestGeneration.failureProjection.recommendedAction}`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : !latestGeneration?.failureProjection
+            ? 'neutral'
+            : latestGeneration.failureProjection.category === 'ROLLBACK_PROVEN' ||
+                latestGeneration.failureProjection.category ===
+                  'VERIFICATION_ENVIRONMENT_UNAVAILABLE'
+              ? 'warn'
+              : 'bad',
+    },
+    {
       label: 'Latest generated candidate',
       value:
         run.runMode !== 'BUILD'
@@ -406,14 +425,16 @@ export function publicationTrustFacts(
           : !latestGeneration
             ? 'No verification evidence'
             : latestGeneration.verificationReceiptId
-              ? `${latestGeneration.verificationOutcome || 'UNKNOWN'} · build ${latestGeneration.verificationBuildPassed ? 'passed' : 'failed'} · tests ${latestGeneration.verificationTestsPassed ?? 0} passed / ${latestGeneration.verificationTestsFailed ?? 0} failed · receipt ${latestGeneration.verificationReceiptId.slice(0, 8)}`
+              ? `${latestGeneration.verificationOutcome || 'UNKNOWN'} · ${latestGeneration.verificationFailureCategory === 'ENVIRONMENT' ? `environment unavailable (${latestGeneration.verificationEnvironmentCode || 'unclassified'})` : latestGeneration.verificationFailureCategory === 'INTERNAL_PROTOCOL' ? `verification evidence invalid (${latestGeneration.verificationEnvironmentCode || 'unclassified'})` : `build ${latestGeneration.verificationBuildPassed ? 'passed' : 'failed'} · tests ${latestGeneration.verificationTestsPassed ?? 0} passed / ${latestGeneration.verificationTestsFailed ?? 0} failed`} · boundary ${latestGeneration.verificationExecutionBoundary || 'legacy'} · receipt ${latestGeneration.verificationReceiptId.slice(0, 8)}`
               : `No immutable verification receipt · current state ${latestGeneration.state}`,
       kind:
         latestGeneration?.verificationOutcome === 'PASSED'
           ? 'ok'
-          : latestGeneration?.verificationOutcome
-            ? 'bad'
-            : 'warn',
+          : latestGeneration?.verificationFailureCategory === 'ENVIRONMENT'
+            ? 'warn'
+            : latestGeneration?.verificationOutcome
+              ? 'bad'
+              : 'warn',
     },
     {
       label: 'Latest acceptance checks',
@@ -456,7 +477,7 @@ export function publicationTrustFacts(
           : !latestGeneration
             ? 'No generation attempt'
             : latestGeneration.state === 'ROLLED_BACK'
-              ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${(latestGeneration.priorAcceptedGeneration || latestGeneration.beforeGeneration).slice(0, 12)}`
+              ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${(latestGeneration.priorAcceptedGeneration || latestGeneration.beforeGeneration || 'unknown').slice(0, 12)}`
               : latestGeneration.state === 'RECOVERY_FAILED'
                 ? `Rollback recovery failed · ${latestGeneration.recoveryFailureCode || 'operator action required'}`
                 : latestGeneration.state === 'ACCEPTED'

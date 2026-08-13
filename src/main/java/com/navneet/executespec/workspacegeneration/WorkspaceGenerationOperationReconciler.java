@@ -30,7 +30,8 @@ public class WorkspaceGenerationOperationReconciler {
         jdbc
             .query(
                 """
-                SELECT a.state,a.llm_operation_id,a.llm_attempt_number,a.llm_lease_token,o.status
+                SELECT a.state,a.llm_operation_id,a.llm_attempt_number,a.llm_lease_token,
+                       a.operation_transition_target,a.operation_transition_state,o.status
                   FROM workspace_generation_attempt a
                   LEFT JOIN llm_execution_operation o ON o.id=a.llm_operation_id
                  WHERE a.id=?
@@ -41,41 +42,69 @@ public class WorkspaceGenerationOperationReconciler {
             .findFirst()
             .orElseThrow(() -> new IllegalStateException("WORKSPACE_GENERATION_ATTEMPT_NOT_FOUND"));
     if (binding.operationId() == null) return Outcome.UNBOUND;
-    String desired = desiredStatus(binding.state());
-    if (desired.equals(binding.operationStatus())) return Outcome.ALREADY_TERMINAL;
-    if (isTerminal(binding.operationStatus())) {
-      throw new IllegalStateException(
-          "WORKSPACE_GENERATION_LLM_TERMINAL_CONFLICT:"
-              + binding.state()
-              + ":"
-              + binding.operationStatus());
+    String desired = requireIntent(binding);
+    if ("COMPLETED".equals(binding.transitionState())) {
+      if (!desired.equals(binding.operationStatus())) {
+        throw new IllegalStateException("WORKSPACE_GENERATION_LLM_RECEIPT_CONFLICT");
+      }
+      return Outcome.ALREADY_TERMINAL;
     }
-    int updated =
+    if (!"PENDING".equals(binding.transitionState())) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_LLM_INTENT_STATE_INVALID");
+    }
+    if (isTerminal(binding.operationStatus())) {
+      if (!desired.equals(binding.operationStatus())) {
+        throw new IllegalStateException(
+            "WORKSPACE_GENERATION_LLM_TERMINAL_CONFLICT:"
+                + binding.state()
+                + ":"
+                + binding.operationStatus());
+      }
+    } else {
+      int updated =
+          jdbc.update(
+              """
+UPDATE llm_execution_operation o
+   SET status=?,completed_at=NOW(),updated_at=NOW(),
+       last_error_code=CASE WHEN ?='FAILED' THEN 'WORKSPACE_GENERATION_ROLLED_BACK'
+                            ELSE last_error_code END,
+       last_error_redacted=CASE WHEN ?='FAILED'
+           THEN 'Durable workspace-generation evidence rejected this physical attempt'
+           ELSE last_error_redacted END,
+       lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,
+       not_reclaim_before=NULL,next_attempt_at=NULL,version=version+1
+  FROM workspace_generation_attempt a
+ WHERE a.id=? AND o.id=a.llm_operation_id
+   AND a.operation_transition_state='PENDING'
+   AND a.operation_transition_target=?
+   AND o.attempt=a.llm_attempt_number
+   AND (o.status='QUEUED'
+     OR (o.status IN ('RUNNING','CANCEL_REQUESTED')
+       AND o.lease_token=a.llm_lease_token))
+""",
+              desired,
+              desired,
+              desired,
+              attemptId,
+              desired);
+      if (updated != 1) {
+        throw new IllegalStateException("WORKSPACE_GENERATION_LLM_RECONCILIATION_CAS_FAILED");
+      }
+    }
+
+    int receipted =
         jdbc.update(
             """
-            UPDATE llm_execution_operation o
-               SET status=?,completed_at=NOW(),updated_at=NOW(),
-                   last_error_code=CASE WHEN ?='FAILED' THEN 'WORKSPACE_GENERATION_ROLLED_BACK'
-                                        ELSE last_error_code END,
-                   last_error_redacted=CASE WHEN ?='FAILED'
-                       THEN 'Durable workspace-generation evidence rejected this physical attempt'
-                       ELSE last_error_redacted END,
-                   lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,
-                   not_reclaim_before=NULL,next_attempt_at=NULL,version=version+1
-              FROM workspace_generation_attempt a
-             WHERE a.id=? AND o.id=a.llm_operation_id
-               AND a.state IN ('ACCEPTED','ROLLED_BACK')
-               AND o.attempt=a.llm_attempt_number
-               AND (o.status='QUEUED'
-                 OR (o.status IN ('RUNNING','CANCEL_REQUESTED')
-                   AND o.lease_token=a.llm_lease_token))
+            UPDATE workspace_generation_attempt
+               SET operation_transition_state='COMPLETED',
+                   operation_transition_completed_at=NOW(),updated_at=NOW()
+             WHERE id=? AND operation_transition_target=?
+               AND operation_transition_state='PENDING'
             """,
-            desired,
-            desired,
-            desired,
-            attemptId);
-    if (updated != 1) {
-      throw new IllegalStateException("WORKSPACE_GENERATION_LLM_RECONCILIATION_CAS_FAILED");
+            attemptId,
+            desired);
+    if (receipted != 1) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_LLM_RECEIPT_CAS_FAILED");
     }
     return Outcome.RECONCILED;
   }
@@ -86,11 +115,9 @@ public class WorkspaceGenerationOperationReconciler {
         jdbc.query(
             """
             SELECT a.id
-              FROM workspace_generation_attempt a
-              JOIN llm_execution_operation o ON o.id=a.llm_operation_id
+             FROM workspace_generation_attempt a
              WHERE a.run_id=? AND a.state IN ('ACCEPTED','ROLLED_BACK')
-               AND ((a.state='ACCEPTED' AND o.status<>'SUCCEEDED')
-                 OR (a.state='ROLLED_BACK' AND o.status<>'FAILED'))
+               AND a.operation_transition_state='PENDING'
              ORDER BY a.attempt_number
             """,
             (rs, row) -> rs.getObject(1, UUID.class),
@@ -103,11 +130,16 @@ public class WorkspaceGenerationOperationReconciler {
         jdbc.queryForObject(
             """
             SELECT COUNT(*)
-              FROM workspace_generation_attempt a
+             FROM workspace_generation_attempt a
               JOIN llm_execution_operation o ON o.id=a.llm_operation_id
              WHERE a.run_id=? AND a.state IN ('ACCEPTED','ROLLED_BACK')
-               AND ((a.state='ACCEPTED' AND o.status<>'SUCCEEDED')
-                 OR (a.state='ROLLED_BACK' AND o.status<>'FAILED'))
+               AND (a.operation_transition_state IS DISTINCT FROM 'COMPLETED'
+                 OR (a.operation_transition_target='SUCCEEDED'
+                     AND o.status IS DISTINCT FROM 'SUCCEEDED')
+                 OR (a.operation_transition_target='FAILED'
+                     AND o.status IS DISTINCT FROM 'FAILED')
+                 OR a.operation_transition_target NOT IN ('SUCCEEDED','FAILED')
+                 OR a.operation_transition_target IS NULL)
             """,
             Integer.class,
             runId);
@@ -122,15 +154,22 @@ public class WorkspaceGenerationOperationReconciler {
         rs.getString("llm_operation_id"),
         (Integer) rs.getObject("llm_attempt_number"),
         rs.getObject("llm_lease_token", UUID.class),
+        rs.getString("operation_transition_target"),
+        rs.getString("operation_transition_state"),
         rs.getString("status"));
   }
 
-  private static String desiredStatus(String state) {
-    return switch (state) {
-      case "ACCEPTED" -> "SUCCEEDED";
-      case "ROLLED_BACK" -> "FAILED";
-      default -> throw new IllegalStateException("WORKSPACE_GENERATION_NOT_TERMINAL");
-    };
+  private static String requireIntent(Binding binding) {
+    String expected =
+        switch (binding.state()) {
+          case "ACCEPTED" -> "SUCCEEDED";
+          case "ROLLED_BACK" -> "FAILED";
+          default -> throw new IllegalStateException("WORKSPACE_GENERATION_NOT_TERMINAL");
+        };
+    if (!expected.equals(binding.transitionTarget())) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_LLM_INTENT_MISSING_OR_INVALID");
+    }
+    return binding.transitionTarget();
   }
 
   private static boolean isTerminal(String status) {
@@ -142,5 +181,7 @@ public class WorkspaceGenerationOperationReconciler {
       String operationId,
       Integer operationAttempt,
       UUID operationToken,
+      String transitionTarget,
+      String transitionState,
       String operationStatus) {}
 }

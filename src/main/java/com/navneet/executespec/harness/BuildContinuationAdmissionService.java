@@ -12,6 +12,7 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.BuildProtocolVersion;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttempt;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttemptRepository;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationKind;
@@ -100,6 +101,9 @@ public class BuildContinuationAdmissionService {
         runs.findByIdForTaskContinuation(request.runId())
             .orElseThrow(() -> new IllegalStateException("BUILD_ATTEMPT_RUN_MISSING"));
     String previousRunStatus = run.getStatus();
+    BuildProtocolVersion protocolVersion =
+        BuildProtocolVersion.parse(run.getBuildProtocolVersion());
+    protocolVersion.requireExecutable();
     boolean alreadyWorking = "WORKING".equals(previousRunStatus);
     if (!alreadyWorking
         && (request.kind() != AdmissionKind.AUTHORIZED_TERMINAL
@@ -146,6 +150,8 @@ public class BuildContinuationAdmissionService {
         WorkspaceGenerationAttempt.builder()
             .id(attemptId)
             .runId(request.runId())
+            .buildProtocolVersion(protocolVersion.name())
+            .verificationCommandProtocolVersion((short) 2)
             .taskId(request.taskId())
             .taskIndex(request.taskIndex())
             .attemptNumber(attemptNumber)

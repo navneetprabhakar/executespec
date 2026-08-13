@@ -387,6 +387,11 @@ public class RunDetail {
       Boolean verificationTestsExecuted,
       Integer verificationTestsPassed,
       Integer verificationTestsFailed,
+      String verificationFailureCategory,
+      String verificationEnvironmentCode,
+      String verificationExecutionBoundary,
+      com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection
+          failureProjection,
       String verificationEvidenceDigest,
       String rejectedDiffDigest,
       String failureCode,

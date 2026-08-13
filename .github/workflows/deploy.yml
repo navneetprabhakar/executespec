@@ -73,6 +73,31 @@ jobs:
           echo "TARGET_SHA=$RESOLVED_SHA" >> "$GITHUB_ENV"
           echo "Resolved deploy source: $RESOLVED_SHA"
 
+      # R12 release-assurance gate: generate the source graph from the exact checked-out commit.
+      # --code-only forbids semantic/LLM extraction; SQL/HCL extras are pinned so migrations and
+      # Terraform remain inside the release graph instead of silently degrading to manual review.
+      - name: Set up Python for release graph
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Generate immutable control-plane graph evidence
+        run: |
+          python -m pip install --disable-pip-version-check 'graphifyy[sql,terraform]==0.9.13'
+          graphify extract . --code-only --no-cluster --out .
+          GRAPH_SHA256=$(sha256sum graphify-out/graph.json | awk '{print $1}')
+          GRAPH_MANIFEST_SHA256=$(sha256sum graphify-out/manifest.json | awk '{print $1}')
+          GRAPHIFY_VERSION=$(python -c "import importlib.metadata as m; print(m.version('graphifyy'))")
+          GRAPHIFY_SQL_PARSER_VERSION=$(python -c "import importlib.metadata as m; print(m.version('tree-sitter-sql'))")
+          GRAPHIFY_HCL_PARSER_VERSION=$(python -c "import importlib.metadata as m; print(m.version('tree-sitter-hcl'))")
+          echo "GRAPH_SHA256=$GRAPH_SHA256" >> "$GITHUB_ENV"
+          echo "GRAPH_MANIFEST_SHA256=$GRAPH_MANIFEST_SHA256" >> "$GITHUB_ENV"
+          echo "GRAPHIFY_VERSION=$GRAPHIFY_VERSION" >> "$GITHUB_ENV"
+          echo "GRAPHIFY_SQL_PARSER_VERSION=$GRAPHIFY_SQL_PARSER_VERSION" >> "$GITHUB_ENV"
+          echo "GRAPHIFY_HCL_PARSER_VERSION=$GRAPHIFY_HCL_PARSER_VERSION" >> "$GITHUB_ENV"
+          jq '(if (.edges|type) == "array" then .edges elif (.links|type) == "array" then .links else error("Graphify edge collection missing") end) as $edges | {nodes:(.nodes|length),edges:($edges|length),sqlFiles:([.nodes[]|select((.source_file//"")|endswith(".sql"))|.source_file]|unique|length),sqlNodes:([.nodes[]|select((.source_file//"")|endswith(".sql"))]|length),hclFiles:([.nodes[]|select((.source_file//"")|test("\\.(tf|tfvars)$"))|.source_file]|unique|length),hclNodes:([.nodes[]|select((.source_file//"")|test("\\.(tf|tfvars)$"))]|length)}' graphify-out/graph.json > graphify-out/release-counts.json
+          echo "Control-plane graph SHA-256: `$GRAPH_SHA256`" >> "$GITHUB_STEP_SUMMARY"
+
       # ── Java setup ────────────────────────────────────────────────────────
       - name: Set up Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v5
@@ -204,6 +229,63 @@ jobs:
           fi
           echo "GCE_INSTANCE_RESOLVED=$INSTANCE" >> $GITHUB_ENV
           echo "Target instance: $INSTANCE"
+
+      # Compare the exact candidate graph with the exact source SHA currently serving this
+      # environment. Any control-plane node/edge change needs a hash-bound review receipt committed
+      # at qualification/control-plane-graph-review.json. The diff step is allowed to finish with a
+      # controlled failure so its review template is still retained as workflow evidence.
+      - name: Diff deployed and candidate control-plane graphs
+        id: control_plane_graph_diff
+        continue-on-error: true
+        run: |
+          BASE_SHA=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
+            --project ${{ env.GCP_PROJECT }} \
+            --zone ${{ env.GCE_ZONE_RESOLVED }} \
+            --tunnel-through-iap \
+            --strict-host-key-checking=no \
+            --command="sudo awk -F= '/^source_sha=/{print \$2}' /opt/app/RUNNING_RELEASE" \
+            | tr -d '\r\n')
+          if ! [[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ ]] || ! git cat-file -e "$BASE_SHA^{commit}"; then
+            echo "::error::Running environment does not expose a source SHA present in repository history."
+            exit 1
+          fi
+          BASE_DIR=$(mktemp -d)
+          trap 'git worktree remove --force "$BASE_DIR" >/dev/null 2>&1 || true' EXIT
+          git worktree add --detach "$BASE_DIR" "$BASE_SHA"
+          graphify extract "$BASE_DIR" --code-only --no-cluster --out "$BASE_DIR"
+          cp "$BASE_DIR/graphify-out/graph.json" graphify-out/deployed-base-graph.json
+          REVIEW_ARGS=()
+          if [ -f qualification/control-plane-graph-review.json ]; then
+            REVIEW_ARGS=(--review qualification/control-plane-graph-review.json)
+          fi
+          node scripts/build-qualification/control-plane-graph-diff.mjs \
+            --base "$BASE_DIR/graphify-out/graph.json" \
+            --candidate graphify-out/graph.json \
+            --output graphify-out/control-plane-diff.json \
+            "${REVIEW_ARGS[@]}"
+
+      - name: Retain exact release graph and diff evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-plane-graph-${{ env.TARGET_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            graphify-out/graph.json
+            graphify-out/manifest.json
+            graphify-out/release-counts.json
+            graphify-out/deployed-base-graph.json
+            graphify-out/control-plane-diff.json
+            graphify-out/control-plane-diff.json.review-template.json
+            qualification/control-plane-graph-review.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: Enforce control-plane graph review
+        if: steps.control_plane_graph_diff.outcome != 'success'
+        run: |
+          echo "::error::Control-plane graph diff failed or requires an exact review receipt."
+          exit 1
 
       # ── Ensure validator toolchains on GCE (idempotent) ───────────────────
       # The code validator needs Node.js (npx/tsc/eslint) and Python3 (mypy/ruff/pytest)
@@ -514,11 +596,16 @@ jobs:
               cd /opt/app/releases
               sudo sha256sum -c app-${{ env.TARGET_SHA }}.jar.sha256
               sudo bash \"\$REMOTE_ENV_PATCH\" '${{ env.APP_PUBLIC_URL }}' '${{ env.DEPLOY_BUCKET_PREFIX }}-${{ env.DEPLOY_ENV }}-deploy' '${{ env.DEPLOY_ENV }}'
-              sudo sed -i '/^EXECUTESPEC_RELEASE_SOURCE_SHA=/d; /^EXECUTESPEC_RELEASE_ARTIFACT_SHA256=/d; /^EXECUTESPEC_RELEASE_ATTEMPT_ID=/d' /opt/app/executespec.env
+              sudo sed -i '/^EXECUTESPEC_RELEASE_SOURCE_SHA=/d; /^EXECUTESPEC_RELEASE_ARTIFACT_SHA256=/d; /^EXECUTESPEC_RELEASE_ATTEMPT_ID=/d; /^EXECUTESPEC_CONTROL_PLANE_GRAPH_SHA256=/d; /^EXECUTESPEC_CONTROL_PLANE_GRAPH_MANIFEST_SHA256=/d; /^EXECUTESPEC_GRAPHIFY_VERSION=/d; /^EXECUTESPEC_GRAPHIFY_SQL_PARSER_VERSION=/d; /^EXECUTESPEC_GRAPHIFY_HCL_PARSER_VERSION=/d' /opt/app/executespec.env
               printf '%s\n' \
                 'EXECUTESPEC_RELEASE_SOURCE_SHA=${{ env.TARGET_SHA }}' \
                 'EXECUTESPEC_RELEASE_ARTIFACT_SHA256=${{ env.JAR_SHA256 }}' \
                 'EXECUTESPEC_RELEASE_ATTEMPT_ID=${{ env.DEPLOY_ATTEMPT_ID }}' \
+                'EXECUTESPEC_CONTROL_PLANE_GRAPH_SHA256=${{ env.GRAPH_SHA256 }}' \
+                'EXECUTESPEC_CONTROL_PLANE_GRAPH_MANIFEST_SHA256=${{ env.GRAPH_MANIFEST_SHA256 }}' \
+                'EXECUTESPEC_GRAPHIFY_VERSION=${{ env.GRAPHIFY_VERSION }}' \
+                'EXECUTESPEC_GRAPHIFY_SQL_PARSER_VERSION=${{ env.GRAPHIFY_SQL_PARSER_VERSION }}' \
+                'EXECUTESPEC_GRAPHIFY_HCL_PARSER_VERSION=${{ env.GRAPHIFY_HCL_PARSER_VERSION }}' \
                 | sudo tee -a /opt/app/executespec.env >/dev/null
               sudo ln -sf /opt/app/releases/app-${{ env.TARGET_SHA }}.jar /opt/app/app.jar
               RELEASE_MARKER_TMP='/opt/app/.RUNNING_RELEASE.${{ env.DEPLOY_ATTEMPT_ID }}.tmp'
@@ -526,6 +613,11 @@ jobs:
                 'source_sha=${{ env.TARGET_SHA }}' \
                 'artifact_sha256=${{ env.JAR_SHA256 }}' \
                 'attempt_id=${{ env.DEPLOY_ATTEMPT_ID }}' \
+                'control_plane_graph_sha256=${{ env.GRAPH_SHA256 }}' \
+                'control_plane_graph_manifest_sha256=${{ env.GRAPH_MANIFEST_SHA256 }}' \
+                'graphify_version=${{ env.GRAPHIFY_VERSION }}' \
+                'graphify_sql_parser_version=${{ env.GRAPHIFY_SQL_PARSER_VERSION }}' \
+                'graphify_hcl_parser_version=${{ env.GRAPHIFY_HCL_PARSER_VERSION }}' \
                 | sudo tee "\$RELEASE_MARKER_TMP" >/dev/null
               sudo mv "\$RELEASE_MARKER_TMP" /opt/app/RUNNING_RELEASE
               echo '${{ env.TARGET_SHA }}' | sudo tee /opt/app/RUNNING_SHA >/dev/null
@@ -546,7 +638,12 @@ jobs:
           EXPECTED_MARKER=$(printf '%s\n' \
             'source_sha=${{ env.TARGET_SHA }}' \
             'artifact_sha256=${{ env.JAR_SHA256 }}' \
-            'attempt_id=${{ env.DEPLOY_ATTEMPT_ID }}')
+            'attempt_id=${{ env.DEPLOY_ATTEMPT_ID }}' \
+            'control_plane_graph_sha256=${{ env.GRAPH_SHA256 }}' \
+            'control_plane_graph_manifest_sha256=${{ env.GRAPH_MANIFEST_SHA256 }}' \
+            'graphify_version=${{ env.GRAPHIFY_VERSION }}' \
+            'graphify_sql_parser_version=${{ env.GRAPHIFY_SQL_PARSER_VERSION }}' \
+            'graphify_hcl_parser_version=${{ env.GRAPHIFY_HCL_PARSER_VERSION }}')
           OBSERVED_MARKER=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE_RESOLVED }} \
@@ -611,13 +708,18 @@ jobs:
           EXPECTED=$(printf '%s\n' \
             'EXECUTESPEC_RELEASE_SOURCE_SHA=${{ env.TARGET_SHA }}' \
             'EXECUTESPEC_RELEASE_ARTIFACT_SHA256=${{ env.JAR_SHA256 }}' \
-            'EXECUTESPEC_RELEASE_ATTEMPT_ID=${{ env.DEPLOY_ATTEMPT_ID }}' | sort)
+            'EXECUTESPEC_RELEASE_ATTEMPT_ID=${{ env.DEPLOY_ATTEMPT_ID }}' \
+            'EXECUTESPEC_CONTROL_PLANE_GRAPH_SHA256=${{ env.GRAPH_SHA256 }}' \
+            'EXECUTESPEC_CONTROL_PLANE_GRAPH_MANIFEST_SHA256=${{ env.GRAPH_MANIFEST_SHA256 }}' \
+            'EXECUTESPEC_GRAPHIFY_VERSION=${{ env.GRAPHIFY_VERSION }}' \
+            'EXECUTESPEC_GRAPHIFY_SQL_PARSER_VERSION=${{ env.GRAPHIFY_SQL_PARSER_VERSION }}' \
+            'EXECUTESPEC_GRAPHIFY_HCL_PARSER_VERSION=${{ env.GRAPHIFY_HCL_PARSER_VERSION }}' | sort)
           OBSERVED=$(gcloud compute ssh ${{ env.GCE_INSTANCE_RESOLVED }} \
             --project ${{ env.GCP_PROJECT }} \
             --zone ${{ env.GCE_ZONE_RESOLVED }} \
             --tunnel-through-iap \
             --strict-host-key-checking=no \
-            --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo cat /proc/\$PID/environ | tr '\\0' '\\n' | grep '^EXECUTESPEC_RELEASE_' | sort" \
+            --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo cat /proc/\$PID/environ | tr '\\0' '\\n' | grep -E '^(EXECUTESPEC_RELEASE_|EXECUTESPEC_CONTROL_PLANE_GRAPH_|EXECUTESPEC_GRAPHIFY_)' | sort" \
             | tr -d '\r')
           if [ "$OBSERVED" != "$EXPECTED" ]; then
             echo "::error::Healthy JVM release tuple mismatch."

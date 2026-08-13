@@ -9,9 +9,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.deployment.GcsTaskCheckpointService;
 import com.navneet.executespec.harness.TaskStatusPersistenceService;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.PostgresIntegrationBase;
+import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +27,11 @@ class WorkspaceGenerationTaskTransitionPostgresTest extends PostgresIntegrationB
   @Autowired WorkspaceGenerationTaskTransitionService transitions;
   @Autowired WorkspaceGenerationRecoveryService recovery;
   @Autowired WorkspaceGenerationOperationReconciler operationReconciler;
+  @Autowired WorkspaceGenerationTerminalReconciler terminalReconciler;
+  @Autowired RunWorkspaceAuthorityService workspaceAuthorities;
   @Autowired CorrectionWorkspaceTransaction workspaces;
+  @Autowired GcsTaskCheckpointService checkpointService;
+  @Autowired WorkspaceIgnoredArtifactGuard ignoredArtifacts;
   @Autowired AgentProperties agentProperties;
 
   @Test
@@ -137,6 +143,52 @@ class WorkspaceGenerationTaskTransitionPostgresTest extends PostgresIntegrationB
   }
 
   @Test
+  void terminalReconciliationReleasesOnlyAfterTaskAndOperationConvergeAndReplayIsHarmless() {
+    BoundFixture fixture = terminalRollbackWithRunningOperation("authority-release");
+
+    assertThat(workspaceAuthorities.releaseConvergedGeneration(fixture.runId())).isFalse();
+    assertThat(authorityCount(fixture.runId())).isOne();
+
+    terminalReconciler.reconcileRun(fixture.runId());
+    terminalReconciler.reconcileRun(fixture.runId());
+
+    assertThat(taskStatus(new Fixture(fixture.runId(), fixture.taskKey(), fixture.attemptId())))
+        .isEqualTo("PARTIAL");
+    assertThat(
+            transitionState(new Fixture(fixture.runId(), fixture.taskKey(), fixture.attemptId())))
+        .isEqualTo("COMPLETED");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT status FROM llm_execution_operation WHERE id=?",
+                String.class,
+                fixture.operationId()))
+        .isEqualTo("FAILED");
+    assertThat(authorityCount(fixture.runId())).isZero();
+    assertThat(workspaceAuthorities.releaseConvergedGeneration(fixture.runId())).isFalse();
+  }
+
+  @Test
+  void convergedOldAttemptCannotReleaseNewerOrNonGenerationAuthority() {
+    BoundFixture fixture = terminalRollbackWithRunningOperation("authority-fence");
+    transitions.publish(fixture.attemptId());
+    operationReconciler.reconcile(fixture.attemptId());
+
+    UUID newerToken = UUID.randomUUID();
+    jdbc.update(
+        "UPDATE run_workspace_authority SET owner_token=?::uuid WHERE run_id=?",
+        newerToken.toString(),
+        fixture.runId());
+    assertThat(workspaceAuthorities.releaseConvergedGeneration(fixture.runId())).isFalse();
+    assertThat(authorityToken(fixture.runId())).isEqualTo(newerToken);
+
+    jdbc.update(
+        "UPDATE run_workspace_authority SET authority_type='CORRECTION' WHERE run_id=?",
+        fixture.runId());
+    assertThat(workspaceAuthorities.releaseConvergedGeneration(fixture.runId())).isFalse();
+    assertThat(authorityCount(fixture.runId())).isOne();
+  }
+
+  @Test
   void crashAfterFilesystemRestoreBeforeTerminalUpdateIsRecoveredAndDuplicateReplayIsHarmless()
       throws Exception {
     String runId = UUID.randomUUID() + "-wg-restored-crash";
@@ -153,6 +205,10 @@ class WorkspaceGenerationTaskTransitionPostgresTest extends PostgresIntegrationB
     git(root, "add", "main.py");
     git(root, "commit", "-m", "accepted predecessor");
     CorrectionWorkspaceTransaction.Checkpoint checkpoint = workspaces.begin(root);
+    WorkspaceIgnoredArtifactGuard.Baseline ignoredBaseline =
+        ignoredArtifacts.capture(checkpoint, () -> {});
+    GcsTaskCheckpointService.CheckpointReceipt checkpointReceipt =
+        checkpointService.checkpointGeneration(runId, "T1", checkpoint);
     var repository = checkpoint.repositories().getFirst();
     String repositoriesJson =
         "[{\"repository\":\"\",\"head\":\""
@@ -173,7 +229,7 @@ class WorkspaceGenerationTaskTransitionPostgresTest extends PostgresIntegrationB
             + "NOW()+INTERVAL '10 minutes',NOW())",
         runId,
         workspaceToken.toString());
-    WorkspaceGenerationPostgresFixture.insertPrepared(
+    WorkspaceGenerationPostgresFixture.insertPreparedExact(
         jdbc,
         attemptId,
         runId,
@@ -186,11 +242,15 @@ class WorkspaceGenerationTaskTransitionPostgresTest extends PostgresIntegrationB
         repositoriesJson,
         "2".repeat(64),
         "3".repeat(64),
-        "{}",
-        "4".repeat(64),
-        "LOCAL_SAME_HOST",
-        "local://before",
-        "5".repeat(64));
+        ignoredBaseline.json(),
+        ignoredBaseline.digest(),
+        checkpointReceipt.kind(),
+        checkpointReceipt.key(),
+        checkpointReceipt.artifactDigest(),
+        checkpointReceipt.storageGeneration(),
+        checkpointReceipt.sizeBytes(),
+        checkpointReceipt.crc32c(),
+        checkpointReceipt.etag());
     jdbc.update("UPDATE workspace_generation_attempt SET state='MUTATING' WHERE id=?", attemptId);
     jdbc.update("DELETE FROM run_workspace_authority WHERE run_id=?", runId);
     jdbc.update(
@@ -377,6 +437,16 @@ class WorkspaceGenerationTaskTransitionPostgresTest extends PostgresIntegrationB
         "SELECT task_transition_state FROM workspace_generation_attempt WHERE id=?",
         String.class,
         fixture.attemptId());
+  }
+
+  private int authorityCount(String runId) {
+    return jdbc.queryForObject(
+        "SELECT COUNT(*) FROM run_workspace_authority WHERE run_id=?", Integer.class, runId);
+  }
+
+  private UUID authorityToken(String runId) {
+    return jdbc.queryForObject(
+        "SELECT owner_token FROM run_workspace_authority WHERE run_id=?", UUID.class, runId);
   }
 
   private record Fixture(String runId, String taskKey, UUID attemptId) {}

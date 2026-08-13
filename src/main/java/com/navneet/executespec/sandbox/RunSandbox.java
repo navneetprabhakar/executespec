@@ -20,6 +20,7 @@ public record RunSandbox(
     String orgId,
     String sourceRevision,
     String repositorySet,
+    SandboxPurpose purpose,
     SandboxState state,
     SandboxIsolationProfile isolationProfile,
     int isolationProfileVersion,
@@ -60,12 +61,52 @@ public record RunSandbox(
       String orgId,
       String sourceRevision,
       String repositorySet,
+      SandboxPurpose purpose,
       SandboxIsolationProfile isolationProfile,
       String configDigest,
       SandboxNetworkPolicy networkPolicy,
       SandboxSecretPolicy secretPolicy,
       Instant expiresAt,
-      String idempotencyKey) {}
+      String idempotencyKey) {
+
+    /** Compatibility for ordinary run sandboxes admitted before purpose became explicit. */
+    public CreateRequest(
+        UUID id,
+        String runId,
+        String projectId,
+        UUID sessionId,
+        String requestedByUserId,
+        String orgId,
+        String sourceRevision,
+        String repositorySet,
+        SandboxIsolationProfile isolationProfile,
+        String configDigest,
+        SandboxNetworkPolicy networkPolicy,
+        SandboxSecretPolicy secretPolicy,
+        Instant expiresAt,
+        String idempotencyKey) {
+      this(
+          id,
+          runId,
+          projectId,
+          sessionId,
+          requestedByUserId,
+          orgId,
+          sourceRevision,
+          repositorySet,
+          SandboxPurpose.RUN,
+          isolationProfile,
+          configDigest,
+          networkPolicy,
+          secretPolicy,
+          expiresAt,
+          idempotencyKey);
+    }
+
+    public CreateRequest {
+      if (purpose == null) throw new IllegalArgumentException("sandbox purpose is required");
+    }
+  }
 
   /**
    * Proof that this JVM currently owns a sandbox. Every fenced write must present it; a takeover

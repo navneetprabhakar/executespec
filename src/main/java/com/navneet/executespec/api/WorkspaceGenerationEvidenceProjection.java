@@ -13,8 +13,11 @@ import com.navneet.executespec.workspacegeneration.WorkspaceGenerationVerificati
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import lombok.extern.slf4j.Slf4j;
+
 /** Projects the bounded customer-safe BUILD generation ledger for run detail. */
 @Component
+@Slf4j
 public class WorkspaceGenerationEvidenceProjection {
 
   private final WorkspaceGenerationAttemptRepository attempts;
@@ -37,9 +40,23 @@ public class WorkspaceGenerationEvidenceProjection {
 
   public List<RunDetail.WorkspaceGenerationAttemptEvidence> forRun(String runId) {
     if (runId == null) return List.of();
-    return attempts.findTop20ByRunIdOrderByCreatedAtDesc(runId).stream()
-        .map(this::project)
-        .toList();
+    try {
+      return attempts.findTop20ByRunIdOrderByCreatedAtDesc(runId).stream()
+          .map(this::project)
+          .toList();
+    } catch (RuntimeException evidenceUnavailable) {
+      log.warn(
+          "workspace generation API evidence unavailable for run {}: {}",
+          runId,
+          evidenceUnavailable.getMessage());
+      return List.of();
+    }
+  }
+
+  public com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection
+      latestFailureForRun(String runId) {
+    List<RunDetail.WorkspaceGenerationAttemptEvidence> evidence = forRun(runId);
+    return evidence.isEmpty() ? null : evidence.getFirst().failureProjection();
   }
 
   private RunDetail.WorkspaceGenerationAttemptEvidence project(WorkspaceGenerationAttempt attempt) {
@@ -65,7 +82,7 @@ public class WorkspaceGenerationEvidenceProjection {
             ? attempt.getCandidateGeneration()
             : null,
         attempt.getTaskContractDigest(),
-        initialFailure(attempt),
+        initialFailure(attempt, contract),
         contract == null ? null : contract.runtimeSurface(),
         contract == null ? null : contract.baselineKind(),
         contract == null || contract.buildCommand() == null
@@ -95,6 +112,11 @@ public class WorkspaceGenerationEvidenceProjection {
         receipt == null ? null : receipt.isTestsExecuted(),
         receipt == null ? null : receipt.getTestsPassed(),
         receipt == null ? null : receipt.getTestsFailed(),
+        receipt == null ? null : receipt.getFailureCategory(),
+        receipt == null ? null : receipt.getEnvironmentCode(),
+        receipt == null ? null : receipt.getExecutionBoundary(),
+        com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection.project(
+            attempt, receipt),
         receipt == null ? null : receipt.getEvidenceDigest(),
         attempt.getRejectedDiffDigest(),
         attempt.getFailureCode(),
@@ -105,7 +127,7 @@ public class WorkspaceGenerationEvidenceProjection {
   }
 
   private RunDetail.WorkspaceGenerationInitialFailureEvidence initialFailure(
-      WorkspaceGenerationAttempt attempt) {
+      WorkspaceGenerationAttempt attempt, TaskAcceptanceContract contract) {
     String json = attempt.getObservedInitialFailureEvidenceJson();
     if (json == null || json.isBlank()) return null;
     try {
@@ -117,11 +139,45 @@ public class WorkspaceGenerationEvidenceProjection {
           code,
           customerSafeInitialFailureDetail(code),
           node.path("command").asText(null),
-          List.of(),
+          visibleFailedTargets(node, contract),
           attempt.getInitialFailureObservedAt());
     } catch (Exception malformedHistoricalEvidence) {
       return null;
     }
+  }
+
+  /**
+   * Preserve only failed targets that the frozen contract explicitly classified as customer
+   * visible. Historical or unmatched targets stay redacted; hidden checks never leak through the
+   * initial-failure projection.
+   */
+  private static List<String> visibleFailedTargets(
+      com.fasterxml.jackson.databind.JsonNode node, TaskAcceptanceContract contract) {
+    if (contract == null) return List.of();
+    java.util.Set<String> visible =
+        java.util.stream.Stream.concat(
+                contract.prefixChecks().stream(), contract.finalChecks().stream())
+            .filter(check -> !check.hidden())
+            .map(TaskAcceptanceContract.AcceptanceCheck::target)
+            .filter(WorkspaceGenerationEvidenceProjection::boundedTarget)
+            .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+    if (visible.isEmpty()) return List.of();
+    com.fasterxml.jackson.databind.JsonNode failedTargets = node.path("failedTargets");
+    if (!failedTargets.isArray()) return List.of();
+    java.util.List<String> projected = new java.util.ArrayList<>();
+    for (com.fasterxml.jackson.databind.JsonNode targetNode : failedTargets) {
+      String target = targetNode.isTextual() ? targetNode.textValue() : null;
+      if (boundedTarget(target) && visible.contains(target) && !projected.contains(target)) {
+        projected.add(target);
+      }
+      if (projected.size() == 20) break;
+    }
+    return List.copyOf(projected);
+  }
+
+  private static boolean boundedTarget(String target) {
+    if (target == null || target.isBlank() || target.length() > 256) return false;
+    return target.chars().noneMatch(character -> Character.isISOControl(character));
   }
 
   private static RunDetail.WorkspaceGenerationAcceptanceCheck projectedCheck(

@@ -20,6 +20,8 @@ import java.util.regex.Pattern;
 
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
+import com.navneet.executespec.sandboxroute.VerificationSandboxAuthority;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.stereotype.Component;
@@ -56,6 +58,15 @@ public class PythonHttpRuntimeAcceptanceService {
   private final SandboxCommandRoutingService sandboxRouting;
 
   public Result verify(String runId, Path workspaceRoot) {
+    return verify(runId, workspaceRoot, null);
+  }
+
+  public Result verify(ExecutionContext context) {
+    return verify(context.runId(), context.workspaceRoot(), context.verificationSandboxAuthority());
+  }
+
+  private Result verify(
+      String runId, Path workspaceRoot, VerificationSandboxAuthority verificationAuthority) {
     DependencyDecision dependencies = validateDependencies(workspaceRoot);
     if (!dependencies.valid()) {
       return Result.failedBeforeExecution(dependencies.reason(), dependencies.evidence());
@@ -79,7 +90,11 @@ public class PythonHttpRuntimeAcceptanceService {
     SandboxExecResult executed;
     boolean cleanupComplete;
     try {
-      executed = sandboxRouting.execute(runId, workspaceRoot, List.of(RUNTIME_COMMAND), TIMEOUT);
+      executed =
+          verificationAuthority == null
+              ? sandboxRouting.execute(runId, workspaceRoot, List.of(RUNTIME_COMMAND), TIMEOUT)
+              : sandboxRouting.executeVerificationShell(
+                  verificationAuthority, RUNTIME_COMMAND, TIMEOUT);
     } finally {
       cleanupComplete = cleanupRuntimeResidue(workspaceRoot);
     }

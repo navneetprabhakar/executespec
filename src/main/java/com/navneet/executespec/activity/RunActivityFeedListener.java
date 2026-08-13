@@ -5,7 +5,7 @@ import java.util.UUID;
 
 import com.navneet.executespec.harness.event.PipelineEvent;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome;
-import com.navneet.executespec.run.outcome.RunTerminalOutcomeContract;
+import com.navneet.executespec.run.outcome.RunTerminalOutcomeProjectionService;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -39,6 +39,7 @@ public class RunActivityFeedListener {
 
   private final PipelineRunRepository runRepo;
   private final ActivityEventEmitter emitter;
+  private final RunTerminalOutcomeProjectionService outcomeProjection;
 
   @Async
   @EventListener
@@ -75,7 +76,7 @@ public class RunActivityFeedListener {
         run,
         ActivityEventType.RUN_COMPLETED,
         null,
-        terminalSummary(RunTerminalOutcomeContract.project(run), "Run finished", run));
+        terminalSummary(outcomeProjection.project(run), "Run finished", run));
   }
 
   @Async
@@ -87,15 +88,7 @@ public class RunActivityFeedListener {
         run.getFailureReason() != null && !run.getFailureReason().isBlank()
             ? run.getFailureReason()
             : event.reason();
-    RunTerminalOutcome outcome =
-        RunTerminalOutcomeContract.project(
-            run.getRunId(),
-            run.getStatus(),
-            run.getStatusReason(),
-            failureReason,
-            run.getActualCostUsd(),
-            run.getHardCapUsd() != null ? run.getHardCapUsd() : run.getUserCostCap(),
-            run.getScmPrUrl() != null ? run.getScmPrUrl() : run.getGithubPrUrl());
+    RunTerminalOutcome outcome = outcomeProjection.project(run, failureReason);
     emit(run, ActivityEventType.RUN_FAILED, null, terminalSummary(outcome, "Run ended", run));
   }
 

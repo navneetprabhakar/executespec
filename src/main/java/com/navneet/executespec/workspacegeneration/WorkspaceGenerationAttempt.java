@@ -32,6 +32,22 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "run_id", nullable = false)
   private String runId;
 
+  /** Exact immutable protocol copied from the parent run when this physical attempt is admitted. */
+  @Column(name = "build_protocol_version", length = 32)
+  private String buildProtocolVersion;
+
+  /** V389 physical-command receipt contract; v1 is rolling-deploy compatibility only. */
+  @Column(name = "verification_command_protocol_version", nullable = false)
+  @Builder.Default
+  private Short verificationCommandProtocolVersion = 1;
+
+  /**
+   * V386 immutable classification for pre-pin history; new supported attempts are not historical.
+   */
+  @Column(name = "historical_disposition", length = 32, nullable = false)
+  @Builder.Default
+  private String historicalDisposition = "NOT_APPLICABLE";
+
   @Column(name = "task_id", nullable = false)
   private String taskId;
 
@@ -153,6 +169,18 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "before_checkpoint_completed_at")
   private Instant beforeCheckpointCompletedAt;
 
+  @Column(name = "before_checkpoint_storage_generation", length = 128)
+  private String beforeCheckpointStorageGeneration;
+
+  @Column(name = "before_checkpoint_size_bytes")
+  private Long beforeCheckpointSizeBytes;
+
+  @Column(name = "before_checkpoint_crc32c", length = 64)
+  private String beforeCheckpointCrc32c;
+
+  @Column(name = "before_checkpoint_etag", length = 512)
+  private String beforeCheckpointEtag;
+
   @Column(name = "checkpoint_kind", length = 24)
   private String checkpointKind;
 
@@ -167,6 +195,18 @@ public class WorkspaceGenerationAttempt {
 
   @Column(name = "checkpoint_completed_at")
   private Instant checkpointCompletedAt;
+
+  @Column(name = "checkpoint_storage_generation", length = 128)
+  private String checkpointStorageGeneration;
+
+  @Column(name = "checkpoint_size_bytes")
+  private Long checkpointSizeBytes;
+
+  @Column(name = "checkpoint_crc32c", length = 64)
+  private String checkpointCrc32c;
+
+  @Column(name = "checkpoint_etag", length = 512)
+  private String checkpointEtag;
 
   @Column(name = "rejected_diff_digest", length = 64)
   private String rejectedDiffDigest;
@@ -216,6 +256,15 @@ public class WorkspaceGenerationAttempt {
 
   @Column(name = "task_transition_failure_at")
   private Instant taskTransitionFailureAt;
+
+  @Column(name = "operation_transition_target", length = 16)
+  private String operationTransitionTarget;
+
+  @Column(name = "operation_transition_state", length = 16)
+  private String operationTransitionState;
+
+  @Column(name = "operation_transition_completed_at")
+  private Instant operationTransitionCompletedAt;
 
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;

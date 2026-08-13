@@ -13,6 +13,7 @@ import com.navneet.executespec.sandbox.RunSandbox;
 import com.navneet.executespec.sandbox.RunSandboxLifecycleService;
 import com.navneet.executespec.sandbox.RunSandboxRuntimeDispatcher;
 import com.navneet.executespec.sandbox.RunSandboxStore;
+import com.navneet.executespec.sandbox.SandboxCommandJournalStore;
 import com.navneet.executespec.sandbox.SandboxExecRequest;
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandbox.SandboxNetworkPolicy;
@@ -22,10 +23,10 @@ import com.navneet.executespec.sandbox.SandboxSecretPolicy;
 import com.navneet.executespec.sandbox.SandboxState;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -67,7 +68,6 @@ import lombok.extern.slf4j.Slf4j;
  * workspaceRoot} argument below is used only to build the spec's container-path mapping.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class SandboxCommandRoutingService {
 
@@ -101,8 +101,28 @@ public class SandboxCommandRoutingService {
   private final SandboxProperties properties;
   private final FeatureFlagService featureFlags;
   private final PipelineRunRepository pipelineRuns;
+  private final VerificationSandboxRoutingService verificationRouter;
 
   private final Map<UUID, RunSandbox.Lease> heldLeases = new ConcurrentHashMap<>();
+
+  public SandboxCommandRoutingService(
+      RunSandboxLifecycleService lifecycle,
+      RunSandboxRuntimeDispatcher dispatcher,
+      RunSandboxStore store,
+      SandboxProperties properties,
+      FeatureFlagService featureFlags,
+      PipelineRunRepository pipelineRuns,
+      SandboxCommandJournalStore commandJournal) {
+    this.lifecycle = lifecycle;
+    this.dispatcher = dispatcher;
+    this.store = store;
+    this.properties = properties;
+    this.featureFlags = featureFlags;
+    this.pipelineRuns = pipelineRuns;
+    this.verificationRouter =
+        new VerificationSandboxRoutingService(
+            lifecycle, dispatcher, store, properties, pipelineRuns, commandJournal);
+  }
 
   /**
    * Whether build/test/lint execution must be routed into a sandbox right now.
@@ -274,6 +294,64 @@ public class SandboxCommandRoutingService {
   }
 
   /**
+   * Admits a physically separate sandbox for one exact-generation verification phase.
+   *
+   * <p>The workspace is derived from the new sandbox id under the sandbox-owned root. It is not a
+   * caller path and it is never the canonical {@code agent.workspace/<runId>} mount.
+   */
+  public VerificationSandboxAuthority openVerification(
+      String runId, String generation, WorkspaceGenerationDispatchAuthority.Phase phase) {
+    return openVerification(runId, null, generation, phase);
+  }
+
+  public VerificationSandboxAuthority openVerification(
+      String runId,
+      UUID attemptId,
+      String generation,
+      WorkspaceGenerationDispatchAuthority.Phase phase) {
+    if (!routingEnabled()) {
+      throw new VerificationSandboxException("VERIFICATION_SANDBOX_NOT_READY");
+    }
+    return verificationRouter.open(runId, attemptId, generation, phase);
+  }
+
+  /** Activates execution only after the materializer proved the copied generation. */
+  public void activateVerification(
+      VerificationSandboxAuthority authority, String materializedGeneration) {
+    verificationRouter.activate(authority, materializedGeneration);
+  }
+
+  /** Executes only through the exact live verification capability; never through the RUN route. */
+  public SandboxExecResult executeVerificationShell(
+      VerificationSandboxAuthority authority, String script, Duration timeout) {
+    return executeVerification(
+        authority, List.of("sh", "-c", script == null ? "" : script), timeout);
+  }
+
+  /**
+   * Executes one argument vector through the exact live verification capability.
+   *
+   * <p>This is the universal non-worker BUILD command seam. Callers must not reconstruct scope from
+   * {@code runId} or trust a workspace path: the opaque capability selects the separately admitted
+   * VERIFICATION runtime and its fixed sandbox-owned mount. Missing, stale or wrong-purpose
+   * authority is refused and never falls through to the ordinary RUN route or the host.
+   */
+  public SandboxExecResult executeVerification(
+      VerificationSandboxAuthority authority, List<String> argv, Duration timeout) {
+    return verificationRouter.execute(authority, argv, timeout);
+  }
+
+  /** Releases the physical runtime before its owned disposable workspace is deleted. */
+  public void closeVerification(VerificationSandboxAuthority authority) {
+    verificationRouter.close(authority);
+  }
+
+  /** Immutable physical receipts produced so far by this exact live verification capability. */
+  public List<UUID> verificationCommandReceiptIds(VerificationSandboxAuthority authority) {
+    return verificationRouter.commandReceiptIds(authority);
+  }
+
+  /**
    * Merged stdout/stderr, matching what the host paths returned via {@code redirectErrorStream}.
    */
   public static String combinedOutput(SandboxExecResult result) {
@@ -352,6 +430,21 @@ public class SandboxCommandRoutingService {
     if (active.isPresent()) {
       return active.get();
     }
+    PipelineRun run = requireAdmissibleRun(runId);
+    return lifecycle.create(
+        new RunSandboxLifecycleService.SandboxAdmission(
+            runId,
+            run.getProjectId(),
+            null,
+            run.getCreatedByUserId(),
+            run.getOrgId(),
+            "run:" + runId,
+            "[]",
+            "run-exec:" + runId + ":" + spec.configDigest()),
+        spec);
+  }
+
+  private PipelineRun requireAdmissibleRun(String runId) {
     PipelineRun run =
         pipelineRuns
             .findById(runId)
@@ -364,21 +457,19 @@ public class SandboxCommandRoutingService {
           "run " + runId + " is already terminal; refusing to create a late sandbox");
     }
     if (run.getCreatedByUserId() == null || run.getOrgId() == null) {
-      // A sandbox without an accountable owner is not admissible; the column is NOT NULL for
-      // exactly that reason and guessing a value here would forge the accountability.
       throw new IllegalStateException("run " + runId + " has no owner/org; cannot admit a sandbox");
     }
-    return lifecycle.create(
-        new RunSandboxLifecycleService.SandboxAdmission(
-            runId,
-            run.getProjectId(),
-            null,
-            run.getCreatedByUserId(),
-            run.getOrgId(),
-            "run:" + runId,
-            "[]",
-            "run-exec:" + runId + ":" + spec.configDigest()),
-        spec);
+    return run;
+  }
+
+  public static class VerificationSandboxException extends RuntimeException {
+    public VerificationSandboxException(String message) {
+      super(message);
+    }
+
+    public VerificationSandboxException(String message, Throwable cause) {
+      super(message, cause);
+    }
   }
 
   /**

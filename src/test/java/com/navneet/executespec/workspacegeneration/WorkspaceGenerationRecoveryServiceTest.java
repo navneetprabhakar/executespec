@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -26,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.deployment.GcsWorkspaceStore;
+import com.navneet.executespec.deployment.LocalGenerationCheckpointStore;
 import com.navneet.executespec.harness.TaskStatusPersistenceService;
 import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
@@ -121,11 +123,17 @@ class WorkspaceGenerationRecoveryServiceTest {
             .checkpointKind("GCS")
             .checkpointKey("gs://bucket/candidate.tar.gz")
             .checkpointDigest(digest)
+            .checkpointStorageGeneration("17")
+            .checkpointSizeBytes(Files.size(archive))
+            .checkpointCrc32c("crc")
+            .checkpointEtag("etag")
             .build();
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
     stubAcceptedFrontier(attempts, runs, accepted);
     GcsWorkspaceStore gcs = mock(GcsWorkspaceStore.class);
-    when(gcs.downloadToTemp("gs://bucket/candidate.tar.gz", runId)).thenReturn(archive);
+    when(gcs.downloadArtifactToTempExact(
+            "gs://bucket/candidate.tar.gz", runId, "17", Files.size(archive), "crc", "etag"))
+        .thenReturn(archive);
     AgentProperties properties = new AgentProperties();
     Path currentBase = temp.resolve("new-node/workspace");
     properties.setWorkspace(currentBase.toString());
@@ -142,12 +150,17 @@ class WorkspaceGenerationRecoveryServiceTest {
             new ObjectMapper(),
             mock(PlatformTransactionManager.class),
             mock(WorkspaceGenerationTerminalReconciler.class),
-            gcs,
-            archives,
+            new WorkspaceGenerationCheckpointRestorer(
+                gcs, mock(LocalGenerationCheckpointStore.class), archives),
             runs,
             mock(WorkspaceIgnoredArtifactGuard.class),
             properties,
-            mock(WorkspaceGenerationTelemetry.class));
+            mock(WorkspaceGenerationTelemetry.class),
+            mock(WorkspaceGenerationRecoveryArtifactJanitor.class),
+            new WorkspaceGenerationFilesystemSaga(
+                WorkspaceGenerationTestSteps.store(), transactions),
+            WorkspaceGenerationTestSteps.store(),
+            mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
 
     recovery.ensureAcceptedWorkspaceAvailable(runId);
 
@@ -189,17 +202,28 @@ class WorkspaceGenerationRecoveryServiceTest {
             .checkpointKind("GCS")
             .checkpointKey("gs://bucket/accepted.tar.gz")
             .checkpointDigest(digest)
+            .checkpointStorageGeneration("17")
+            .checkpointSizeBytes(Files.size(archive))
+            .checkpointCrc32c("crc")
+            .checkpointEtag("etag")
             .build();
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
     stubAcceptedFrontier(attempts, runs, accepted);
     GcsWorkspaceStore gcs = mock(GcsWorkspaceStore.class);
-    when(gcs.downloadToTemp("gs://bucket/accepted.tar.gz", runId)).thenReturn(archive);
+    when(gcs.downloadArtifactToTempExact(
+            "gs://bucket/accepted.tar.gz", runId, "17", Files.size(archive), "crc", "etag"))
+        .thenReturn(archive);
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(currentBase.toString());
     RunWorkspaceAuthorityService authorities = mock(RunWorkspaceAuthorityService.class);
     RunWorkspaceAuthorityService.Lease recoveryLease = recoveryLease(runId);
     when(authorities.tryAcquire(runId, RunWorkspaceAuthorityService.Authority.RECOVERY))
         .thenReturn(Optional.of(recoveryLease));
+    WorkspaceGenerationRecoveryArtifactJanitor janitor =
+        mock(WorkspaceGenerationRecoveryArtifactJanitor.class);
+    doThrow(new IllegalStateException("cleanup store unavailable"))
+        .when(janitor)
+        .enqueue(eq(runId), any(Path.class));
     WorkspaceGenerationRecoveryService recovery =
         new WorkspaceGenerationRecoveryService(
             attempts,
@@ -208,12 +232,17 @@ class WorkspaceGenerationRecoveryServiceTest {
             new ObjectMapper(),
             transactionManager(),
             mock(WorkspaceGenerationTerminalReconciler.class),
-            gcs,
-            archives,
+            new WorkspaceGenerationCheckpointRestorer(
+                gcs, mock(LocalGenerationCheckpointStore.class), archives),
             runs,
             mock(WorkspaceIgnoredArtifactGuard.class),
             properties,
-            mock(WorkspaceGenerationTelemetry.class));
+            mock(WorkspaceGenerationTelemetry.class),
+            janitor,
+            new WorkspaceGenerationFilesystemSaga(
+                WorkspaceGenerationTestSteps.store(), transactions),
+            WorkspaceGenerationTestSteps.store(),
+            mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
 
     recovery.ensureAcceptedWorkspaceAvailable(runId);
 
@@ -222,10 +251,7 @@ class WorkspaceGenerationRecoveryServiceTest {
     assertThat(restored.resolve("wrong.txt")).doesNotExist();
     assertThat(transactions.begin(restored).generation())
         .isEqualTo(acceptedCheckpoint.generation());
-    try (var siblings = Files.list(currentBase)) {
-      assertThat(siblings.map(path -> path.getFileName().toString()).toList())
-          .containsExactly(runId);
-    }
+    verify(janitor, org.mockito.Mockito.atLeastOnce()).enqueue(eq(runId), any(Path.class));
     verify(recoveryLease).close();
   }
 
@@ -267,12 +293,19 @@ class WorkspaceGenerationRecoveryServiceTest {
             new ObjectMapper(),
             transactionManager(),
             mock(WorkspaceGenerationTerminalReconciler.class),
-            gcs,
-            mock(WorkspaceGenerationArchiveService.class),
+            new WorkspaceGenerationCheckpointRestorer(
+                gcs,
+                mock(LocalGenerationCheckpointStore.class),
+                mock(WorkspaceGenerationArchiveService.class)),
             runs,
             mock(WorkspaceIgnoredArtifactGuard.class),
             properties,
-            mock(WorkspaceGenerationTelemetry.class));
+            mock(WorkspaceGenerationTelemetry.class),
+            mock(WorkspaceGenerationRecoveryArtifactJanitor.class),
+            new WorkspaceGenerationFilesystemSaga(
+                WorkspaceGenerationTestSteps.store(), transactions),
+            WorkspaceGenerationTestSteps.store(),
+            mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
 
     assertThatThrownBy(() -> recovery.ensureAcceptedWorkspaceAvailable(runId))
         .isInstanceOf(IllegalStateException.class)
@@ -322,7 +355,8 @@ class WorkspaceGenerationRecoveryServiceTest {
                 return invocation.callRealMethod();
               })
           .when(ignored)
-          .cleanAttemptArtifacts(any(), eq(ignoredBaseline.json()), any());
+          .cleanAttemptArtifacts(
+              any(), eq(ignoredBaseline.json()), eq(ignoredBaseline.digest()), any());
 
       Files.writeString(root.resolve("tracked.txt"), "rejected\n");
       Files.writeString(root.resolve("staged.txt"), "rejected\n");
@@ -470,12 +504,19 @@ class WorkspaceGenerationRecoveryServiceTest {
               new ObjectMapper(),
               transactionManager(),
               terminal,
-              mock(GcsWorkspaceStore.class),
-              mock(WorkspaceGenerationArchiveService.class),
+              new WorkspaceGenerationCheckpointRestorer(
+                  mock(GcsWorkspaceStore.class),
+                  mock(LocalGenerationCheckpointStore.class),
+                  mock(WorkspaceGenerationArchiveService.class)),
               mock(PipelineRunRepository.class),
               mock(WorkspaceIgnoredArtifactGuard.class),
               new AgentProperties(),
-              mock(WorkspaceGenerationTelemetry.class));
+              mock(WorkspaceGenerationTelemetry.class),
+              mock(WorkspaceGenerationRecoveryArtifactJanitor.class),
+              new WorkspaceGenerationFilesystemSaga(
+                  WorkspaceGenerationTestSteps.store(), workspaces),
+              WorkspaceGenerationTestSteps.store(),
+              mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
 
       recovery.recover(stale, lease);
 
@@ -543,12 +584,18 @@ class WorkspaceGenerationRecoveryServiceTest {
         new ObjectMapper(),
         transactionManager,
         mock(WorkspaceGenerationTerminalReconciler.class),
-        mock(GcsWorkspaceStore.class),
-        new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
+        new WorkspaceGenerationCheckpointRestorer(
+            mock(GcsWorkspaceStore.class),
+            mock(LocalGenerationCheckpointStore.class),
+            new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions)),
         mock(PipelineRunRepository.class),
         ignored,
         properties,
-        mock(WorkspaceGenerationTelemetry.class));
+        mock(WorkspaceGenerationTelemetry.class),
+        mock(WorkspaceGenerationRecoveryArtifactJanitor.class),
+        new WorkspaceGenerationFilesystemSaga(WorkspaceGenerationTestSteps.store(), transactions),
+        WorkspaceGenerationTestSteps.store(),
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
   }
 
   private WorkspaceGenerationRecoveryService recovery(
@@ -561,12 +608,18 @@ class WorkspaceGenerationRecoveryServiceTest {
         new ObjectMapper(),
         transactionManager(),
         mock(WorkspaceGenerationTerminalReconciler.class),
-        mock(GcsWorkspaceStore.class),
-        new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions),
+        new WorkspaceGenerationCheckpointRestorer(
+            mock(GcsWorkspaceStore.class),
+            mock(LocalGenerationCheckpointStore.class),
+            new WorkspaceGenerationArchiveService(new ObjectMapper(), transactions)),
         runs,
         mock(WorkspaceIgnoredArtifactGuard.class),
         new AgentProperties(),
-        mock(WorkspaceGenerationTelemetry.class));
+        mock(WorkspaceGenerationTelemetry.class),
+        mock(WorkspaceGenerationRecoveryArtifactJanitor.class),
+        new WorkspaceGenerationFilesystemSaga(WorkspaceGenerationTestSteps.store(), transactions),
+        WorkspaceGenerationTestSteps.store(),
+        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class));
   }
 
   private static void stubAcceptedFrontier(
@@ -640,6 +693,7 @@ class WorkspaceGenerationRecoveryServiceTest {
         .beforeGeneration(checkpoint.generation())
         .repositoriesJson(new ObjectMapper().writeValueAsString(repositories))
         .ignoredArtifactBaselineJson(ignoredBaseline)
+        .ignoredArtifactBaselineDigest(DigestUtils.sha256Hex(ignoredBaseline))
         .recoveryLeaseToken(recoveryToken)
         .build();
   }

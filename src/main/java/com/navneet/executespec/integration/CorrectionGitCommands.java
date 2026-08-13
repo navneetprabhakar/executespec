@@ -14,10 +14,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * Bounded Git subprocess execution for {@link CorrectionWorkspaceTransaction}.
  *
- * <p>Every command runs with a hard timeout, merged bounded output capture, and no shell. The
- * temporary-index commands additionally disable repository-controlled hooks ({@code -c
- * core.hooksPath=/dev/null}) and route all index mutation through a caller-supplied {@code
- * GIT_INDEX_FILE} so evidence capture can never stage or reset the live caller-owned index.
+ * <p>Every remaining mutation/recovery command runs with a hard timeout, merged bounded output
+ * capture, and no shell. Workspace-generation identity no longer uses this subprocess adapter; it
+ * is produced by {@link NonExecutingGitTreeWriter} so repository filters/helpers cannot execute
+ * while evidence is calculated.
  */
 final class CorrectionGitCommands {
 
@@ -33,32 +33,6 @@ final class CorrectionGitCommands {
       throw commandFailure(repository, result, String.join(" ", command));
     }
     return result.output();
-  }
-
-  /** Runs a hook-disabled Git command against a temporary index file, never the live index. */
-  String gitIndexed(Path repository, Path indexFile, String... args) {
-    List<String> command = new ArrayList<>(args.length + 3);
-    command.add("git");
-    command.add("-c");
-    command.add("core.hooksPath=/dev/null");
-    command.addAll(List.of(args));
-    CommandResult result =
-        run(
-            repository,
-            Map.of("GIT_INDEX_FILE", indexFile.toAbsolutePath().toString()),
-            command.toArray(String[]::new));
-    if (result.exitCode() != 0) {
-      throw commandFailure(repository, result, String.join(" ", command));
-    }
-    return result.output();
-  }
-
-  boolean hasCommit(Path repository) {
-    return run(repository, Map.of(), "git", "rev-parse", "--verify", "-q", "HEAD").exitCode() == 0;
-  }
-
-  Path gitDir(Path repository) {
-    return Path.of(git(repository, "rev-parse", "--absolute-git-dir").trim());
   }
 
   BinaryCommandResult gitBytes(Path repository, int captureLimit, String... args) {

@@ -53,6 +53,7 @@ class SandboxRunWorkspaceProvisionTest {
   private ScriptedContainerRuntime runtime;
   private RunSandboxRuntimeDispatcher dispatcher;
   private Path runWorkspace;
+  private SandboxProperties properties;
 
   @BeforeEach
   void setUp() throws IOException {
@@ -66,7 +67,9 @@ class SandboxRunWorkspaceProvisionTest {
     runWorkspace =
         Files.createDirectories(agentWorkspaceRoot.toAbsolutePath().normalize().resolve(RUN_ID));
 
-    SandboxProperties properties = new SandboxProperties();
+    properties = new SandboxProperties();
+    properties.setWorkspaceRoot(
+        Files.createDirectories(agentWorkspaceRoot.resolve("sandboxes")).toString());
     Map<String, Object> ownership = Files.readAttributes(runWorkspace, "unix:uid,gid");
     properties.setRuntimeUid(((Number) ownership.get("uid")).intValue());
     properties.setRuntimeGid(((Number) ownership.get("gid")).intValue());
@@ -123,6 +126,38 @@ class SandboxRunWorkspaceProvisionTest {
     assertThat(runtime.execArgvs.get(0)).containsSequence("mvn", "-q", "verify");
   }
 
+  @Test
+  void verificationPurposeBindsOnlyItsSandboxOwnedWorkspaceNeverTheCanonicalRunWorkspace()
+      throws IOException {
+    Path verificationWorkspace =
+        Files.createDirectories(
+            Path.of(properties.getWorkspaceRoot())
+                .resolve(SANDBOX_ID.toString())
+                .resolve("workspace"));
+    SandboxRuntimeSpec spec =
+        new SandboxRuntimeSpec(
+            "img",
+            "/workspace",
+            List.of(
+                new SandboxRuntimeSpec.WritableMount(
+                    verificationWorkspace.toString(), "/workspace")),
+            new SandboxRuntimeSpec.SandboxRuntimeLimits(
+                2.0, 1024L * 1024 * 1024, 128, Duration.ofMinutes(15), 64L * 1024 * 1024),
+            SandboxNetworkPolicy.DENY_ALL,
+            SandboxSecretPolicy.NO_HOST_SECRETS);
+    RunSandbox sandbox =
+        sandbox(SandboxState.REQUESTED, spec.configDigest(), SandboxPurpose.VERIFICATION);
+    RunSandbox.Lease lease = lease();
+    when(store.markReady(eq(lease), anyString(), anyString()))
+        .thenReturn(sandbox(SandboxState.READY, spec.configDigest(), SandboxPurpose.VERIFICATION));
+
+    dispatcher.provision(sandbox, lease, spec);
+
+    String argv = String.join(" ", runtime.issued("run").getFirst());
+    assertThat(argv).contains("--volume " + verificationWorkspace + ":/workspace:rw");
+    assertThat(argv).doesNotContain("--volume " + runWorkspace + ":/workspace:rw");
+  }
+
   private static SandboxRuntimeSpec spec() {
     return new SandboxRuntimeSpec(
         "img",
@@ -140,6 +175,11 @@ class SandboxRunWorkspaceProvisionTest {
   }
 
   private static RunSandbox sandbox(SandboxState state, String configDigest) {
+    return sandbox(state, configDigest, SandboxPurpose.RUN);
+  }
+
+  private static RunSandbox sandbox(
+      SandboxState state, String configDigest, SandboxPurpose purpose) {
     return new RunSandbox(
         SANDBOX_ID,
         RUN_ID,
@@ -149,6 +189,7 @@ class SandboxRunWorkspaceProvisionTest {
         "org-1",
         "abc1234",
         "[]",
+        purpose,
         state,
         SandboxIsolationProfile.CONTAINER_STRICT_V1,
         1,

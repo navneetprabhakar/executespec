@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -121,7 +122,7 @@ class SandboxRoutedBuildAndLintTest {
   }
 
   @Test
-  void anUnavailableSandboxYieldsNoTestCountRatherThanAHostRerun() {
+  void anUnavailableSandboxYieldsTypedEnvironmentEvidenceRatherThanAHostRerun() throws Exception {
     SandboxCommandRoutingService routing = mock(SandboxCommandRoutingService.class);
     when(routing.routingEnabled()).thenReturn(true);
     when(routing.executeShell(anyString(), any(), anyString(), any())).thenReturn(UNAVAILABLE);
@@ -129,10 +130,17 @@ class SandboxRoutedBuildAndLintTest {
     WorkspaceTestRunner runner =
         new WorkspaceTestRunner(
             new TestCommandResolver(), new ShellSandboxPolicy(), null, null, routing);
+    java.nio.file.Files.writeString(
+        workspace.resolve("package.json"), "{\"scripts\":{\"test\":\"vitest run\"}}");
 
-    // No recognized runner in an empty temp dir either way; the contract asserted here is that an
-    // unavailable sandbox is never a reason to fall through to the host shell.
-    assertThat(runner.runTests("run-1", workspace)).isEmpty();
+    WorkspaceTestRunner.ExecutionEvidence evidence =
+        runner.executeTests(new ExecutionContext("run-1", "T1", workspace));
+
+    assertThat(evidence.status())
+        .isEqualTo(WorkspaceTestRunner.ExecutionStatus.TOOLCHAIN_UNAVAILABLE);
+    assertThat(evidence.result()).isNull();
+    assertThat(evidence.executed()).isFalse();
+    verify(routing).executeShell(eq("run-1"), eq(workspace), anyString(), any());
   }
 
   @Test

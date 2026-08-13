@@ -9,18 +9,23 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.api.dto.RunDetail;
 import com.navneet.executespec.workspacegeneration.TaskAcceptanceContract;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttempt;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationAttemptRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationKind;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationState;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationVerificationReceipt;
 import com.navneet.executespec.workspacegeneration.WorkspaceGenerationVerificationReceiptRepository;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 class WorkspaceGenerationEvidenceProjectionTest {
 
@@ -95,8 +100,13 @@ class WorkspaceGenerationEvidenceProjectionTest {
             List.of(),
             true,
             List.of("."),
-            List.of(new TaskAcceptanceContract.AcceptanceCheck("INITIAL_FAILURE", "todo", true)),
-            List.of(new TaskAcceptanceContract.AcceptanceCheck("TESTS_GREEN", "npm test", false)),
+            List.of(
+                new TaskAcceptanceContract.AcceptanceCheck(
+                    "INITIAL_FAILURE", "secret endpoint", true)),
+            List.of(
+                new TaskAcceptanceContract.AcceptanceCheck("TESTS_GREEN", "npm test", false),
+                new TaskAcceptanceContract.AcceptanceCheck(
+                    "VISIBLE_FAILED_TARGET", "todo creates an item", false)),
             "c".repeat(64));
     WorkspaceGenerationAttempt attempt =
         WorkspaceGenerationAttempt.builder()
@@ -114,7 +124,7 @@ class WorkspaceGenerationEvidenceProjectionTest {
             .observedInitialFailureEvidenceJson(
                 "{\"outcome\":\"FAILURE_OBSERVED\",\"code\":\"INITIAL_TESTS_FAILED\","
                     + "\"detail\":\"one test failed\",\"command\":\"npm test\","
-                    + "\"failedTargets\":[\"todo creates an item\"]}")
+                    + "\"failedTargets\":[\"todo creates an item\",\"secret endpoint\"]}")
             .initialFailureObservedAt(Instant.parse("2026-08-10T00:00:05Z"))
             .requestedProvider("openai")
             .requestedModel("gpt-5.4-mini")
@@ -141,6 +151,9 @@ class WorkspaceGenerationEvidenceProjectionTest {
             .testsExecuted(true)
             .testsPassed(2)
             .testsFailed(0)
+            .failureCategory(null)
+            .environmentCode(null)
+            .executionBoundary("DISPOSABLE_EXACT_GENERATION")
             .evidenceJson(
                 "{\"acceptanceCheckResults\":[{\"kind\":\"TESTS_GREEN\","
                     + "\"status\":\"PASSED\",\"detail\":\"tests passed\"}]}")
@@ -162,11 +175,15 @@ class WorkspaceGenerationEvidenceProjectionTest {
     assertThat(evidence.initialFailureEvidence().code()).isEqualTo("INITIAL_TESTS_FAILED");
     assertThat(evidence.initialFailureEvidence().detail())
         .isEqualTo("The frozen test command failed before generation.");
-    assertThat(evidence.initialFailureEvidence().failedTargets()).isEmpty();
+    assertThat(evidence.initialFailureEvidence().failedTargets())
+        .containsExactly("todo creates an item");
     assertThat(evidence.runtimeSurface()).isEqualTo("NODE");
     assertThat(evidence.buildCommand()).isEqualTo("npm run build");
     assertThat(evidence.testCommand()).isEqualTo("npm test");
-    assertThat(evidence.acceptanceChecks()).hasSize(2);
+    assertThat(evidence.acceptanceChecks()).hasSize(3);
+    assertThat(evidence.verificationFailureCategory()).isNull();
+    assertThat(evidence.verificationEnvironmentCode()).isNull();
+    assertThat(evidence.verificationExecutionBoundary()).isEqualTo("DISPOSABLE_EXACT_GENERATION");
     assertThat(evidence.acceptanceChecks())
         .anySatisfy(
             check -> {
@@ -190,5 +207,186 @@ class WorkspaceGenerationEvidenceProjectionTest {
     assertThat(evidence.verificationReceiptId()).isEqualTo(receiptId.toString());
     assertThat(evidence.verificationOutcome()).isEqualTo("PASSED");
     assertThat(evidence.verificationTestsPassed()).isEqualTo(2);
+    assertThat(evidence.failureProjection()).isNull();
+  }
+
+  @Test
+  void projectsEnvironmentFailureCausalityIntoTheRunDetailDto() {
+    UUID attemptId = UUID.randomUUID();
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    WorkspaceGenerationVerificationReceiptRepository receipts =
+        mock(WorkspaceGenerationVerificationReceiptRepository.class);
+    WorkspaceGenerationAttempt attempt =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId("environment-run")
+            .taskId("T1")
+            .taskIndex(0)
+            .attemptNumber(1)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(WorkspaceGenerationState.ROLLED_BACK)
+            .beforeGeneration("a".repeat(64))
+            .candidateGeneration("b".repeat(64))
+            .failureCode("TASK_VERIFICATION_REJECTED")
+            .createdAt(Instant.EPOCH)
+            .build();
+    WorkspaceGenerationVerificationReceipt receipt =
+        WorkspaceGenerationVerificationReceipt.builder()
+            .id(UUID.randomUUID())
+            .attemptId(attemptId)
+            .outcome("UNAVAILABLE")
+            .failureCategory("ENVIRONMENT")
+            .environmentCode("BUILD_POLICY_DENIED")
+            .executionBoundary("DISPOSABLE_EXACT_GENERATION")
+            .build();
+    when(attempts.findTop20ByRunIdOrderByCreatedAtDesc("environment-run"))
+        .thenReturn(List.of(attempt));
+    when(receipts.findFirstByAttemptIdOrderByCreatedAtDesc(attemptId))
+        .thenReturn(Optional.of(receipt));
+
+    RunDetail.WorkspaceGenerationAttemptEvidence evidence =
+        new WorkspaceGenerationEvidenceProjection(attempts, receipts, new ObjectMapper())
+            .forRun("environment-run")
+            .getFirst();
+
+    assertThat(evidence.verificationFailureCategory()).isEqualTo("ENVIRONMENT");
+    assertThat(evidence.verificationEnvironmentCode()).isEqualTo("BUILD_POLICY_DENIED");
+    assertThat(evidence.failureProjection().category())
+        .isEqualTo(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection
+                .Category.VERIFICATION_ENVIRONMENT_UNAVAILABLE);
+    assertThat(evidence.failureProjection().recommendedAction())
+        .isEqualTo(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection
+                .RecommendedAction.RETRY_AFTER_ENVIRONMENT_RECOVERY);
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("customerFailureFixtures")
+  void everyCustomerFailureFixtureIsProjectedIntoTheApiDto(
+      String name,
+      WorkspaceGenerationState state,
+      boolean candidatePresent,
+      String failureCode,
+      String recoveryFailureCode,
+      String receiptOutcome,
+      String receiptCategory,
+      com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection.Category
+          expectedCategory) {
+    UUID attemptId = UUID.randomUUID();
+    String runId = "fixture-" + name;
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    WorkspaceGenerationVerificationReceiptRepository receipts =
+        mock(WorkspaceGenerationVerificationReceiptRepository.class);
+    WorkspaceGenerationAttempt attempt =
+        WorkspaceGenerationAttempt.builder()
+            .id(attemptId)
+            .runId(runId)
+            .taskId("T1")
+            .taskIndex(0)
+            .attemptNumber(1)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(state)
+            .beforeGeneration("a".repeat(64))
+            .candidateGeneration(candidatePresent ? "b".repeat(64) : null)
+            .failureCode(failureCode)
+            .recoveryFailureCode(recoveryFailureCode)
+            .createdAt(Instant.EPOCH)
+            .build();
+    when(attempts.findTop20ByRunIdOrderByCreatedAtDesc(runId)).thenReturn(List.of(attempt));
+    if (receiptOutcome == null) {
+      when(receipts.findFirstByAttemptIdOrderByCreatedAtDesc(attemptId))
+          .thenReturn(Optional.empty());
+    } else {
+      WorkspaceGenerationVerificationReceipt receipt =
+          WorkspaceGenerationVerificationReceipt.builder()
+              .id(UUID.randomUUID())
+              .attemptId(attemptId)
+              .outcome(receiptOutcome)
+              .failureCategory(receiptCategory)
+              .executionBoundary("DISPOSABLE_EXACT_GENERATION")
+              .build();
+      when(receipts.findFirstByAttemptIdOrderByCreatedAtDesc(attemptId))
+          .thenReturn(Optional.of(receipt));
+    }
+
+    RunDetail.WorkspaceGenerationAttemptEvidence evidence =
+        new WorkspaceGenerationEvidenceProjection(attempts, receipts, new ObjectMapper())
+            .forRun(runId)
+            .getFirst();
+
+    assertThat(evidence.failureProjection()).isNotNull();
+    assertThat(evidence.failureProjection().category()).isEqualTo(expectedCategory);
+    assertThat(evidence.failureProjection().candidatePresent()).isEqualTo(candidatePresent);
+    assertThat(evidence.failureProjection().publicationBlocked()).isTrue();
+  }
+
+  private static Stream<Arguments> customerFailureFixtures() {
+    return Stream.of(
+        Arguments.of(
+            "generated-rejected-restored",
+            WorkspaceGenerationState.ROLLED_BACK,
+            true,
+            "TASK_VERIFICATION_REJECTED",
+            null,
+            "FAILED",
+            "PRODUCT",
+            WorkspaceGenerationFailureProjection.Category.ROLLBACK_PROVEN),
+        Arguments.of(
+            "rollback-unproven",
+            WorkspaceGenerationState.RECOVERY_FAILED,
+            true,
+            "TASK_VERIFICATION_REJECTED",
+            "ROLLBACK_PROOF_FAILED",
+            "FAILED",
+            "PRODUCT",
+            WorkspaceGenerationFailureProjection.Category.ROLLBACK_UNPROVEN),
+        Arguments.of(
+            "no-candidate",
+            WorkspaceGenerationState.ADMITTED,
+            false,
+            "PROVIDER_DISPATCH_FAILED",
+            null,
+            null,
+            null,
+            WorkspaceGenerationFailureProjection.Category.NO_CANDIDATE),
+        Arguments.of(
+            "environment-unavailable",
+            WorkspaceGenerationState.ROLLED_BACK,
+            true,
+            "TASK_VERIFICATION_REJECTED",
+            null,
+            "UNAVAILABLE",
+            "ENVIRONMENT",
+            WorkspaceGenerationFailureProjection.Category.VERIFICATION_ENVIRONMENT_UNAVAILABLE),
+        Arguments.of(
+            "checkpoint-unacknowledged",
+            WorkspaceGenerationState.ROLLED_BACK,
+            true,
+            "CHECKPOINT_UPLOAD_UNACKNOWLEDGED",
+            null,
+            null,
+            null,
+            WorkspaceGenerationFailureProjection.Category.CHECKPOINT_FAILED),
+        Arguments.of(
+            "frontier-cas-conflict",
+            WorkspaceGenerationState.VERIFYING,
+            true,
+            "FRONTIER_CAS_CONFLICT",
+            null,
+            null,
+            null,
+            WorkspaceGenerationFailureProjection.Category.FRONTIER_CONFLICT),
+        Arguments.of(
+            "terminal-operation-conflict",
+            WorkspaceGenerationState.VERIFYING,
+            true,
+            "TERMINAL_OPERATION_CONFLICT",
+            null,
+            null,
+            null,
+            WorkspaceGenerationFailureProjection.Category.INTERNAL_PROTOCOL_CONFLICT));
   }
 }

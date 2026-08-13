@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Component;
 
@@ -81,7 +82,7 @@ public class LintProcessRunner {
    * UNAVAILABLE" — and the adapter degrades exactly as it already does for a missing CLI.
    */
   public Result run(Path workingDir, List<String> argv, long timeoutSeconds) {
-    return run(null, workingDir, argv, timeoutSeconds);
+    return run((String) null, workingDir, argv, timeoutSeconds);
   }
 
   /** Run-scoped entry point. {@code runId} is what allows the command to be contained. */
@@ -95,10 +96,35 @@ public class LintProcessRunner {
     return runOnHost(workingDir, argv, timeoutSeconds);
   }
 
+  /**
+   * Exact-generation BUILD entrypoint. Verification authority forbids both ordinary RUN routing and
+   * host fallback, independently of the mutable global routing flag.
+   */
+  public Result run(
+      ExecutionContext context, Path workingDir, List<String> argv, long timeoutSeconds) {
+    if (argv == null || argv.isEmpty()) {
+      return new Result(false, -1, null, null, "refusing to run an empty command");
+    }
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      return new Result(false, -1, null, null, "VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    if (sandboxRouting == null) {
+      return new Result(false, -1, null, null, "verification sandbox routing unavailable");
+    }
+    SandboxExecResult sandboxed =
+        sandboxRouting.executeVerification(
+            context.verificationSandboxAuthority(), argv, Duration.ofSeconds(timeoutSeconds));
+    return sandboxResult(sandboxed, timeoutSeconds);
+  }
+
   private Result runInSandbox(
       String runId, Path workingDir, List<String> argv, long timeoutSeconds) {
     SandboxExecResult sandboxed =
         sandboxRouting.execute(runId, workingDir, argv, Duration.ofSeconds(timeoutSeconds));
+    return sandboxResult(sandboxed, timeoutSeconds);
+  }
+
+  private Result sandboxResult(SandboxExecResult sandboxed, long timeoutSeconds) {
     return switch (sandboxed.status()) {
       case COMPLETED ->
           new Result(true, sandboxed.exitCode(), sandboxed.stdout(), sandboxed.stderr(), null);
