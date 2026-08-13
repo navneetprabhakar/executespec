@@ -67,6 +67,9 @@ backlog timing, dead-letter state, and later resolution; diagnostic failure cann
 isolation loop. V399 persists the exact terminal physical-operation target and an immutable
 completion receipt. The terminal reconciler consumes that durable intent, converges task and
 operation independently, and releases workspace authority only after both receipts are complete.
+The historical terminal-row backfill transactionally suspends the V384 resolved-attempt guard,
+performs the enrichment under the migration table lock, and reinstalls the expanded V399 guard
+before commit; `FlywayMigrationInventoryTest` pins that ordering.
 `WorkspaceGenerationSchemaAttestor` independently verifies migration V399 and all 62 load-bearing
 PostgreSQL indexes/triggers before protocol-v2 admission.
 `BuildEnvironmentPlanResolver` derives deterministic, network-denied reconstruction commands from
