@@ -16,12 +16,16 @@ class DeploymentPointerProtocolTest {
     String publisher = Files.readString(Path.of("scripts/publish-release-pointer.sh"));
 
     int deploy = workflow.indexOf("- name: Deploy JAR to GCE");
+    int graphDiff =
+        workflow.indexOf("- name: Record deployed and candidate control-plane graph diff");
     int reconcile = workflow.indexOf("- name: Reconcile host release candidate");
     int health = workflow.indexOf("- name: Health check");
     int processAttest = workflow.indexOf("- name: Verify running JVM release identity");
     int publish = workflow.indexOf("- name: Publish verified live release pointer");
 
     assertThat(deploy).isGreaterThanOrEqualTo(0);
+    assertThat(graphDiff).isGreaterThanOrEqualTo(0);
+    assertThat(graphDiff).isLessThan(deploy);
     assertThat(reconcile).isGreaterThan(deploy);
     assertThat(health).isGreaterThan(reconcile);
     assertThat(processAttest).isGreaterThan(health);
@@ -39,6 +43,12 @@ class DeploymentPointerProtocolTest {
         .doesNotContain("sudo tr '\\\\0' '\\\\n' < /proc/\\$PID/environ")
         .doesNotContain("Revert CURRENT_SHA on failed deploy")
         .doesNotContain("CURRENT_SHA restored to");
+    assertThat(workflow.substring(graphDiff, deploy))
+        .contains("BASE_SHA=\"$PREVIOUS_CURRENT_SHA\"")
+        .contains("Installed host candidate differs from the verified-live pointer")
+        .doesNotContain(
+            "Host source SHA does not match the immutable deploy pointer captured before"
+                + " qualification");
     assertThat(publisher)
         .contains("x-goog-if-generation-match:$MATCH_GENERATION")
         .contains("refusing stale pointer write");
