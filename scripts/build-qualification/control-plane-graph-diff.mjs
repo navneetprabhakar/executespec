@@ -16,7 +16,10 @@ const AREA_RULES = [
   ],
   ["GENERATION", /\/workspacegeneration\/|generation|acceptance|rollback/i],
   ["AUTHORITY", /authority|lease|fence|receipt|transition|protocol|state/i],
-  ["DEPLOYMENT", /\/deployment\/|\.github\/workflows\/deploy\.yml/],
+  [
+    "DEPLOYMENT",
+    /\/deployment\/|\.github\/workflows\/deploy\.yml|scripts\/build-qualification\//,
+  ],
 ];
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -110,6 +113,14 @@ const semanticGraphHash = (graph) =>
     );
   })();
 
+const controlGraphHash = (nodes, edges) =>
+  hash(
+    JSON.stringify({
+      nodes: [...nodes].sort(),
+      edges: [...edges].sort(),
+    }),
+  );
+
 const sortedDifference = (left, right) =>
   [...left].filter((value) => !right.has(value)).sort();
 
@@ -189,9 +200,17 @@ export function compareControlPlaneGraphs(base, candidate, rawHashes = {}) {
   });
 
   return {
-    schemaVersion: 1,
-    baseGraphSha256: rawHashes.baseGraphSha256 ?? null,
-    candidateGraphSha256: rawHashes.candidateGraphSha256 ?? null,
+    schemaVersion: 2,
+    baseControlGraphSha256: controlGraphHash(
+      baseControlNodes,
+      baseControlEdges,
+    ),
+    candidateControlGraphSha256: controlGraphHash(
+      candidateControlNodes,
+      candidateControlEdges,
+    ),
+    baseFullGraphSha256: rawHashes.baseFullGraphSha256 ?? null,
+    candidateFullGraphSha256: rawHashes.candidateFullGraphSha256 ?? null,
     baseArtifactSha256: rawHashes.baseArtifactSha256 ?? null,
     candidateArtifactSha256: rawHashes.candidateArtifactSha256 ?? null,
     baseExtractionPrefixCount: baseNormalization.prefixCount,
@@ -219,9 +238,9 @@ export function validateReview(diff, review) {
     return { accepted: false, reason: "REVIEW_MISSING" };
   }
   const exact =
-    review.schemaVersion === 1 &&
-    review.baseGraphSha256 === diff.baseGraphSha256 &&
-    review.candidateGraphSha256 === diff.candidateGraphSha256 &&
+    review.schemaVersion === 2 &&
+    review.baseControlGraphSha256 === diff.baseControlGraphSha256 &&
+    review.candidateControlGraphSha256 === diff.candidateControlGraphSha256 &&
     review.diffSha256 === diff.diffSha256;
   if (!exact) return { accepted: false, reason: "REVIEW_IDENTITY_MISMATCH" };
   if (review.decision !== "APPROVED") {
@@ -272,8 +291,8 @@ async function main() {
   const base = JSON.parse(baseRaw);
   const candidate = JSON.parse(candidateRaw);
   const diff = compareControlPlaneGraphs(base, candidate, {
-    baseGraphSha256: semanticGraphHash(base),
-    candidateGraphSha256: semanticGraphHash(candidate),
+    baseFullGraphSha256: semanticGraphHash(base),
+    candidateFullGraphSha256: semanticGraphHash(candidate),
     baseArtifactSha256: hash(baseRaw),
     candidateArtifactSha256: hash(candidateRaw),
   });
@@ -287,9 +306,9 @@ async function main() {
 
   if (diff.reviewRequired && !result.accepted) {
     const template = {
-      schemaVersion: 1,
-      baseGraphSha256: diff.baseGraphSha256,
-      candidateGraphSha256: diff.candidateGraphSha256,
+      schemaVersion: 2,
+      baseControlGraphSha256: diff.baseControlGraphSha256,
+      candidateControlGraphSha256: diff.candidateControlGraphSha256,
       diffSha256: diff.diffSha256,
       decision: "APPROVED",
       reviewer: "REPLACE_WITH_INDEPENDENT_REVIEWER",
