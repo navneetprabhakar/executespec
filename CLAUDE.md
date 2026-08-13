@@ -27,15 +27,17 @@ collection is `edges`; release counting and semantic diffing fail closed if neit
 legacy `links` collection exists, or if both collections conflict. Graphify cross-file edge
 endpoints can embed the absolute extraction root; the diff canonicalizer infers that prefix only
 when the same exact prefix is bound to at least two distinct `source_file` identities, records the
-base/candidate prefix counts, and strips it before semantic hashing. Review schema v2 binds approval
-to deterministic hashes of the filtered control-plane subgraphs plus the exact diff digest; whole-
-graph semantic hashes and raw artifact hashes remain provenance only because Graphify can vary in
-unrelated, non-control output across identical extractions. A different worktree path or unrelated
-Graphify variation alone must therefore produce zero control-plane changes. The deploy gate parses
+base/candidate prefix counts, and strips it before semantic hashing. Diff schema v3 records
+deterministic hashes of the filtered control-plane subgraphs plus the exact diff digest; whole-graph
+semantic hashes and raw artifact hashes remain provenance only because Graphify can vary in
+unrelated, non-control output across identical extractions. The diff is retained as advisory release
+evidence and does not require a manual receipt; malformed graphs and release-identity
+inconsistency still fail deployment. A different worktree path or unrelated Graphify variation
+alone must therefore produce zero control-plane changes. The deploy gate parses
 exactly one canonical source SHA from the atomic host marker, cross-checks the pre-qualification
 immutable deploy pointer, and requires that source and candidate share repository history without
-blocking an explicit rollback to an older commit. The
-local contract is not deployed evidence: R12 remains in progress until the authenticated endpoint
+blocking an explicit rollback to an older commit. The local contract is not deployed evidence: R12
+remains in progress until the authenticated endpoint
 and live container mount are captured from the exact deployed candidate.
 
 **R10 terminal causality projection:** failed BUILD attempts now expose a typed, customer-safe
