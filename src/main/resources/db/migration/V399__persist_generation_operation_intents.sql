@@ -6,6 +6,12 @@ ALTER TABLE workspace_generation_attempt
     ADD COLUMN operation_transition_state VARCHAR(16),
     ADD COLUMN operation_transition_completed_at TIMESTAMPTZ;
 
+-- V384's mature transition guard correctly makes resolved attempts immutable. Suspend that guard
+-- inside this transactional migration before enriching historical terminal rows, then reinstall
+-- the expanded V399 guard below. PostgreSQL holds the ALTER/UPDATE table locks until commit, so no
+-- application writer can observe the table without a transition guard.
+DROP TRIGGER workspace_generation_attempt_transition ON workspace_generation_attempt;
+
 -- Existing terminal rows become explicit receipts. A physical mismatch remains PENDING for the
 -- reconciler; matching terminal operations are acknowledged without inventing a new provider call.
 UPDATE workspace_generation_attempt a
@@ -68,8 +74,6 @@ FOR EACH ROW EXECUTE FUNCTION seed_workspace_generation_operation_intent();
 
 -- The mature transition guard may exempt exactly one receipt mutation at a time. It must not
 -- exempt a combined task+operation rewrite that would bypass both receipt validators.
-DROP TRIGGER workspace_generation_attempt_transition ON workspace_generation_attempt;
-
 CREATE TRIGGER workspace_generation_attempt_transition
 BEFORE UPDATE ON workspace_generation_attempt
 FOR EACH ROW
