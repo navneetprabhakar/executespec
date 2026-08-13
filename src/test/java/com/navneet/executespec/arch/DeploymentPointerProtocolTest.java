@@ -38,7 +38,11 @@ class DeploymentPointerProtocolTest {
         .contains("sudo cat /proc/\\$PID/environ | tr")
         .doesNotContain("sudo tr '\\\\0' '\\\\n' < /proc/\\$PID/environ")
         .doesNotContain("Revert CURRENT_SHA on failed deploy")
-        .doesNotContain("CURRENT_SHA restored to");
+        .doesNotContain("CURRENT_SHA restored to")
+        .doesNotContain("graphify")
+        .doesNotContain("control-plane graph")
+        .doesNotContain("CONTROL_PLANE_GRAPH")
+        .doesNotContain("GRAPHIFY_");
     assertThat(publisher)
         .contains("x-goog-if-generation-match:$MATCH_GENERATION")
         .contains("refusing stale pointer write");
