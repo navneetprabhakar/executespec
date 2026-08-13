@@ -15,6 +15,9 @@
 > guards terminal orphan-archive deletion against accepted or unresolved references. V398 persists
 > poison-record reconciliation counts, backlog timing, dead-letter state, and resolution evidence.
 > V399 persists exact terminal physical-operation intent and its immutable completion receipt.
+> Replacement deployments derive advisory graph evidence from the verified-live `CURRENT_SHA`
+> pointer; an installed-but-unhealthy `RUNNING_RELEASE` candidate is reported as drift but cannot
+> deadlock recovery before the next JAR is installed.
 
 **R12 release attestation (local implementation):**
 `GET /api/admin/control-plane-release-attestation` is the SUPER_ADMIN/no-store, repeatable-read
