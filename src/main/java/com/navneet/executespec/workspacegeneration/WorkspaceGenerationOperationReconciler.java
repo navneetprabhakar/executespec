@@ -41,8 +41,11 @@ public class WorkspaceGenerationOperationReconciler {
             .stream()
             .findFirst()
             .orElseThrow(() -> new IllegalStateException("WORKSPACE_GENERATION_ATTEMPT_NOT_FOUND"));
-    if (binding.operationId() == null) return Outcome.UNBOUND;
     String desired = requireIntent(binding);
+    if (binding.operationId() == null) {
+      completeUnboundReceipt(attemptId, binding, desired);
+      return Outcome.UNBOUND;
+    }
     if ("COMPLETED".equals(binding.transitionState())) {
       if (!desired.equals(binding.operationStatus())) {
         throw new IllegalStateException("WORKSPACE_GENERATION_LLM_RECEIPT_CONFLICT");
@@ -109,6 +112,27 @@ UPDATE llm_execution_operation o
     return Outcome.RECONCILED;
   }
 
+  private void completeUnboundReceipt(UUID attemptId, Binding binding, String desired) {
+    if ("COMPLETED".equals(binding.transitionState())) return;
+    if (!"PENDING".equals(binding.transitionState())) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_LLM_INTENT_STATE_INVALID");
+    }
+    int receipted =
+        jdbc.update(
+            """
+            UPDATE workspace_generation_attempt
+               SET operation_transition_state='COMPLETED',
+                   operation_transition_completed_at=NOW(),updated_at=NOW()
+             WHERE id=? AND llm_operation_id IS NULL
+               AND operation_transition_target=? AND operation_transition_state='PENDING'
+            """,
+            attemptId,
+            desired);
+    if (receipted != 1) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_LLM_RECEIPT_CAS_FAILED");
+    }
+  }
+
   @Transactional
   public void reconcileRun(String runId) {
     List<UUID> ids =
@@ -116,7 +140,8 @@ UPDATE llm_execution_operation o
             """
             SELECT a.id
              FROM workspace_generation_attempt a
-             WHERE a.run_id=? AND a.state IN ('ACCEPTED','ROLLED_BACK')
+             WHERE a.run_id=? AND (a.state IN ('ACCEPTED','ROLLED_BACK')
+                 OR (a.state='RECOVERY_FAILED' AND a.resolved_at IS NOT NULL))
                AND a.operation_transition_state='PENDING'
              ORDER BY a.attempt_number
             """,
@@ -131,13 +156,15 @@ UPDATE llm_execution_operation o
             """
             SELECT COUNT(*)
              FROM workspace_generation_attempt a
-              JOIN llm_execution_operation o ON o.id=a.llm_operation_id
-             WHERE a.run_id=? AND a.state IN ('ACCEPTED','ROLLED_BACK')
+              LEFT JOIN llm_execution_operation o ON o.id=a.llm_operation_id
+             WHERE a.run_id=? AND (a.state IN ('ACCEPTED','ROLLED_BACK')
+                 OR (a.state='RECOVERY_FAILED' AND a.resolved_at IS NOT NULL))
                AND (a.operation_transition_state IS DISTINCT FROM 'COMPLETED'
-                 OR (a.operation_transition_target='SUCCEEDED'
-                     AND o.status IS DISTINCT FROM 'SUCCEEDED')
-                 OR (a.operation_transition_target='FAILED'
-                     AND o.status IS DISTINCT FROM 'FAILED')
+                 OR (a.llm_operation_id IS NOT NULL
+                   AND ((a.operation_transition_target='SUCCEEDED'
+                         AND o.status IS DISTINCT FROM 'SUCCEEDED')
+                     OR (a.operation_transition_target='FAILED'
+                         AND o.status IS DISTINCT FROM 'FAILED')))
                  OR a.operation_transition_target NOT IN ('SUCCEEDED','FAILED')
                  OR a.operation_transition_target IS NULL)
             """,
@@ -163,7 +190,7 @@ UPDATE llm_execution_operation o
     String expected =
         switch (binding.state()) {
           case "ACCEPTED" -> "SUCCEEDED";
-          case "ROLLED_BACK" -> "FAILED";
+          case "ROLLED_BACK", "RECOVERY_FAILED" -> "FAILED";
           default -> throw new IllegalStateException("WORKSPACE_GENERATION_NOT_TERMINAL");
         };
     if (!expected.equals(binding.transitionTarget())) {

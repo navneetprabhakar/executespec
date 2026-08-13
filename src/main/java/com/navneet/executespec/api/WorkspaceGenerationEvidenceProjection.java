@@ -122,8 +122,33 @@ public class WorkspaceGenerationEvidenceProjection {
         attempt.getFailureCode(),
         attempt.getRecoveryFailureCode(),
         attempt.getRecoveryFailureAt(),
+        attempt.getRecoveryAttemptCount(),
+        attempt.getRecoveryNextAttemptAt(),
+        attempt.getRecoverySupportId() == null ? null : attempt.getRecoverySupportId().toString(),
+        attempt.getRecoveryExhaustedAt(),
+        recoveryStatus(attempt),
+        recoveryUserActionRequired(attempt),
         attempt.getCreatedAt(),
         attempt.getResolvedAt());
+  }
+
+  private static String recoveryStatus(WorkspaceGenerationAttempt attempt) {
+    if (attempt.getRecoveryExhaustedAt() != null) return "EXHAUSTED";
+    if (attempt.getState()
+        == com.navneet.executespec.workspacegeneration.WorkspaceGenerationState.RECOVERY_FAILED) {
+      return "RETRY_SCHEDULED";
+    }
+    if (attempt.getState()
+        == com.navneet.executespec.workspacegeneration.WorkspaceGenerationState.ROLLING_BACK) {
+      return "RECOVERING";
+    }
+    return null;
+  }
+
+  private static Boolean recoveryUserActionRequired(WorkspaceGenerationAttempt attempt) {
+    String status = recoveryStatus(attempt);
+    if (status == null) return null;
+    return "EXHAUSTED".equals(status);
   }
 
   private RunDetail.WorkspaceGenerationInitialFailureEvidence initialFailure(

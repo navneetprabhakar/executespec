@@ -105,9 +105,10 @@ class FlywayMigrationInventoryTest {
     // receipt, per-repository rollback, deterministic accepted replacement, and guarded orphan
     // archive cleanup, bringing the total to 383. V398 adds durable poison-record reconciliation
     // diagnostics and dead-letter indexes, bringing the total to 384. V399 persists the exact
-    // physical-operation terminal intent and completion receipt, bringing the total to 385.
-    assertThat(migrations).hasSize(385);
-    assertThat(migrations.getLast().version()).isEqualTo("399");
+    // physical-operation terminal intent and completion receipt, bringing the total to 385. V400
+    // repairs pre-dispatch rollback identity and bounds durable recovery, bringing it to 386.
+    assertThat(migrations).hasSize(386);
+    assertThat(migrations.getLast().version()).isEqualTo("400");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

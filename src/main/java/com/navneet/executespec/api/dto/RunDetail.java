@@ -397,6 +397,12 @@ public class RunDetail {
       String failureCode,
       String recoveryFailureCode,
       Instant recoveryFailureAt,
+      Integer recoveryAttemptCount,
+      Instant recoveryNextAttemptAt,
+      String recoverySupportId,
+      Instant recoveryExhaustedAt,
+      String recoveryStatus,
+      Boolean recoveryUserActionRequired,
       Instant createdAt,
       Instant resolvedAt) {}
 

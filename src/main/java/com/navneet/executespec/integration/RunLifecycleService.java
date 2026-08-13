@@ -148,6 +148,7 @@ public class RunLifecycleService {
         null,
         null,
         null,
+        null,
         null);
   }
 
@@ -203,6 +204,7 @@ public class RunLifecycleService {
   private final CorrectionValidationAdmission correctionValidationAdmission;
   private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
       workspaceGenerationRecovery;
+  private final RunCancellationStore cancellationStore;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -273,9 +275,17 @@ public class RunLifecycleService {
     // Claim cancellation before touching transient state. A reviewer/validation thread may reach
     // terminal at the same time; only one terminal writer is allowed to win, and this narrow query
     // avoids saving a stale PipelineRun entity over concurrent usage/evidence fields.
-    if (runRepo.claimTerminalTransitionWithReasons(
-            runId, "CANCELLED", null, "Cancelled by user from status " + status, Instant.now())
-        != 1) {
+    boolean cancellationClaimed =
+        cancellationStore == null
+            ? runRepo.claimTerminalTransitionWithReasons(
+                    runId,
+                    "CANCELLED",
+                    null,
+                    "Cancelled by user from status " + status,
+                    Instant.now())
+                == 1
+            : cancellationStore.cancel(runId, status, Instant.now());
+    if (!cancellationClaimed) {
       return false;
     }
 
@@ -284,11 +294,26 @@ public class RunLifecycleService {
     // again after all already-recorded calls have settled.
     java.util.concurrent.Future<?> future = controlPort.removeActiveRun(runId);
     if (future != null) future.cancel(true);
+    var generationConvergence =
+        workspaceGenerationRecovery == null
+            ? com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+                .CancellationConvergence.PENDING
+            : workspaceGenerationRecovery.convergeCancelledRun(runId);
     tokenAttributor.reconcileRunTotalsFromLedger(runId);
     RunCostTracker.Snapshot cost = costTracker.snapshot(runId);
     persistenceWriter.raiseUsageFloor(runId, cost);
 
     // SSE makes the UI reflect the already-persisted cancellation immediately.
+    if (generationConvergence
+        == com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+            .CancellationConvergence.PENDING) {
+      broadcaster.emit(
+          runId,
+          RunEvent.log(
+              runId,
+              "cancellation-recovery",
+              "Cancellation is durable; workspace rollback is pending bounded recovery."));
+    }
     emitCancellation(runId);
     return true;
   }

@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
@@ -32,18 +33,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WorkspaceGenerationRecoveryService {
 
+  static final int MAX_RECOVERY_ATTEMPTS = WorkspaceGenerationRecoveryFailurePolicy.MAX_ATTEMPTS;
+
   static final List<WorkspaceGenerationState> UNRESOLVED =
-      List.of(
-          WorkspaceGenerationState.ADMITTED,
-          WorkspaceGenerationState.OPERATION_CLAIMED,
-          WorkspaceGenerationState.AUTHORITY_ACQUIRED,
-          WorkspaceGenerationState.PREPARED,
-          WorkspaceGenerationState.MUTATING,
-          WorkspaceGenerationState.VERIFYING,
-          WorkspaceGenerationState.VERIFIED,
-          WorkspaceGenerationState.CHECKPOINTING,
-          WorkspaceGenerationState.ROLLING_BACK,
-          WorkspaceGenerationState.RECOVERY_FAILED);
+      WorkspaceGenerationRecoveryScope.UNRESOLVED;
 
   private final WorkspaceGenerationAttemptRepository attempts;
   private final CorrectionWorkspaceTransaction workspaces;
@@ -61,13 +54,41 @@ public class WorkspaceGenerationRecoveryService {
   private final WorkspaceGenerationStepStore generationSteps;
   private final com.navneet.executespec.deployment.GcsTaskCheckpointService checkpointService;
 
-  /** Read-only fence used by reviewer, validation and publication admission. */
+  public enum CancellationConvergence {
+    CONVERGED,
+    PENDING
+  }
+
+  /** Starts cancellation convergence immediately; the scheduled scanner owns any deferred retry. */
+  public CancellationConvergence convergeCancelledRun(String runId) {
+    try {
+      recoverRunOrThrow(runId);
+      return CancellationConvergence.CONVERGED;
+    } catch (RuntimeException deferredOrFailed) {
+      // Exhaustion deliberately throws the failed rollback proof after it has durably quarantined
+      // and reconciled the attempt. For a cancelled parent, FAILED cannot overwrite CANCELLED; an
+      // empty unresolved set is therefore converged cancellation, not another scheduled retry.
+      try {
+        if (attempts.findFirstUnresolvedByRunId(runId).isEmpty()) {
+          return CancellationConvergence.CONVERGED;
+        }
+      } catch (RuntimeException convergenceReadFailure) {
+        deferredOrFailed.addSuppressed(convergenceReadFailure);
+      }
+      log.warn(
+          "Cancelled BUILD generation convergence remains pending run={} errorCode={}",
+          runId,
+          bounded(deferredOrFailed.getMessage()));
+      return CancellationConvergence.PENDING;
+    }
+  }
+
   public void assertNoUnresolvedAttempt(String runId) {
     assertNoUnresolvedAttempt(runId, "UNSPECIFIED");
   }
 
   public void assertNoUnresolvedAttempt(String runId, String boundary) {
-    var unresolved = attempts.findFirstByRunIdAndStateInOrderByCreatedAtDesc(runId, UNRESOLVED);
+    var unresolved = attempts.findFirstUnresolvedByRunId(runId);
     if (unresolved.isPresent()) {
       WorkspaceGenerationAttempt attempt = unresolved.get();
       telemetry.control(
@@ -123,7 +144,7 @@ public class WorkspaceGenerationRecoveryService {
 
   public void recoverRunOrThrow(String runId) {
     attempts
-        .findFirstByRunIdAndStateInOrderByCreatedAtDesc(runId, UNRESOLVED)
+        .findFirstUnresolvedByRunId(runId)
         .ifPresent(
             row -> {
               Lease lease =
@@ -194,8 +215,7 @@ public class WorkspaceGenerationRecoveryService {
   }
 
   void recoverAll() {
-    List<WorkspaceGenerationAttempt> unresolved =
-        attempts.findByStateInOrderByCreatedAtAsc(UNRESOLVED);
+    List<WorkspaceGenerationAttempt> unresolved = attempts.findRecoverableAt(Instant.now());
     telemetry.unresolved(unresolved.size());
     for (WorkspaceGenerationAttempt attempt : unresolved) {
       try {
@@ -211,15 +231,16 @@ public class WorkspaceGenerationRecoveryService {
       }
     }
     terminalReconciler.reconcileAllKnownTerminalRuns();
-    telemetry.unresolved(attempts.findByStateInOrderByCreatedAtAsc(UNRESOLVED).size());
+    telemetry.unresolved(Math.toIntExact(attempts.countUnresolved()));
   }
 
   void recover(WorkspaceGenerationAttempt stale, Lease recoveryLease) {
     TransactionTemplate transactions = independentTransactions();
     boolean recoveryClaimed = false;
     boolean rolledBack = false;
+    boolean recoveryLeaseClosed = false;
     try {
-      reconcileInterruptedArchive(stale, recoveryLease);
+      Instant claimAt = Instant.now();
       int claimed =
           transactions.execute(
               ignored ->
@@ -228,10 +249,12 @@ public class WorkspaceGenerationRecoveryService {
                       stale.getState(),
                       WorkspaceGenerationState.ROLLING_BACK,
                       recoveryLease.ownerToken(),
-                      Instant.now()));
+                      UUID.randomUUID(),
+                      claimAt));
       requireCas(claimed, "WORKSPACE_GENERATION_RECOVERY_CLAIM_FAILED");
       recoveryClaimed = true;
       WorkspaceGenerationAttempt row = require(stale.getId());
+      reconcileInterruptedArchive(stale, recoveryLease);
       telemetry.authority("TAKEOVER", Authority.RECOVERY.name());
       telemetry.recovery(
           row.getRunId(),
@@ -315,18 +338,24 @@ public class WorkspaceGenerationRecoveryService {
     } catch (RuntimeException failure) {
       if (recoveryClaimed) {
         try {
-          int failed =
-              transactions.execute(
-                  ignored ->
-                      attempts.markRecoveredFailure(
-                          stale.getId(),
-                          recoveryLease.ownerToken(),
-                          "ROLLBACK_PROOF_FAILED",
-                          bounded(failure.getMessage()),
-                          WorkspaceGenerationState.ROLLING_BACK,
-                          WorkspaceGenerationState.RECOVERY_FAILED,
-                          Instant.now()));
-          requireCas(failed, "WORKSPACE_GENERATION_RECOVERY_FAILURE_CAS_FAILED");
+          var disposition =
+              new WorkspaceGenerationRecoveryFailurePolicy(attempts)
+                  .persist(stale.getId(), recoveryLease.ownerToken(), failure, transactions);
+          if (disposition.exhausted()) {
+            // Terminal reconciliation is database-fenced while any workspace authority exists.
+            // Release RECOVERY only after the exhausted receipt is durable, then publish task,
+            // operation, and parent-run terminal state in that order.
+            recoveryLease.close();
+            recoveryLeaseClosed = true;
+            terminalReconciler.reconcileRun(stale.getRunId());
+            runs.claimTerminalTransitionWithReasons(
+                stale.getRunId(),
+                "FAILED",
+                "WORKSPACE_GENERATION_RECOVERY_EXHAUSTED",
+                "Workspace recovery could not prove rollback; support id "
+                    + require(stale.getId()).getRecoverySupportId(),
+                disposition.failedAt());
+          }
         } catch (RuntimeException persistenceFailure) {
           failure.addSuppressed(persistenceFailure);
         }
@@ -342,7 +371,7 @@ public class WorkspaceGenerationRecoveryService {
               : stale.getState().name());
       throw failure;
     } finally {
-      recoveryLease.close();
+      if (!recoveryLeaseClosed) recoveryLease.close();
     }
     if (rolledBack) {
       terminalReconciler.reconcileRolledBack(require(stale.getId()));

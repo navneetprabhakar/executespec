@@ -76,6 +76,12 @@ export interface WorkspaceGenerationAttemptEvidence {
   failureCode?: string | null;
   recoveryFailureCode?: string | null;
   recoveryFailureAt?: string | null;
+  recoveryAttemptCount?: number | null;
+  recoveryNextAttemptAt?: string | null;
+  recoverySupportId?: string | null;
+  recoveryExhaustedAt?: string | null;
+  recoveryStatus?: 'RECOVERING' | 'RETRY_SCHEDULED' | 'EXHAUSTED' | null;
+  recoveryUserActionRequired?: boolean | null;
   createdAt: string;
   resolvedAt?: string | null;
 }

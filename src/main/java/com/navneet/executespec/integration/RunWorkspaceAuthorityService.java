@@ -179,11 +179,12 @@ public class RunWorkspaceAuthorityService {
                    FROM workspace_generation_attempt a
                    JOIN llm_execution_operation o ON o.id=a.llm_operation_id
                   WHERE a.run_id=w.run_id AND a.workspace_lease_token=w.owner_token
-                    AND a.state IN ('ACCEPTED','ROLLED_BACK')
+                    AND (a.state IN ('ACCEPTED','ROLLED_BACK')
+                      OR (a.state='RECOVERY_FAILED' AND a.resolved_at IS NOT NULL))
                     AND a.task_transition_state='COMPLETED'
                     AND a.operation_transition_state='COMPLETED'
                     AND ((a.state='ACCEPTED' AND o.status='SUCCEEDED')
-                      OR (a.state='ROLLED_BACK' AND o.status='FAILED'))
+                      OR (a.state IN ('ROLLED_BACK','RECOVERY_FAILED') AND o.status='FAILED'))
                )
             """,
             runId);

@@ -74,6 +74,52 @@ class WorkspaceGenerationEvidenceProjectionTest {
   }
 
   @Test
+  void projectsRetryableAndExhaustedRecoveryAsDistinctDurableApiStates() {
+    WorkspaceGenerationAttemptRepository attempts =
+        mock(WorkspaceGenerationAttemptRepository.class);
+    Instant now = Instant.parse("2026-08-13T10:00:00Z");
+    WorkspaceGenerationAttempt retrying =
+        WorkspaceGenerationAttempt.builder()
+            .id(UUID.randomUUID())
+            .runId("recovery-api")
+            .taskId("T1")
+            .taskIndex(0)
+            .attemptNumber(1)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(WorkspaceGenerationState.RECOVERY_FAILED)
+            .recoveryAttemptCount(2)
+            .recoveryNextAttemptAt(now.plusSeconds(60))
+            .recoverySupportId(UUID.randomUUID())
+            .createdAt(now)
+            .build();
+    WorkspaceGenerationAttempt exhausted =
+        WorkspaceGenerationAttempt.builder()
+            .id(UUID.randomUUID())
+            .runId("recovery-api")
+            .taskId("T2")
+            .taskIndex(1)
+            .attemptNumber(1)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(WorkspaceGenerationState.RECOVERY_FAILED)
+            .recoveryAttemptCount(3)
+            .recoverySupportId(UUID.randomUUID())
+            .recoveryExhaustedAt(now)
+            .resolvedAt(now)
+            .createdAt(now)
+            .build();
+    when(attempts.findTop20ByRunIdOrderByCreatedAtDesc("recovery-api"))
+        .thenReturn(List.of(exhausted, retrying));
+
+    List<RunDetail.WorkspaceGenerationAttemptEvidence> evidence =
+        new WorkspaceGenerationEvidenceProjection(attempts).forRun("recovery-api");
+
+    assertThat(evidence.get(0).recoveryStatus()).isEqualTo("EXHAUSTED");
+    assertThat(evidence.get(0).recoveryUserActionRequired()).isTrue();
+    assertThat(evidence.get(1).recoveryStatus()).isEqualTo("RETRY_SCHEDULED");
+    assertThat(evidence.get(1).recoveryUserActionRequired()).isFalse();
+  }
+
+  @Test
   void projectsFrozenContractRouteUsageAndVerificationReceipt() throws Exception {
     UUID attemptId = UUID.randomUUID();
     UUID receiptId = UUID.randomUUID();
