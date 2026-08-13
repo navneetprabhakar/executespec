@@ -306,7 +306,12 @@ export function publicationTrustFacts(
     ['ROLLED_BACK', 'RECOVERY_FAILED'].includes(attempt.state),
   );
   const unresolvedGenerations = generationAttempts.filter(
-    (attempt) => !['ACCEPTED', 'ROLLED_BACK'].includes(attempt.state),
+    (attempt) =>
+      !['ACCEPTED', 'ROLLED_BACK'].includes(attempt.state) &&
+      !(attempt.state === 'RECOVERY_FAILED' && attempt.resolvedAt),
+  );
+  const exhaustedGenerations = generationAttempts.filter(
+    (attempt) => attempt.state === 'RECOVERY_FAILED' && Boolean(attempt.recoveryExhaustedAt),
   );
   const latestGenerationFailure = generationAttempts.find(
     (attempt) => attempt.failureCode || attempt.recoveryFailureCode,
@@ -350,11 +355,11 @@ export function publicationTrustFacts(
           ? 'Not applicable to PATCH'
           : generationAttempts.length === 0
             ? 'No generation-attempt evidence'
-            : `${generationAttempts.length} recent · ${rejectedGenerations.length} rejected · ${unresolvedGenerations.length} unresolved${latestGenerationFailure ? ` · latest ${latestGenerationFailure.recoveryFailureCode || latestGenerationFailure.failureCode} · diff ${latestGenerationFailure.rejectedDiffDigest?.slice(0, 12) || 'unavailable'}` : ''}`,
+            : `${generationAttempts.length} recent · ${rejectedGenerations.length} rejected · ${unresolvedGenerations.length} unresolved${latestGenerationFailure ? ` · latest ${latestGenerationFailure.recoveryFailureCode || latestGenerationFailure.failureCode} · diff ${latestGenerationFailure.rejectedDiffDigest?.slice(0, 12) || 'unavailable'}${latestGenerationFailure.recoverySupportId ? ` · support ${latestGenerationFailure.recoverySupportId}` : ''}` : ''}`,
       kind:
         run.runMode !== 'BUILD'
           ? 'neutral'
-          : unresolvedGenerations.length > 0
+          : unresolvedGenerations.length > 0 || exhaustedGenerations.length > 0
             ? 'bad'
             : rejectedGenerations.length > 0
               ? 'warn'
@@ -479,7 +484,9 @@ export function publicationTrustFacts(
             : latestGeneration.state === 'ROLLED_BACK'
               ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${(latestGeneration.priorAcceptedGeneration || latestGeneration.beforeGeneration || 'unknown').slice(0, 12)}`
               : latestGeneration.state === 'RECOVERY_FAILED'
-                ? `Rollback recovery failed · ${latestGeneration.recoveryFailureCode || 'operator action required'}`
+                ? latestGeneration.recoveryExhaustedAt
+                  ? `Rollback recovery exhausted after ${latestGeneration.recoveryAttemptCount ?? 0} attempts · ${latestGeneration.recoveryFailureCode || 'operator action required'} · support ${latestGeneration.recoverySupportId || 'unavailable'}`
+                  : `Rollback recovery retry ${latestGeneration.recoveryAttemptCount ?? 0}/3 pending${latestGeneration.recoveryNextAttemptAt ? ` at ${latestGeneration.recoveryNextAttemptAt}` : ''} · ${latestGeneration.recoveryFailureCode || 'operator action required'} · support ${latestGeneration.recoverySupportId || 'unavailable'}`
                 : latestGeneration.state === 'ACCEPTED'
                   ? 'Not rolled back; deterministic verification and frontier CAS accepted this generation'
                   : `Rollback not terminal · current state ${latestGeneration.state}`,

@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -60,13 +62,14 @@ public class WorkspaceGenerationStepStore {
       String etag) {}
 
   private final JdbcTemplate jdbc;
-  private final ObjectMapper objectMapper;
+  private final ObjectWriter canonicalWriter;
   private final TransactionTemplate independent;
 
   public WorkspaceGenerationStepStore(
       JdbcTemplate jdbc, ObjectMapper objectMapper, PlatformTransactionManager transactionManager) {
     this.jdbc = jdbc;
-    this.objectMapper = objectMapper;
+    this.canonicalWriter =
+        objectMapper.writer().with(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
     this.independent = new TransactionTemplate(transactionManager);
     this.independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
@@ -310,7 +313,7 @@ public class WorkspaceGenerationStepStore {
 
   private String canonical(Object value) {
     try {
-      return objectMapper.writeValueAsString(value);
+      return canonicalWriter.writeValueAsString(value);
     } catch (Exception failure) {
       throw new IllegalStateException("WORKSPACE_GENERATION_STEP_EVIDENCE_INVALID", failure);
     }

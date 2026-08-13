@@ -236,6 +236,22 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "recovery_started_at")
   private Instant recoveryStartedAt;
 
+  @Column(name = "recovery_attempt_count", nullable = false)
+  @Builder.Default
+  private Integer recoveryAttemptCount = 0;
+
+  @Column(name = "recovery_last_attempt_at")
+  private Instant recoveryLastAttemptAt;
+
+  @Column(name = "recovery_next_attempt_at")
+  private Instant recoveryNextAttemptAt;
+
+  @Column(name = "recovery_support_id")
+  private UUID recoverySupportId;
+
+  @Column(name = "recovery_exhausted_at")
+  private Instant recoveryExhaustedAt;
+
   @Column(name = "task_transition_kind", length = 24)
   private String taskTransitionKind;
 

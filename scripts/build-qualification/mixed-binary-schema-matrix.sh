@@ -2,23 +2,28 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --previous-jar PATH --candidate-jar PATH --output-dir PATH" >&2
+  echo "usage: $0 --previous-jar PATH --candidate-jar PATH --previous-head N --candidate-head N --output-dir PATH" >&2
   exit 64
 }
 
 previous_jar=""
 candidate_jar=""
 output_dir=""
+expected_previous_head=""
+expected_candidate_head=""
 while (($#)); do
   case "$1" in
     --previous-jar) previous_jar="${2:-}"; shift 2 ;;
     --candidate-jar) candidate_jar="${2:-}"; shift 2 ;;
+    --previous-head) expected_previous_head="${2:-}"; shift 2 ;;
+    --candidate-head) expected_candidate_head="${2:-}"; shift 2 ;;
     --output-dir) output_dir="${2:-}"; shift 2 ;;
     *) usage ;;
   esac
 done
 
-[[ -f "$previous_jar" && -f "$candidate_jar" && -n "$output_dir" ]] || usage
+[[ -f "$previous_jar" && -f "$candidate_jar" && -n "$expected_previous_head" \
+  && -n "$expected_candidate_head" && -n "$output_dir" ]] || usage
 mkdir -p "$output_dir"
 
 matrix_id="$$"
@@ -173,12 +178,13 @@ reconciliation_failures_after="$(db_scalar previous_schema "SELECT count(*) FROM
 run_case candidate_on_fresh_candidate BOOTED "$candidate_jar" candidate_schema true 18105
 fresh_candidate_head="$(db_scalar candidate_schema "SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1")"
 
-[[ "$previous_head" == "383" ]] || {
-  echo "expected previous schema head 383, got $previous_head" >&2
+[[ "$previous_head" == "$expected_previous_head" ]] || {
+  echo "expected previous schema head $expected_previous_head, got $previous_head" >&2
   exit 1
 }
-[[ "$candidate_head" == "398" && "$fresh_candidate_head" == "398" ]] || {
-  echo "expected upgraded and fresh candidate schema head 398, got $candidate_head/$fresh_candidate_head" >&2
+[[ "$candidate_head" == "$expected_candidate_head" \
+  && "$fresh_candidate_head" == "$expected_candidate_head" ]] || {
+  echo "expected upgraded and fresh candidate schema head $expected_candidate_head, got $candidate_head/$fresh_candidate_head" >&2
   exit 1
 }
 [[ "$(db_scalar previous_schema "SELECT flag_value FROM feature_flag WHERE flag_key='build.shared-code-change-loop.enabled'")" == "false" ]] || {

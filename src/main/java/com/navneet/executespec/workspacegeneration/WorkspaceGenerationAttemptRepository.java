@@ -16,6 +16,43 @@ public interface WorkspaceGenerationAttemptRepository
   List<WorkspaceGenerationAttempt> findByStateInOrderByCreatedAtAsc(
       List<WorkspaceGenerationState> states);
 
+  @Query(
+      value =
+          """
+          SELECT * FROM workspace_generation_attempt
+           WHERE state IN ('ADMITTED','OPERATION_CLAIMED','AUTHORITY_ACQUIRED','PREPARED',
+                           'MUTATING','VERIFYING','VERIFIED','CHECKPOINTING','ROLLING_BACK')
+              OR (state='RECOVERY_FAILED' AND resolved_at IS NULL
+                  AND (recovery_next_attempt_at IS NULL OR recovery_next_attempt_at <= :now))
+           ORDER BY created_at
+          """,
+      nativeQuery = true)
+  List<WorkspaceGenerationAttempt> findRecoverableAt(@Param("now") Instant now);
+
+  @Query(
+      value =
+          """
+          SELECT * FROM workspace_generation_attempt
+           WHERE run_id=:runId
+             AND (state IN ('ADMITTED','OPERATION_CLAIMED','AUTHORITY_ACQUIRED','PREPARED',
+                            'MUTATING','VERIFYING','VERIFIED','CHECKPOINTING','ROLLING_BACK')
+               OR (state='RECOVERY_FAILED' AND resolved_at IS NULL))
+           ORDER BY created_at DESC LIMIT 1
+          """,
+      nativeQuery = true)
+  Optional<WorkspaceGenerationAttempt> findFirstUnresolvedByRunId(@Param("runId") String runId);
+
+  @Query(
+      value =
+          """
+          SELECT COUNT(*) FROM workspace_generation_attempt
+           WHERE state IN ('ADMITTED','OPERATION_CLAIMED','AUTHORITY_ACQUIRED','PREPARED',
+                           'MUTATING','VERIFYING','VERIFIED','CHECKPOINTING','ROLLING_BACK')
+              OR (state='RECOVERY_FAILED' AND resolved_at IS NULL)
+          """,
+      nativeQuery = true)
+  long countUnresolved();
+
   Optional<WorkspaceGenerationAttempt> findFirstByRunIdAndStateInOrderByCreatedAtDesc(
       String runId, List<WorkspaceGenerationState> states);
 
@@ -231,12 +268,16 @@ public interface WorkspaceGenerationAttemptRepository
   @Query(
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :rollingBack, "
           + "a.recoveryLeaseToken = :recoveryToken, a.recoveryStartedAt = :now, "
+          + "a.recoveryAttemptCount = a.recoveryAttemptCount + 1, "
+          + "a.recoveryLastAttemptAt = :now, a.recoveryNextAttemptAt = NULL, "
+          + "a.recoverySupportId = COALESCE(a.recoverySupportId, :supportId), "
           + "a.updatedAt = :now WHERE a.id = :id AND a.state = :expected")
   int claimRecovery(
       @Param("id") UUID id,
       @Param("expected") WorkspaceGenerationState expected,
       @Param("rollingBack") WorkspaceGenerationState rollingBack,
       @Param("recoveryToken") UUID recoveryToken,
+      @Param("supportId") UUID supportId,
       @Param("now") Instant now);
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -330,16 +371,41 @@ public interface WorkspaceGenerationAttemptRepository
       "UPDATE WorkspaceGenerationAttempt a SET a.state = :recoveryFailed, "
           + "a.recoveryFailureCode = COALESCE(a.recoveryFailureCode, :code), "
           + "a.recoveryFailureReason = COALESCE(a.recoveryFailureReason, :reason), "
-          + "a.recoveryFailureAt = COALESCE(a.recoveryFailureAt, :now), a.updatedAt = :now "
+          + "a.recoveryFailureAt = COALESCE(a.recoveryFailureAt, :now), "
+          + "a.recoveryNextAttemptAt = :nextAttempt, a.updatedAt = :now "
           + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "
-          + "AND a.state = :rollingBack")
-  int markRecoveredFailure(
+          + "AND a.state = :rollingBack AND a.recoveryAttemptCount < :maxAttempts")
+  int markRecoveryRetry(
       @Param("id") UUID id,
       @Param("token") UUID token,
       @Param("code") String code,
       @Param("reason") String reason,
       @Param("rollingBack") WorkspaceGenerationState rollingBack,
       @Param("recoveryFailed") WorkspaceGenerationState recoveryFailed,
+      @Param("maxAttempts") int maxAttempts,
+      @Param("nextAttempt") Instant nextAttempt,
+      @Param("now") Instant now);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "UPDATE WorkspaceGenerationAttempt a SET a.state = :recoveryFailed, "
+          + "a.recoveryFailureCode = COALESCE(a.recoveryFailureCode, :code), "
+          + "a.recoveryFailureReason = COALESCE(a.recoveryFailureReason, :reason), "
+          + "a.recoveryFailureAt = COALESCE(a.recoveryFailureAt, :now), "
+          + "a.recoveryNextAttemptAt = NULL, a.recoveryExhaustedAt = :now, "
+          + "a.resolvedAt = :now, a.taskTransitionKind = 'MARK_PARTIAL', "
+          + "a.taskTransitionState = 'PENDING', a.operationTransitionTarget = 'FAILED', "
+          + "a.operationTransitionState = 'PENDING', a.updatedAt = :now "
+          + "WHERE a.id = :id AND a.recoveryLeaseToken = :token "
+          + "AND a.state = :rollingBack AND a.recoveryAttemptCount >= :maxAttempts")
+  int markRecoveryExhausted(
+      @Param("id") UUID id,
+      @Param("token") UUID token,
+      @Param("code") String code,
+      @Param("reason") String reason,
+      @Param("rollingBack") WorkspaceGenerationState rollingBack,
+      @Param("recoveryFailed") WorkspaceGenerationState recoveryFailed,
+      @Param("maxAttempts") int maxAttempts,
       @Param("now") Instant now);
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)

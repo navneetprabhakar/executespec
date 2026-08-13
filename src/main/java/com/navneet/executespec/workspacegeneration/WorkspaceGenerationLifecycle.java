@@ -40,6 +40,7 @@ public class WorkspaceGenerationLifecycle {
   private static final String SHA_256 = "[0-9a-f]{64}";
 
   private final WorkspaceGenerationAttemptRepository attempts;
+  private final WorkspaceGenerationAdmissionStore admissionStore;
   private final WorkspaceGenerationVerificationReceiptRepository receipts;
   private final PipelineRunRepository runs;
   private final PipelineRunMutationRepository runMutations;
@@ -80,17 +81,8 @@ public class WorkspaceGenerationLifecycle {
     String taskId = admitted.getTaskId();
     Lease lease = workspaceAuthorities.acquire(runId, Authority.BUILD_GENERATION);
     try {
-      requireCas(
-          attempts.acquireAuthority(
-              attemptId,
-              lease.ownerToken(),
-              llmOperationId,
-              llmAttemptNumber,
-              llmLeaseToken,
-              WorkspaceGenerationState.OPERATION_CLAIMED,
-              WorkspaceGenerationState.AUTHORITY_ACQUIRED,
-              Instant.now()),
-          "WORKSPACE_GENERATION_AUTHORITY_ACQUIRE_CAS_FAILED");
+      admissionStore.acquireAuthority(
+          attemptId, lease.ownerToken(), llmOperationId, llmAttemptNumber, llmLeaseToken);
       Path canonicalRoot = WorkspaceGenerationEvidenceCodec.realPath(workspaceRoot);
       if (!canonicalRoot.equals(
           WorkspaceGenerationEvidenceCodec.realPath(Path.of(admitted.getWorkspaceRoot())))) {

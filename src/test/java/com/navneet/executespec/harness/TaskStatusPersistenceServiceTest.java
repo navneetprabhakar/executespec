@@ -154,14 +154,24 @@ class TaskStatusPersistenceServiceTest {
     PipelineRunRepository runs = mock(PipelineRunRepository.class);
     String runId = "12345678-aaaa-bbbb-cccc-123456789012";
     PipelineRun cancelled = PipelineRun.builder().runId(runId).status("CANCELLED").build();
+    AgentTask task =
+        AgentTask.builder()
+            .taskId("12345678_T1")
+            .runId(runId)
+            .status("WORKING")
+            .startedAt(java.time.Instant.now().minusSeconds(5))
+            .build();
     when(runs.findByIdForTaskContinuation(runId)).thenReturn(Optional.of(cancelled));
+    when(tasks.findByIdForUpdate("12345678_T1")).thenReturn(Optional.of(task));
     TaskStatusPersistenceService service = new TaskStatusPersistenceService(tasks, null, runs);
 
     TaskStatusPersistenceService.Result result =
         service.publishWorkspaceGenerationTransition(runId, "T1", "PENDING", "PARTIAL", 0, null);
 
     assertEquals(TaskStatusPersistenceService.Result.CANCELLED_WINS, result);
-    org.mockito.Mockito.verifyNoInteractions(tasks);
+    assertEquals("CANCELLED", task.getStatus());
+    org.junit.jupiter.api.Assertions.assertNotNull(task.getCompletedAt());
+    verify(tasks).saveAndFlush(task);
   }
 
   @Test

@@ -25,6 +25,20 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
   List<AgentTask> findByStatus(String status);
 
   /**
+   * Converges every nonterminal task after the parent run has durably won cancellation. The bulk
+   * CAS is deliberately independent of worker callbacks: a crashed worker or a recovery pass that
+   * finishes immediately before cancellation must not leave PENDING/LOCKED/WORKING rows beneath a
+   * CANCELLED parent. Terminal task evidence is immutable and therefore excluded.
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @org.springframework.transaction.annotation.Transactional
+  @Query(
+      "UPDATE AgentTask t SET t.status = 'CANCELLED', "
+          + "t.completedAt = COALESCE(t.completedAt, :now), t.lastActivityAt = :now "
+          + "WHERE t.runId = :runId AND t.status IN ('PENDING', 'LOCKED', 'WORKING')")
+  int cancelNonterminalForRun(@Param("runId") String runId, @Param("now") Instant now);
+
+  /**
    * 2026-05-04 — used by {@link
    * com.navneet.executespec.harness.SequentialExecutor#resolveResumeAction} to inspect a specific
    * task's persisted status during boot-time replay. Returns Optional because resume may run for

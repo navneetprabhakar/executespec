@@ -120,6 +120,7 @@ class RunLifecycleServiceContinuationApprovalTest {
       workspaceGenerationRecovery =
           mock(
               com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService.class);
+  private final RunCancellationStore cancellationStore = mock(RunCancellationStore.class);
   private RunLifecycleService service;
 
   @BeforeEach
@@ -127,6 +128,10 @@ class RunLifecycleServiceContinuationApprovalTest {
     agentProps.setWorkspace(tempDir.toString());
     when(pool.executor()).thenReturn(executorService);
     when(costTracker.snapshot(any())).thenReturn(new RunCostTracker.Snapshot(0, 0, 0, 0, 0.0, 0));
+    when(workspaceGenerationRecovery.convergeCancelledRun(any()))
+        .thenReturn(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+                .CancellationConvergence.CONVERGED);
     service =
         new RunLifecycleService(
             runRepo,
@@ -163,7 +168,8 @@ class RunLifecycleServiceContinuationApprovalTest {
             correctionWorkspaceTransaction,
             approvedRouteAdmission,
             correctionValidationAdmission,
-            workspaceGenerationRecovery);
+            workspaceGenerationRecovery,
+            cancellationStore);
     LlmExecutionReference reference =
         new LlmExecutionReference(
             "llmctx-continuation-test", LlmExecutionScope.customer("test-org"));
@@ -278,15 +284,18 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(runRepo.claimTerminalTransitionWithReasons(
             eq(RUN_ID), eq("CANCELLED"), isNull(), any(), any()))
         .thenReturn(1);
+    when(cancellationStore.cancel(eq(RUN_ID), eq("WORKING"), any())).thenReturn(true);
     when(costTracker.snapshot(RUN_ID))
         .thenReturn(new RunCostTracker.Snapshot(409_127, 14_706, 0, 372_736, 0.010256, 27));
 
     assertThat(service.cancel(RUN_ID)).isTrue();
 
+    verify(cancellationStore).cancel(eq(RUN_ID), eq("WORKING"), any());
     verify(tokenAttributor).reconcileRunTotalsFromLedger(RUN_ID);
     verify(persistenceWriter)
         .raiseUsageFloor(
             RUN_ID, new RunCostTracker.Snapshot(409_127, 14_706, 0, 372_736, 0.010256, 27));
+    verify(workspaceGenerationRecovery).convergeCancelledRun(RUN_ID);
     verify(runRepo, never()).save(run);
   }
 
@@ -297,9 +306,11 @@ class RunLifecycleServiceContinuationApprovalTest {
     when(runRepo.claimTerminalTransitionWithReasons(
             eq(RUN_ID), eq("CANCELLED"), isNull(), any(), any()))
         .thenReturn(0);
+    when(cancellationStore.cancel(eq(RUN_ID), eq("WORKING"), any())).thenReturn(false);
 
     assertThat(service.cancel(RUN_ID)).isFalse();
 
+    verify(cancellationStore).cancel(eq(RUN_ID), eq("WORKING"), any());
     verify(controlPort, never()).removeActiveRun(RUN_ID);
     verify(broadcaster, never()).complete(RUN_ID);
   }

@@ -70,7 +70,7 @@ operation independently, and releases workspace authority only after both receip
 The historical terminal-row backfill transactionally suspends the V384 resolved-attempt guard,
 performs the enrichment under the migration table lock, and reinstalls the expanded V399 guard
 before commit; `FlywayMigrationInventoryTest` pins that ordering.
-`WorkspaceGenerationSchemaAttestor` independently verifies migration V399 and all 62 load-bearing
+`WorkspaceGenerationSchemaAttestor` independently verifies migration V400 and all 62 load-bearing
 PostgreSQL indexes/triggers before protocol-v2 admission.
 `BuildEnvironmentPlanResolver` derives deterministic, network-denied reconstruction commands from
 accepted Node, Python, Maven, Gradle, Go, and Rust manifests plus a digest-pinned runtime image.
@@ -116,6 +116,11 @@ freezes effective route, iteration/tool/model-call counts, token categories, and
 verification. This keeps usage-evidence persistence separate from the lifecycle state machine.
 `WorkspaceGenerationRollbackService` owns the evidence-first database/filesystem/database rejection
 sequence so the lifecycle state machine stays below the new-class size ceiling.
+`WorkspaceGenerationRecoveryFailurePolicy` owns the three-attempt 30/60/120-second retry schedule
+and the durable exhausted-quarantine receipt, keeping recovery orchestration separate from failure
+adjudication without weakening its compare-and-set fence.
+`WorkspaceGenerationRecoveryScope` is the single state-set definition used by recovery scans and
+their exhaustive crash-state tests.
 
 ## Invariants
 
@@ -220,20 +225,31 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   `V390__durable_publication_preparation.sql` adds the accepted-frontier preparation,
   per-repository exact commit receipts, repository-provision intents, exact push attempts,
   immutable transition/delete guards, recovery indexes, and digest self-checks.
-- **V391–V399 forward reliability controls:** V391 recovers stale sandbox command admission, V392
+- **V391–V400 forward reliability controls:** V391 recovers stale sandbox command admission, V392
   fences publication attempt recovery, V393 queues recovery-artifact cleanup, V394 binds checkpoint
   storage identity, V395 types verification causality, and
   `V396__persist_build_environment_receipts.sql` makes environment cleanup/materialization evidence
   append-only state-transition authority. V397 journals durable intent/APPLIED/VERIFIED receipts
   around archive writes, per-repository rollback, and accepted replacement; deterministic physical
-  identities make takeover replay safe, and guarded orphan cleanup rechecks accepted/unresolved
-  references before exact-generation deletion. The replacement-JVM kill matrix terminates after
-  each Git mutation, directory move, and archive-storage-before-receipt window. V398 persists
+  identities make takeover replay safe. Step evidence is serialized with recursively ordered map
+  keys before hashing, so the same logical intent is byte-stable across replacement JVMs. Guarded
+  orphan cleanup rechecks accepted/unresolved references before exact-generation deletion. The
+  replacement-JVM kill matrix terminates after each Git mutation, directory move, and
+  archive-storage-before-receipt window. V398 persists
   poison terminal-reconciliation diagnostics and dead-letter state without granting those rows any
   generation or terminal authority. V399 persists exact terminal operation intent and its
   immutable receipt, blocks later attempt admission until that receipt completes, and permits
-  authority release only after task and operation convergence. The terminal kill matrix halts a
-  real JVM at eight boundaries twice each and replays every case twice from replacement JVMs.
+  authority release only after task and operation convergence. V400 permits pre-dispatch rollback
+  to preserve an already-claimed immutable LLM identity, moves authority acquisition into the
+  externally invoked `WorkspaceGenerationAdmissionStore` transaction, and persists bounded
+  recovery count/backoff/support identity. The third failed recovery becomes resolved
+  `RECOVERY_FAILED` quarantine only after durable task/operation failure intents exist; RECOVERY
+  authority is released before parent-run terminal publication. An ADMITTED attempt that has no
+  physical LLM operation completes its durable operation-transition receipt directly instead of
+  leaving a permanently pending unbound receipt. `RunCancellationStore` atomically commits normal
+  parent cancellation with every PENDING/LOCKED/WORKING task cancellation; executor interruption
+  and generation rollback occur only after that transaction. The terminal kill matrix halts a real
+  JVM at eight boundaries twice each and replays every case twice from replacement JVMs.
 - Entities: `WorkspaceGenerationAttempt`, `WorkspaceGenerationVerificationReceipt`.
 - Evidence rows are immutable while the parent run exists; whole-run retention deletion may
   cascade. Original `failure_*` and `rejected_diff_*` evidence freezes independently from the first
@@ -254,6 +270,13 @@ sequence so the lifecycle state machine stays below the new-class size ceiling.
   claim, exact next-checkpoint admission, receipt binding and retention.
 - `WorkspaceGenerationTaskTransitionPostgresTest`: real-PostgreSQL task/run locking, cancellation
   precedence, rollback publication, stale-transition rejection, and terminal convergence.
+- `WorkspaceGenerationPreDispatchPostgresTest`: real Spring/PostgreSQL proof for the missing
+  transaction exception, normal PREPARED admission, ADMITTED/OPERATION_CLAIMED/AUTHORITY_ACQUIRED
+  replacement recovery, every pre-dispatch cancellation state, recovery-first and cancel-first
+  orderings, cancellation from MUTATING/VERIFYING/VERIFIED/CHECKPOINTING plus stale ROLLING_BACK
+  and retryable RECOVERY_FAILED (including future-backoff bypass), provider-dispatch cancellation
+  fencing, exact workspace restoration with CANCELLED_WINS, atomic parent/task cancellation
+  rollback on a forced task-write failure, and bounded quarantine.
 - `WorkspaceGenerationTerminalReconcilerTest`: accepted/rolled-back task and operation convergence.
 - `WorkspaceGenerationProtocolReferenceModelTest`: exhaustive reachable-state exploration for the
   coupled run/task/generation/operation/authority/intent/checkpoint/publication invariants.

@@ -43,7 +43,7 @@ class WorkspaceGenerationProtocolPostgresTest {
     WorkspaceGenerationSchemaAttestor.Attestation schema =
         new WorkspaceGenerationSchemaAttestor(jdbc).attest();
     assertThat(schema.ready()).isTrue();
-    assertThat(schema.latestSuccessfulMigration()).isEqualTo("399");
+    assertThat(schema.latestSuccessfulMigration()).isEqualTo("400");
     assertThat(schema.artifacts())
         .hasSize(62)
         .allMatch(
@@ -58,7 +58,7 @@ class WorkspaceGenerationProtocolPostgresTest {
         .allMatch(ControlPlaneSchemaEvidenceExporter.AppliedMigration::success)
         .last()
         .extracting(ControlPlaneSchemaEvidenceExporter.AppliedMigration::version)
-        .isEqualTo("399");
+        .isEqualTo("400");
     assertThat(releaseSchema.definitions())
         .hasSize(62)
         .allMatch(

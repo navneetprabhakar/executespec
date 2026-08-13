@@ -420,6 +420,7 @@ class WorkspaceGenerationLifecycleBoundaryTest {
             transactionManager);
     return new WorkspaceGenerationLifecycle(
         attempts,
+        new WorkspaceGenerationAdmissionStore(attempts),
         mock(WorkspaceGenerationVerificationReceiptRepository.class),
         mock(PipelineRunRepository.class),
         runMutations,
