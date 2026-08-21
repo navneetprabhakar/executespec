@@ -3,6 +3,8 @@ package com.navneet.executespec.agent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -16,6 +18,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.context.ContextStore;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.DeterministicFailureDelta;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -49,7 +52,11 @@ class WorkerAgentAutoVerifyTest {
   }
 
   private record Fixture(
-      WorkerAgent worker, WorkspaceTestRunner runner, Tool write, ToolRegistry registry) {}
+      WorkerAgent worker,
+      WorkspaceTestRunner runner,
+      Tool write,
+      ToolRegistry registry,
+      Metrics metrics) {}
 
   private static TestExecutionSummary summary(int total, int passed, int failed, int errors) {
     return TestExecutionSummary.builder()
@@ -112,10 +119,15 @@ class WorkerAgentAutoVerifyTest {
             null,
             null,
             runner);
-    return new Fixture(worker, runner, write, registry);
+    return new Fixture(worker, runner, write, registry, metrics);
   }
 
   private static WorkerTaskRequest request() {
+    return request(null);
+  }
+
+  private static WorkerTaskRequest request(
+      DeterministicFailureDelta.Snapshot initialFailureSnapshot) {
     return WorkerTaskRequest.builder()
         .provider("deepseek")
         .model("deepseek-v4-flash")
@@ -128,6 +140,7 @@ class WorkerAgentAutoVerifyTest {
         .stagnationWarnAfter(20)
         .stagnationForceAfter(20)
         .autoVerify(true)
+        .initialFailureSnapshot(initialFailureSnapshot)
         .build();
   }
 
@@ -135,14 +148,21 @@ class WorkerAgentAutoVerifyTest {
   void runs_suite_on_completion_intent_after_write_and_refuses_red_result() {
     Fixture f = fixture(summary(5, 3, 2, 0), 20);
 
-    WorkerResult result = f.worker.run(request());
+    WorkerResult result =
+        f.worker.run(
+            request(
+                DeterministicFailureDelta.snapshot(
+                    2, 3, 0, 5, "FAILED test_contract — AssertionError")));
 
     assertThat(result.outcome()).isEqualTo(WorkerResult.Outcome.COMPLETED);
     assertThat(result.iterations()).isEqualTo(4);
-    assertThat(result.toolCallLog()).anyMatch(line -> line.contains("AUTO_VERIFY"));
+    assertThat(result.toolCallLog()).anyMatch(line -> line.contains("AUTO_VERIFY_IMPROVED"));
     assertThat(result.toolCallLog())
         .anyMatch(line -> line.contains("failedTests: [FAILED test_contract"));
     verify(f.runner, org.mockito.Mockito.times(2)).runTestsDetailed(anyString(), any());
+    verify(f.metrics, atLeastOnce())
+        .recordWorkspaceGenerationVerification(
+            anyString(), eq("ITERATION"), eq("NARROWEST_AVAILABLE"), any());
   }
 
   @Test

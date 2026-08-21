@@ -10,6 +10,8 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 
 /** Bounded, workspace-local metadata for an actual provider/model continuation handoff. */
 final class ProviderHandoffDossier {
@@ -22,6 +24,7 @@ final class ProviderHandoffDossier {
   private ProviderHandoffDossier() {}
 
   static void write(
+      ExecutionContext context,
       Path workspace,
       String runId,
       String taskId,
@@ -33,6 +36,7 @@ final class ProviderHandoffDossier {
       String reason,
       String failure) {
     if (workspace == null || runId == null || taskId == null) return;
+    context.assertWorkspaceGenerationDispatch(WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
     Path target = workspace.resolve(".agent-context").resolve(FILE_NAME);
     Path temp = target.resolveSibling(FILE_NAME + ".tmp");
     try {
@@ -104,6 +108,33 @@ final class ProviderHandoffDossier {
         + node.path("reason").asText("not recorded")
         + ". Do not repeat the failed approach blindly; inspect the existing workspace and verify"
         + " the stated failure before editing.";
+  }
+
+  static String writeAndReadRecoveryNote(
+      ExecutionContext context,
+      Path workspace,
+      String runId,
+      String taskId,
+      String fromProvider,
+      String fromModel,
+      String toProvider,
+      String toModel,
+      String decision,
+      String reason,
+      String failure) {
+    write(
+        context,
+        workspace,
+        runId,
+        taskId,
+        fromProvider,
+        fromModel,
+        toProvider,
+        toModel,
+        decision,
+        reason,
+        failure);
+    return read(workspace, runId, taskId).map(ProviderHandoffDossier::recoveryNote).orElse(null);
   }
 
   private static String cap(String value) {

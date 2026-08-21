@@ -7,6 +7,7 @@ import java.util.concurrent.Future;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 
@@ -16,12 +17,12 @@ final class WorkerCorrectionToolFence {
   private WorkerCorrectionToolFence() {}
 
   static Future<?> submitCurrent(ExecutorService executor, Runnable dispatch) {
-    RunWorkspaceAuthorityService.Lease lease =
+    RunWorkspaceAuthorityService.Lease correctionLease =
         RunWorkspaceAuthorityService.currentCorrectionToolLease();
     return executor.submit(
         () ->
             RunWorkspaceAuthorityService.withCorrectionToolLease(
-                lease,
+                correctionLease,
                 () -> {
                   dispatch.run();
                   return null;
@@ -43,8 +44,17 @@ final class WorkerCorrectionToolFence {
     RunWorkspaceAuthorityService.assertCorrectionToolDispatch(context.runId());
   }
 
+  static void assertAttemptAdmission(WorkerTaskRequest request) {
+    if (request.changeMode() == CodeChangeMode.BUILD) {
+      request
+          .context()
+          .assertWorkspaceGenerationDispatch(WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
+    }
+  }
+
   static String guardDispatch(
       WorkerTaskRequest request, RunCostTracker costTracker, WorkerDispatchMode mode) {
+    assertAttemptAdmission(request);
     assertDispatch(request.context());
     return WorkerLiveBudgetGuard.guard(
         request, costTracker, request.workerStartedAtEpochMs(), mode);

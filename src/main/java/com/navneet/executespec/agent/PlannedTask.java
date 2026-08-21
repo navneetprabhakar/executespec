@@ -27,7 +27,7 @@ import lombok.Builder;
  * @param hardConstraints per-task constraints the worker must satisfy (e.g. "Do NOT use JPA — use
  *     JDBC directly"). Framed as project-controlled worker evidence rather than system authority.
  */
-@Builder
+@Builder(toBuilder = true)
 public record PlannedTask(
     String id,
     String title,
@@ -43,6 +43,11 @@ public record PlannedTask(
      * requirement. Empty on legacy plans and when the v3 flag is off.
      */
     List<String> meetsRequirements,
+    /**
+     * Exact customer- or platform-authoritative output paths. Unlike {@link #touchesFiles}, these
+     * paths participate in deterministic acceptance.
+     */
+    List<String> requiredArtifacts,
     /**
      * v2.6.2-track slice 3 — LEAF (terminal task, executor runs as-is) vs EPIC (expand into
      * subtasks via {@code TaskExpanderAgent} recursion, depth ≤ 2). Default LEAF for
@@ -63,6 +68,7 @@ public record PlannedTask(
     if (dependsOn == null) dependsOn = List.of();
     if (hardConstraints == null) hardConstraints = List.of();
     if (meetsRequirements == null) meetsRequirements = List.of();
+    if (requiredArtifacts == null) requiredArtifacts = List.of();
     if (taskType == null) taskType = TaskType.LEAF;
   }
 

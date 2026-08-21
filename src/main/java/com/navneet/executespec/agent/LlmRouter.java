@@ -605,17 +605,46 @@ public class LlmRouter {
   @Value("${spring.ai.deepseek.base-url:https://api.deepseek.com}")
   private String deepSeekBaseUrl;
 
-  /** Native DeepSeek thinking/tool responses can take longer than other OpenAI-wire providers. */
-  @Value("${spring.ai.deepseek.read-timeout-seconds:300}")
-  private int deepSeekReadTimeoutSeconds = 300;
+  /**
+   * Per-turn transport read window for EVERY provider (the single most important slow-model knob —
+   * a non-streaming completion that takes longer than this is cut off mid-generation). Default 660s
+   * (~11 min) fits a ~10-minute reasoning turn with a small margin. A per-provider override below
+   * (>0) wins; otherwise every provider inherits this value. Raising it is a pure config change.
+   * (2026-08-08 slow-model pass — previously openai/openrouter were hardcoded at 120s and anthropic
+   * at 300s with no config escape, so a slow model was severed on every provider.)
+   */
+  @Value("${executespec.llm.model-response-timeout-seconds:660}")
+  private int modelResponseTimeoutSeconds = 660;
 
   /**
-   * Fireworks long agentic tool turns (500K-token GLM contexts) routinely exceed the generic 120s
-   * OpenAI-wire window; the provider keeps generating and bills the discarded completion while the
-   * client cancels at exactly 120s. Same window as native DeepSeek.
+   * Per-turn transport read window for INTERACTIVE (human-facing chat) turns only — a person is
+   * watching, so this stays well below the slow-model pipeline window so a wedged provider fails
+   * fast instead of hanging the user for minutes. Default 180s (3 min).
    */
-  @Value("${spring.ai.fireworks.read-timeout-seconds:300}")
-  private int fireworksReadTimeoutSeconds = 300;
+  @Value("${executespec.llm.interactive-model-response-timeout-seconds:180}")
+  private int interactiveModelResponseTimeoutSeconds = 180;
+
+  /** Per-provider window override; -1 (default) inherits {@link #modelResponseTimeoutSeconds}. */
+  @Value("${spring.ai.anthropic.read-timeout-seconds:-1}")
+  private int anthropicReadTimeoutSeconds = -1;
+
+  @Value("${spring.ai.openai.read-timeout-seconds:-1}")
+  private int openAiReadTimeoutSeconds = -1;
+
+  @Value("${spring.ai.openrouter.read-timeout-seconds:-1}")
+  private int openRouterReadTimeoutSeconds = -1;
+
+  /** Native DeepSeek thinking/tool responses can take longer than other OpenAI-wire providers. */
+  @Value("${spring.ai.deepseek.read-timeout-seconds:-1}")
+  private int deepSeekReadTimeoutSeconds = -1;
+
+  /**
+   * Fireworks long agentic tool turns (500K-token GLM contexts) routinely exceed the generic
+   * OpenAI-wire window; the provider keeps generating and bills the discarded completion while the
+   * client cancels at the deadline.
+   */
+  @Value("${spring.ai.fireworks.read-timeout-seconds:-1}")
+  private int fireworksReadTimeoutSeconds = -1;
 
   /**
    * Gemini thinking-model worker calls routinely exceed the client's static 60s default (calibrated
@@ -623,8 +652,8 @@ public class LlmRouter {
    * replaces the WorkerAgent-side global read-timeout pin: the router resolves it for EVERY Gemini
    * call, so callers no longer need a provider-blind override to avoid the 60s default.
    */
-  @Value("${spring.ai.gemini.read-timeout-seconds:300}")
-  private int geminiReadTimeoutSeconds = 300;
+  @Value("${spring.ai.gemini.read-timeout-seconds:-1}")
+  private int geminiReadTimeoutSeconds = -1;
 
   // 2026-06-09 — Fireworks AI: OpenAI-wire-compatible US-hosted fast inference for the Chinese open
   // models. Same plumbing as DeepSeek (per-call base-URL). System fallback key; org BYOK via
@@ -646,7 +675,7 @@ public class LlmRouter {
    * constant is the PIPELINE (default) ceiling; interactive chat turns use the smaller {@link
    * #INTERACTIVE_TRANSIENT_RETRY_MAX_ATTEMPTS}.
    */
-  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 6;
+  public static final int TRANSIENT_RETRY_MAX_ATTEMPTS = 8;
 
   /**
    * Retry ceiling for human-facing chat turns ({@link LlmRequest.RetryProfile#INTERACTIVE}). A
@@ -661,14 +690,15 @@ public class LlmRouter {
   public static final int AUXILIARY_TRANSIENT_RETRY_MAX_ATTEMPTS = 2;
 
   /**
-   * PIPELINE spacing — accuracy over latency (2026-08-01, TB 2.1 campaign): one initial call plus
-   * five retries at 5s/15s/25s/45s/65s. The old 2s/4s/8s ladder re-hit a still-pressured provider
-   * fast enough to exhaust the envelope inside one throttling window; wider gaps trade wall clock
-   * for a materially higher chance the transient clears before the envelope is spent. Nobody is
-   * watching a worker/planner/reviewer call, so the wall-clock cost is acceptable there.
+   * PIPELINE spacing — accuracy over latency (2026-08-01, TB 2.1 campaign; widened 2026-08-08 for
+   * slow models): one initial call plus seven retries at 10s/20s/40s/60s/90s/120s/150s. Nobody is
+   * watching a worker/planner/reviewer call, so trading wall clock for a materially higher chance
+   * the transient (429/5xx/overload) clears before the envelope is spent is the right call. A
+   * genuinely slow model is helped by the wider per-turn transport window above, not by retries
+   * (which re-hit the same window); these extra attempts only cover transient upstream blips.
    */
   private static final long[] PIPELINE_RETRY_BACKOFF_MS = {
-    5_000L, 15_000L, 25_000L, 45_000L, 65_000L
+    10_000L, 20_000L, 40_000L, 60_000L, 90_000L, 120_000L, 150_000L
   };
 
   /** INTERACTIVE spacing — the pre-campaign 2s/4s/8s ladder (RL-2026-05-029). */
@@ -677,8 +707,6 @@ public class LlmRouter {
   /** AUXILIARY spacing — fail over to the caller's structured fallback after one short retry. */
   private static final long[] AUXILIARY_RETRY_BACKOFF_MS = {2_000L};
 
-  private static final Duration DEFAULT_TRANSPORT_TIMEOUT = Duration.ofSeconds(120);
-  private static final Duration ANTHROPIC_TRANSPORT_TIMEOUT = Duration.ofSeconds(300);
   private static final int ANTHROPIC_FALLBACK_MAX_TOKENS = 16_000;
   private static final Duration TRANSPORT_SAFETY_MARGIN = Duration.ofSeconds(15);
 
@@ -688,6 +716,10 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
+    // V374 — a BUILD/correction worker may spend only while its exact workspace-generation and
+    // LLM-attempt leases remain current. The bound fence is absent for unrelated agents.
+    com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+        request.context().runId());
     // RR-392 — one shared fail-closed authorization for every provider-spending dispatch.
     providerDispatchAuthorization.authorize(
         request.provider(), request.model(), request.context().runId());
@@ -902,6 +934,8 @@ public class LlmRouter {
     final int maxAttempts = transientRetryMaxAttempts(request);
     final long[] backoffLadderMs = transientRetryBackoffMs(request);
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+          request.context().runId());
       // This is the last common seam before every physical chat transport. The request already
       // carries the managed-AI or failover route, so price that effective provider/model rather
       // than the worker's earlier requested route. Rechecking each bounded retry also observes any
@@ -1362,6 +1396,15 @@ public class LlmRouter {
    */
   private Duration transportTimeout(LlmRequest request) {
     Duration window = providerTransportWindow(request.provider());
+    // Human-facing (INTERACTIVE) turns fail fast — a person is watching, so the slow-model
+    // pipeline window (660s) is wrong here: a wedged provider would hold the socket ~11 min per
+    // attempt. Cap INTERACTIVE at the tighter interactive window. PIPELINE keeps the full window;
+    // AUXILIARY already self-caps via its caller's 60s readTimeoutSeconds override below.
+    if (request.retryProfile() == LlmRequest.RetryProfile.INTERACTIVE) {
+      Duration interactive =
+          Duration.ofSeconds(Math.max(1, interactiveModelResponseTimeoutSeconds));
+      if (interactive.compareTo(window) < 0) window = interactive;
+    }
     if (request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0) {
       Duration override = Duration.ofSeconds(request.readTimeoutSeconds());
       return override.compareTo(window) < 0 ? override : window;
@@ -1370,17 +1413,23 @@ public class LlmRouter {
   }
 
   private Duration providerTransportWindow(String provider) {
-    if ("anthropic".equalsIgnoreCase(provider)) return ANTHROPIC_TRANSPORT_TIMEOUT;
-    if ("deepseek".equalsIgnoreCase(provider)) {
-      return Duration.ofSeconds(Math.max(1, deepSeekReadTimeoutSeconds));
-    }
-    if ("fireworks".equalsIgnoreCase(provider)) {
-      return Duration.ofSeconds(Math.max(1, fireworksReadTimeoutSeconds));
-    }
-    if ("gemini".equalsIgnoreCase(provider)) {
-      return Duration.ofSeconds(Math.max(1, geminiReadTimeoutSeconds));
-    }
-    return DEFAULT_TRANSPORT_TIMEOUT;
+    if ("anthropic".equalsIgnoreCase(provider)) return resolveWindow(anthropicReadTimeoutSeconds);
+    if ("deepseek".equalsIgnoreCase(provider)) return resolveWindow(deepSeekReadTimeoutSeconds);
+    if ("fireworks".equalsIgnoreCase(provider)) return resolveWindow(fireworksReadTimeoutSeconds);
+    if ("gemini".equalsIgnoreCase(provider)) return resolveWindow(geminiReadTimeoutSeconds);
+    if ("openai".equalsIgnoreCase(provider)) return resolveWindow(openAiReadTimeoutSeconds);
+    if ("openrouter".equalsIgnoreCase(provider)) return resolveWindow(openRouterReadTimeoutSeconds);
+    // Any other/unknown provider inherits the shared per-turn window.
+    return resolveWindow(-1);
+  }
+
+  /** Per-provider override (>0) wins; otherwise the shared {@link #modelResponseTimeoutSeconds}. */
+  private Duration resolveWindow(int providerConfiguredSeconds) {
+    int seconds =
+        providerConfiguredSeconds > 0
+            ? providerConfiguredSeconds
+            : Math.max(1, modelResponseTimeoutSeconds);
+    return Duration.ofSeconds(seconds);
   }
 
   /** PIPELINE unless the request explicitly opts into the interactive envelope. */
@@ -1618,6 +1667,8 @@ public class LlmRouter {
           "Anthropic rejected `temperature` for model={} — retrying without it (will skip on"
               + " subsequent calls this JVM)",
           r.model());
+      com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
+          r.context().runId());
       projectedCallCostAdmission.admit(r, tools);
       PhysicalDispatch retryAttempt = prepareAnthropicAttempt(auditContext);
       String retryApiKey = retryAttempt == null ? apiKey : retryAttempt.apiKey();

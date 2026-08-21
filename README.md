@@ -96,6 +96,12 @@ request is not falsely shown as cross-provider divergence. Exact model pins rema
 Terminal result pages render the server-owned outcome verbatim with exactly one primary next action;
 logs, evidence, and files remain secondary diagnostics. User cancellation is presented as a neutral
 stop, while platform failures retain a support code without exposing internal exception detail.
+For BUILD failures, the newest durable generation attempt distinguishes no candidate, rejected and
+restored code, unresolved rollback, verification-environment unavailability, checkpoint failure,
+frontier conflict, lost authority, and protocol conflict. Run detail, lists/CLI, Web, email,
+notifications, activity, and automation exit semantics use that same projection; older failed
+attempts cannot override a later accepted generation. Visible failed acceptance targets are retained
+as evidence, while hidden targets and raw provider/tool errors remain redacted.
 An existing pull request does not by itself prove that the terminal attempt changed code; failed or
 limited attempts leave that impact unknown. Provider and model-route failures lead directly to
 `/provider-keys` rather than offering a retry against the same invalid configuration.
@@ -168,7 +174,7 @@ Generated project explanations can ground narrowly scoped behavior in digest-val
 exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
 treated as authority.
 
-The current deployment candidate advances the migration source head to V373. V354 adds
+The current deployment candidate advances the migration source head to V400. V354 adds
 rollout-gated operation-fenced provider-attempt admission; its default remains
 `EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
 admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
@@ -191,6 +197,91 @@ selected repository, checkout branch, and publication tuple all match exactly. P
 clones retain the active actor's in-memory GitHub credential. Crash-recovered clones must prove
 their actual branch before planning, and correction runs project the reused PR's live status/CI
 evidence through their own run-detail API.
+
+V396 closes the hidden dependency-state gap in the shared BUILD protocol. Git-ignored bytes remain
+outside accepted product identity, but Node, Python, Maven, Gradle, Go, and Rust environments are
+reconstructed from accepted manifests under a digest-pinned, network-denied sandbox plan before
+probe, worker, and final verification. Cleanup and materialization receipts are append-only;
+PostgreSQL refuses a protocol-v2 verification transition without the required passing receipts.
+
+V397 closes the filesystem/database split. Every predecessor/candidate archive upload,
+per-repository rollback, and accepted-workspace replacement receives durable intent before its
+physical write and an applied/verified receipt afterward. Archive keys and replacement scratch
+paths are deterministic, rollback resumes only incomplete repositories, and terminal orphan
+archives are deleted only after a fresh database check proves no accepted or unresolved reference.
+
+V398 closes the poison-record observability gap in terminal reconciliation. Failure counts, oldest
+pending age, safe error code, dead-letter threshold, and later resolution are durable and exposed
+only through the no-store SUPER_ADMIN qualification endpoint. Diagnostic persistence is explicitly
+non-authoritative: if it fails, healthy terminal records still reconcile in the same scan.
+
+V399 closes terminal physical-operation ownership. Acceptance or rollback persists the exact
+operation target before reconciliation; task and operation completion have separate immutable
+receipts, later attempt admission remains fenced until both converge, and workspace authority is
+released only after that proof. The local crash matrix kills a real JVM at eight terminal
+boundaries twice each and replays every case twice from replacement JVMs without contradiction.
+
+V400 repairs the pre-dispatch control-plane deadlock. Claimed attempts retain their immutable LLM
+identity while rolling back without a workspace checkpoint; authority acquisition runs in its own
+narrow transaction; failed recovery persists a stable support ID and 30/60/120-second bounded
+schedule. The third failed proof becomes resolved quarantine with mandatory task and physical-
+operation failure receipts before recovery authority is released and the parent may fail. Run
+detail distinguishes recovering, retry scheduled, and exhausted states and says whether operator
+action is required. An ADMITTED crash with no physical operation still receives a completed
+operation-transition receipt, so it cannot block replacement admission. Cancellation atomically
+terminalizes the parent and every nonterminal task before executor interruption and bounded
+workspace convergence. The shared BUILD rollout flag remains false.
+
+V374 makes every initial BUILD task an accepted-generation transaction. Before provider/tool
+dispatch, the server persists an exact task contract, workspace lease, per-task LLM operation, Git
+tree baseline, ignored-artifact baseline, and durable generation archive. A task becomes COMPLETE
+only after server-resolved build/test verification, an immutable receipt, a candidate checkpoint,
+and an atomic accepted-frontier advance. The exact candidate diff is authoritative: zero-diff
+generations fail, and actual code changes require an executed non-empty green test suite even when
+the planner described the task as documentation/configuration. Failure, cancellation, or crash
+restores the exact
+multi-repository predecessor; reviewer/validation/publication require the current bytes to equal the
+accepted frontier. Default workspace/repo exports first honor the latest accepted correction
+generation, otherwise they require the accepted initial BUILD frontier. The initial reviewer is
+read-only. Production BUILD fails closed without durable
+cross-node checkpoint storage, and local-hands BUILD remains blocked until the client proxy carries
+the same generation protocol.
+V375 preserves original rejection and rejected-diff evidence separately from the first recovery
+failure, so crash recovery cannot rewrite causality. Ignored dependency/cache roots are purged at
+task entry and before acceptance (plus rollback/recovery). V380 durably couples rollback to replayable `MARK_PARTIAL` or
+`REOPEN_PENDING` task-row publication; downstream admission remains closed until its independent
+receipt commits. A task may install derived dependencies for deterministic verification, but those
+bytes never cross a task or node boundary. Run detail
+exposes a bounded, patch-free generation-attempt ledger and the Evidence view highlights rejected
+or unresolved attempts using stable codes and immutable digests.
+V376 adds the default-off `build.shared-code-change-loop.enabled` rollout control. When enabled,
+BUILD and PATCH still retain different orchestration but dispatch mutation through the same
+provider-neutral `CodeChangeLoop`. Supported greenfield BUILD tasks start from a deterministic
+executable red baseline; server-frozen schema-v2 commands and paths, not planner prose, determine
+acceptance. Only changed deterministic failure evidence counts as diagnostic progress, and a route
+change starts a new fenced generation attempt from the accepted frontier. V377 makes the exact
+task contract, planned initial failure, requested/effective route, iterations, tool/model calls,
+token usage and cost immutable and inspectable through run detail. V378 separately freezes the
+deterministic initial acceptance probe executed after baseline materialization and before provider
+dispatch; only an observed red result admits dispatch, while green, drifted, or unavailable probes
+roll back without a model call. The exact red count/signature seeds the first post-edit verifier,
+and the latest deterministic failure is pinned outside any generated history-compaction summary.
+Hidden endpoint assertions are omitted from both the worker directive and customer API. Typed
+`WORKSPACE_GENERATION` SSE, metrics, and Evidence UI facts keep candidate, per-check verification,
+rollback, and accepted frontier separate.
+Acceptance checks carry an explicit proof strength. A task contract that requires
+`RUNTIME_CONTRACT` cannot be satisfied by a green build or generic test count. The qualified
+Python HTTP adapter runs an immutable hidden CRUD/runtime contract inside a content-addressed,
+non-root, network-none container using only its pinned offline FastAPI dependency kit. Unsupported
+greenfield HTTP stacks fail before provider spend; malformed OpenAPI, undeclared statuses,
+schema-invalid responses, crashes, non-persistent mutations, and route aliases fail closed.
+Route changes enter a fresh physical generation/LLM attempt before replacement dispatch. Customer
+BUILD ZIP export holds publication authority through file traversal and binds the archive to the
+accepted frontier with `X-ExecuteSpec-Workspace-Generation`; a lease loss aborts and removes the
+partial archive.
+Separately authorized operators can inspect a preserved rejected candidate through the
+SUPER_ADMIN-only, no-store qualification-evidence endpoint; ordinary run detail never exposes the
+raw rejected diff.
 V360 persists a run-bound canonical Spring HTTP surface
 at brownfield admission and blocks route removal after workers, corrections, validation, and
 immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
@@ -206,6 +297,47 @@ queue or spend twice. Because task-boundary, post-review, and post-validation ap
 a code-mutating worker, every server-side approved continuation now uses the same reversible
 checkpoint, stale-evidence invalidation, exact approved-route fencing, read-only final review,
 deterministic validation, and accept-or-rollback lifecycle.
+V383 makes that lifecycle the only BUILD mutation kernel: admission persists `ADMITTED`, claims the
+exact physical LLM operation, and acquires workspace authority before provider/tool dispatch;
+same-route smoke retries, model/provider changes, approved continuations, and generated corrections
+all create fresh supervised attempts. Terminal task, LLM-operation, and run-frontier state is
+reconciled after acceptance/rollback and again during crash recovery.
+V384 persists `MARK_COMPLETE` in the same ACCEPTED attempt update, so task completion and physical
+operation success are independently replayable from committed generation/frontier evidence. The
+coordinator no longer infers either terminal outcome from where request control flow failed, and a
+poisoned terminal record cannot stop unrelated runs from being attempted in the same sweep.
+V385 snapshots `LEGACY_V1` or `SHARED_KERNEL_V2` once on initial BUILD admission and copies that
+immutable identity to every generation attempt. Execution never re-reads the rollout flag; unknown
+historical identity and parent/attempt mismatch fail closed. BUILD provider, tool, initial-probe,
+and verification dispatch now carry an explicit process-local `ExecutionContext` capability bound
+to the exact run, task, attempt, workspace lease, and phase, with a fresh database fence per use.
+The coordinator passes that capability directly into the worker dispatch function; no intermediate
+generation-context ThreadLocal remains.
+V386 converts pre-pin BUILD history to explicit `LEGACY_UNKNOWN` without inferring the old rollout
+flag. It persists a separate immutable disposition, promotes proven terminal contradictions to
+quarantine, blocks unknown BUILD publication, and exposes SUPER_ADMIN-only no-store schema
+attestation and digest-bound historical inventory endpoints. Previous-writer null inserts remain
+schema-compatible but are immediately labelled missing evidence and cannot invent protocol v2.
+V387 adds append-only operator adjudication over a minimized causal snapshot. Closing history as
+non-executable keeps its retention hold; deletion requires a distinct applied release receipt, and
+neither action changes the original run/attempt disposition or permits publication. The database
+enforces the hold across direct, retention, GDPR, and project-cascade deletion paths.
+V388 separates canonical RUN sandboxes from exact-generation VERIFICATION sandboxes. Verification
+mounts only `executespec.sandbox.workspace-root/<sandboxId>/workspace`, requires an opaque
+generation-bound capability, never falls back to the RUN sandbox or host, and records durable
+cleanup intent so startup/scheduled reconciliation can delete terminal workspaces after crashes.
+BUILD standards lint/invariants, breaking-change classifiers, CLI smoke, validation tests and
+change inspection now receive that exact VERIFICATION capability rather than reconstructing scope
+from a run id or caller path. Workspace-generation and change-evidence trees use non-executing
+JGit reads/insertion, so repository clean filters, fsmonitor helpers, textconv and external diff
+drivers cannot run while evidence is collected. Safe relative symlinks and executable modes are
+preserved in the disposable copy; absolute or workspace-escaping symlinks are refused.
+V389 adds a durable command journal for those verification sandboxes. Every command is admitted
+before dispatch, fenced to the exact sandbox lease and runtime epoch, and settled with an immutable
+terminal receipt bound to the disposable workspace before/after digests. Protocol-v2 passing
+verification cites only successful receipt ids; a crash after dispatch recovers as
+`INDETERMINATE`, never inferred success. Previous writers remain on immutable command protocol v1
+during the rolling expansion, while every new generation attempt is pinned to v2.
 Exact HTTP requirements and the admitted brownfield surface are checked before the read-only
 reviewer spends tokens, then checked again inside the final-validation chokepoint used by normal,
 crash-recovery, retry-validation, and re-review paths.
@@ -267,7 +399,7 @@ RequirementIR also remains `LEGACY`.
 | Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
 | Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
 | Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V373`              | V373 separates checkout from exact existing-PR authority; next V374      |
+| Flyway head       | `V400`              | V399 persists terminal operation intents; V400 adds bounded pre-dispatch recovery and quarantine; next V401 |
 | Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
 
 `VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
@@ -303,7 +435,7 @@ egress is required before the four runtime flags can be enabled.
 | Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
 | LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
 | LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL (Cloud SQL in prod), Flyway migrations head V373                         | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/`                 |
+| Database            | PostgreSQL/pgvector (local container in the current single-VM deployment; managed Cloud SQL remains supported), Flyway migrations head V400 | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/` |
 | Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
 | Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
 | Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
@@ -315,8 +447,8 @@ egress is required before the four runtime flags can be enabled.
 | Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
 | Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
 | Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reads `/opt/app/RUNNING_SHA` back from the target host and fails on any target-SHA mismatch before health verification. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
-| Cloud               | GCP us-east4 — single GCE VM serves prod + dev; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reconciles an atomic source/artifact/attempt host tuple, verifies the healthy JVM's startup tuple, then generation-CAS-publishes `CURRENT_SHA`. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
+| Cloud               | GCP us-east4 — private 4-vCPU/8-GiB GCE VM, local PostgreSQL + Redis, Cloud NAT, and Cloudflare Tunnel at `app.executespec.ai`; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`infra/SINGLE_VM.md`](infra/SINGLE_VM.md), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
 
 Browser session hydration is fail-visible: protected routes retain a valid session across a
 transient `/auth/me` failure and show an explicit Retry action instead of an indefinite loading
@@ -363,7 +495,7 @@ Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks
 │   └── ... (78 package roots total under com.navneet.executespec)
 ├── src/main/resources/
 │   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V373; next V374; 359 source files; immutable post-apply)
+│   ├── db/migration/             Flyway V*.sql (head V400; next V401; 386 migration files; immutable post-apply)
 │   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
 │   └── static/                   Vite build output served by Spring Boot
 ├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
@@ -429,6 +561,69 @@ Run submit advanced options include continuation controls: "Confirm model upgrad
 `Apply to Run` is temporarily fail-closed. V368 force-disables the legacy direct-mutation path until it uses the same checkpointed correction, evidence invalidation, deterministic validation, read-only review, rollback, and publication-admission lifecycle as approved continuation corrections.
 
 Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run, set `SWEBENCH_ENABLED=true`, `SWEBENCH_OUTPUT_BASE` to a writable directory, and `SWEBENCH_INSTANCES_FILE` to the task JSON; the base configuration binds these controls without requiring the benchmark profile. Keep `SWEBENCH_DEFAULT_PROVIDER=deepseek` for the approved DeepSeek-only smoke lane. The benchmark generation request accepts `absoluteDeadlineEpochMs` and `shutdownReserveMs`; the server tightens that deadline to `SWEBENCH_TASK_WALL_TIMEOUT_MINUTES`, keeps at least 120 seconds for cleanup/result publication, and rejects an unusable deadline before container or provider work.
+
+The authorization-gated paired BUILD qualification is defined by
+`scripts/build-qualification/paired-build-v1.json`. It binds the control/candidate arms to distinct
+release SHAs on one HTTPS host, pins the same held-out spec/evaluator digests and exact
+Anthropic/Sonnet 5 plus OpenRouter/GLM 5.2 routes, and requires accepted-generation evidence, zero
+unresolved generation attempts, a content-addressed export, all held-out tests, and an independent
+archive-bound code review. The control arm is two immutable historical rollbacks and creates no
+fresh run. The candidate arm permits exactly two fresh runs, one per route, capped at $5 each and
+$10 total. `scripts/run-paired-build-qualification.sh --dry-run` performs no login, submission,
+provider call, flag mutation, or deployment. `--execute` additionally requires
+`BUILD_QUAL_AUTHORIZATION_ID`, credentials, the exact candidate SHA, reviewed controls, and a
+proof that `build.shared-code-change-loop.enabled=false` before opening the qualification window.
+The executor then enables the flag once, repeats a positive read immediately before each paid
+submission, and installs EXIT/INT/TERM cleanup that restores and reads back `false`; the cleanup
+receipt is persisted without credentials. It also compares the candidate SHA with the SUPER_ADMIN
+no-store `GET /api/admin/release-identity` response, whose authority is the serving JVM's
+startup-captured source SHA, artifact SHA-256 and deployment-attempt tuple; missing, malformed or
+mismatched identity aborts before run creation.
+Accepted artifacts persist that complete attested tuple, canonical authority and live-read timestamp;
+candidate results are rejected unless the attested SHA equals the frozen candidate release and the accepted attempt
+also contains an observed failure-first result and frozen acceptance checks. The harness never
+leaves the global flag enabled after a normal exit or catchable interruption.
+`scripts/validate-paired-build-results.mjs` refuses an incomplete pair or system score in place of
+the held-out and manual evidence.
+
+Before deployment, `scripts/build-qualification/mixed-binary-schema-matrix.sh` launches packaged
+previous and candidate JARs against real PostgreSQL 16 schemas. Callers provide both expected
+migration heads explicitly; the current candidate verifies the supported V399→V400
+migration, a previous-binary dark start on expanded V400, a fresh V400 boot, and fail-closed
+candidate startup when migrations are deliberately disabled on V399. The evidence also records JAR
+digests, migration heads, the shared-BUILD flag, and before/after control-plane row counts.
+
+`scripts/build-qualification/real-container-command-recovery.sh` repeats the five command crash
+windows against PostgreSQL 16 and the strict Docker toolchain. It kills a live `docker exec`,
+fences late settlement, and launches recovery/teardown and janitor takeover in a separate JVM.
+The evidence bundle hashes the V391 command migration, V392 publication migration, V393 recovery-
+cleanup migration, V394 checkpoint-identity migration, V395 typed-verification migration, V396
+environment-receipt migration, V397 filesystem-saga migration, V398 reconciliation-diagnostic migration,
+V399 terminal-operation-intent migration, V400 bounded-recovery migration, fixture, image,
+test report and log; shared BUILD
+remains false throughout.
+
+`scripts/build-qualification/real-git-publication-recovery.sh` runs the exact prepared-commit
+dispatcher against two real local bare-Git remotes twice. It kills the publisher after the second
+remote ref moves but before settlement, then proves replacement-JVM recovery records
+`INDETERMINATE` and blocks blind replay while preserving the first `PUBLISHED` receipt. This lane
+uses no provider credential and does not replace deployed GitHub/Bitbucket reconciliation.
+
+Before any paid live qualification, run the provider-free mechanism corpus:
+
+```bash
+node scripts/build-kernel-provider-free-qualification.mjs
+node --test scripts/build-kernel-provider-free-qualification.test.mjs
+```
+
+It covers empty Python/REST/TypeScript/frontend builds plus brownfield feature/bug, multi-file,
+migration, multi-task and multi-repository changes. Arm A models one-pass legacy BUILD acceptance;
+arm B models failure-first BUILD with exact rollback and retry from the accepted frontier; arm C
+models PATCH where applicable. The held-out evaluator never reads ExecuteSpec's verified score.
+The current deterministic scripted run is A=30%, B=100%, C=100%, with zero B wrong accepts,
+unresolved attempts, rollback mismatches or PATCH regressions. This is provider-free mechanism
+evidence, not a live-model-quality result. Evidence is written to
+`target/build-kernel-qualification/provider-free-v1.json`.
 
 Live provider fixtures are also fail-closed. Reserve an exact provider/model/run scope with
 `scripts/provider-budget-ledger.mjs`, then boot with the Maven live-test profile and that reservation:
@@ -725,12 +920,29 @@ OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire defau
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
 | `DEPLOYMENT_RECOVERY_SAFE_ENABLED`                                                         | Explicit prod attestation required to expose deployment creation; defaults to `false` |
 | `EXECUTESPEC_MIN_CLI_VERSION`                                                              | Oldest supported CLI/VS Code protocol version advertised on API responses; defaults to `1.0.0` |
+| `SANDBOX_IMAGE` / `SANDBOX_WORKSPACE_ROOT`                                                 | Strict BUILD sandbox image and host root. Release qualification requires an immutable `@sha256:` image and absolute root. |
+| `EXECUTESPEC_CONTROL_PLANE_GRAPH_SHA256` / `EXECUTESPEC_CONTROL_PLANE_GRAPH_MANIFEST_SHA256` | Exact code-only Graphify artifacts generated from the deployed source SHA. The deploy workflow stamps both into the running JVM. |
+| `EXECUTESPEC_GRAPHIFY_VERSION` / `EXECUTESPEC_GRAPHIFY_SQL_PARSER_VERSION` / `EXECUTESPEC_GRAPHIFY_HCL_PARSER_VERSION` | Pinned extractor/parser provenance for SQL/HCL graph coverage. |
 
 Release safety: production and benchmark profiles do not deliver outbound integration lifecycle
 updates because the current adapters are non-idempotent, best-effort append operations. Deployment
 creation is also hidden and returns 503 unless durable external-resource recovery has been
 explicitly attested with `DEPLOYMENT_RECOVERY_SAFE_ENABLED=true`; existing deployment read,
 rollback, and destroy operations remain available for cleanup.
+
+The SUPER_ADMIN-only `GET /api/admin/control-plane-release-attestation` endpoint exports one
+`Cache-Control: no-store`, digest-bound release tuple: running source/JAR identity, all applied
+Flyway versions and checksums, full required PostgreSQL trigger/index definitions, persisted versus
+process-effective control flags, protocol mode, sandbox image/mount/limit configuration, and graph
+provenance. `evidenceComplete` and `safeDarkState` are separate: an exact snapshot can be complete
+while shared BUILD is enabled, but it is no longer a dark qualification state. Use
+`scripts/build-qualification/capture-control-plane-release-attestation.sh` to capture and validate
+the deployed tuple against expected immutable hashes. A source checkout or migration file is not
+deployed-release evidence. Deployments also compare the code-only graph of the currently serving
+source SHA with the candidate. Any control-plane node or edge addition/removal fails before deploy
+unless `qualification/control-plane-graph-review.json` carries the exact semantic graph hashes,
+diff digest, independent reviewer, timestamp, impacted-area coverage, and a substantive rationale;
+the failed workflow retains a review template with the graph artifacts.
 | `APP_SURFACE_RETURN_URL`                                                                   | Browser OAuth callback URL (e.g. `http://localhost:5173/auth/callback`) |
 | `DASHBOARD_URL`                                                                            | Dashboard URL used in Slack and notification links                    |
 

@@ -66,6 +66,8 @@ public class StartupRunResumer {
       AgentTaskRepository taskRepo,
       SseBroadcaster broadcaster,
       com.navneet.executespec.integration.DurableCorrectionLifecycle durableCorrectionLifecycle,
+      com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+          workspaceGenerationRecoveryService,
       org.springframework.beans.factory.ObjectProvider<
               com.navneet.executespec.integration.RunLifecycleService>
           runLifecycleServiceProvider) {
@@ -73,6 +75,7 @@ public class StartupRunResumer {
     this.taskRepo = taskRepo;
     this.broadcaster = broadcaster;
     this.durableCorrectionLifecycle = durableCorrectionLifecycle;
+    this.workspaceGenerationRecoveryService = workspaceGenerationRecoveryService;
     this.runLifecycleServiceProvider = runLifecycleServiceProvider;
   }
 
@@ -87,7 +90,7 @@ public class StartupRunResumer {
       org.springframework.beans.factory.ObjectProvider<
               com.navneet.executespec.integration.RunLifecycleService>
           runLifecycleServiceProvider) {
-    this(runRepo, taskRepo, broadcaster, null, runLifecycleServiceProvider);
+    this(runRepo, taskRepo, broadcaster, null, null, runLifecycleServiceProvider);
   }
 
   /** Statuses that indicate a run was in-flight when the JVM died. */
@@ -113,6 +116,8 @@ public class StartupRunResumer {
   private final SseBroadcaster broadcaster;
   private final com.navneet.executespec.integration.DurableCorrectionLifecycle
       durableCorrectionLifecycle;
+  private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+      workspaceGenerationRecoveryService;
   private final AtomicBoolean scanInProgress = new AtomicBoolean();
 
   @Value("${agent.recovery.auto-resume-on-startup:false}")
@@ -229,6 +234,21 @@ public class StartupRunResumer {
             status,
             "Incomplete correction could not be rolled back safely: "
                 + correctionRecoveryFailure.getMessage());
+        failedInterrupted++;
+        continue;
+      }
+      try {
+        // BUILD attempts are independently durable. Generic run replay is forbidden until every
+        // unresolved generation has either been accepted or rolled back to its exact predecessor.
+        if (workspaceGenerationRecoveryService != null) {
+          workspaceGenerationRecoveryService.recoverRunOrThrow(run.getRunId());
+        }
+      } catch (RuntimeException generationRecoveryFailure) {
+        markFailed(
+            run,
+            status,
+            "Incomplete BUILD generation could not be recovered safely: "
+                + generationRecoveryFailure.getMessage());
         failedInterrupted++;
         continue;
       }

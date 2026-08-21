@@ -323,6 +323,7 @@ final class TaskExpansionPlanNormalizer {
         .description(description)
         .complexity(task.complexity())
         .touchesFiles(task.touchesFiles())
+        .requiredArtifacts(task.requiredArtifacts())
         .dependsOn(task.dependsOn())
         .hardConstraints(hardConstraints)
         .meetsRequirements(task.meetsRequirements())

@@ -77,8 +77,13 @@ public class ReviewerAgent {
    */
   public static final int FIX_BUILD_PASS_MAX_ITER = 35;
 
-  /** Wall-clock cap on the fix-build pass — narrower scope than general/wiring. */
-  public static final long FIX_BUILD_PASS_TIMEOUT_SECONDS = 360;
+  /**
+   * Wall-clock cap on the fix-build pass — narrower scope than general/wiring. Raised 2026-08-08
+   * (360s → 2400s) for slow models: this wraps a MULTI-TURN mutating repair loop, and at ~10 min
+   * per model turn the old cap was under one turn, so a slow model's repair was cancelled before it
+   * could finish.
+   */
+  public static final long FIX_BUILD_PASS_TIMEOUT_SECONDS = 2400;
 
   /**
    * Flag key for the Phase 2 fix-the-build third pass. Default ON — the pass only fires when the
@@ -93,19 +98,23 @@ public class ReviewerAgent {
    * LLM does not freeze the whole run. See v2.5.10 eval Bug C: a Gemini reviewer hung indefinitely
    * with all worker tasks complete, blocking terminate + score persistence.
    */
-  public static final long GENERAL_PASS_TIMEOUT_SECONDS = 600; // was 90 — bumped 2026-04-19
+  // Wraps a multi-turn read-only reviewer loop; raised 2026-08-08 (600s → 2400s) so a slow model
+  // (~10 min/turn) gets several diagnosis turns instead of being cancelled mid-first-turn.
+  public static final long GENERAL_PASS_TIMEOUT_SECONDS = 2400; // was 600 (was 90 — 2026-04-19)
 
   /** Wall-clock cap on the wiring pass — narrower scope than general. */
-  public static final long WIRING_PASS_TIMEOUT_SECONDS = 600; // was 60 — bumped 2026-04-19
+  public static final long WIRING_PASS_TIMEOUT_SECONDS = 2400; // was 600 (was 60 — 2026-04-19)
 
   /**
    * RR-272 — how long a cancelled review pass gets to actually stop before the review is abandoned.
    * {@code Future.cancel(true)} only sets the interrupt flag; {@link WorkerAgent} checks it at an
-   * iteration boundary, so a provider call already in flight (native DeepSeek reads up to 300s) or
-   * a running build/tool command has to unwind first. 330s covers one full in-flight provider read
-   * plus unwind without letting the pipeline block indefinitely on a wedged thread.
+   * iteration boundary, so a provider call already in flight or a running build/tool command has to
+   * unwind first. This MUST exceed one full in-flight provider read; raised 2026-08-08 (330s →
+   * 1000s) because the per-turn transport window is now ~660s for a slow model, so 1000s covers one
+   * full slow-model read plus unwind without letting the pipeline block indefinitely on a wedged
+   * thread.
    */
-  public static final long TERMINATION_RESERVE_SECONDS = 330;
+  public static final long TERMINATION_RESERVE_SECONDS = 1000;
 
   /**
    * Poll interval while waiting for a cancelled pass to terminate; also the re-interrupt period.
@@ -804,6 +813,31 @@ exit=0 — the harness will reject premature completions.
       evidence
           .append("\n\n")
           .append(PromptTrustBoundary.wrap("PLAN_REQUIREMENTS", rows.toString().stripTrailing()));
+    }
+    if (req.planAdvisories() != null && !req.planAdvisories().isEmpty()) {
+      // Class-C plan-time advisories (2026-08-08). These heuristic cross-task contract findings did
+      // NOT block the run — they false-positive too often to be run-killers — so verify each one
+      // against the actual generated code here, where it can be confirmed or dismissed with real
+      // evidence rather than guessed at plan time. A finding you cannot reproduce in the code is a
+      // false positive; report only the ones that are genuinely present.
+      StringBuilder rows = new StringBuilder();
+      for (String advisory : req.planAdvisories()) {
+        if (advisory == null || advisory.isBlank()) continue;
+        rows.append("- ").append(advisory.strip()).append('\n');
+      }
+      if (!rows.isEmpty()) {
+        evidence
+            .append(
+                "\n\nThe advisories below are non-blocking heuristic findings raised during"
+                    + " planning. They did NOT block the run because they false-positive too often"
+                    + " to be trusted at plan time. Verify each one against the actual generated"
+                    + " code: confirm it as a real defect or dismiss it as a false positive. Do not"
+                    + " fail the review over an advisory you cannot reproduce in the code.")
+            .append("\n\n")
+            .append(
+                PromptTrustBoundary.wrap(
+                    "PLAN_ADVISORIES_TO_VERIFY", rows.toString().stripTrailing()));
+      }
     }
     return evidence.toString().stripTrailing();
   }

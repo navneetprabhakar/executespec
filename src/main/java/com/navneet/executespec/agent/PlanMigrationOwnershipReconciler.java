@@ -277,6 +277,7 @@ final class PlanMigrationOwnershipReconciler {
         .description(description)
         .complexity(source.complexity())
         .touchesFiles(files)
+        .requiredArtifacts(source.requiredArtifacts())
         .dependsOn(source.dependsOn())
         .hardConstraints(constraints == null ? List.of() : constraints)
         .meetsRequirements(source.meetsRequirements())

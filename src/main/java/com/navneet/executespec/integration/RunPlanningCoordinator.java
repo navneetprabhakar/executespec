@@ -389,7 +389,10 @@ class RunPlanningCoordinator {
 
     java.util.Map<String, String> routeContext =
         com.navneet.executespec.router.RunModelOverrides.capture();
-    long expansionDeadlineNanos = System.nanoTime() + java.time.Duration.ofMinutes(20).toNanos();
+    // Raised 2026-08-08 (20 → 45 min) for slow models: this wall wraps the whole parallel
+    // TaskExpanderAgent fan-out, and each future is one model expansion turn (~10 min for a slow
+    // reasoning model). 20 min could not fit a multi-task LARGE expansion on a slow route.
+    long expansionDeadlineNanos = System.nanoTime() + java.time.Duration.ofMinutes(45).toNanos();
     for (List<PlannedTask> wave : expansionWaves(tasksToExpand)) {
       Plan waveContext = expansionContext(skeleton, expanded);
       List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
@@ -1109,6 +1112,7 @@ class RunPlanningCoordinator {
               .description(c.description())
               .complexity(c.complexity() == null ? PlannedTask.Complexity.MEDIUM : c.complexity())
               .touchesFiles(c.touchesFiles())
+              .requiredArtifacts(c.requiredArtifacts())
               .dependsOn(rewrittenDeps)
               .hardConstraints(c.hardConstraints())
               .meetsRequirements(c.meetsRequirements())
@@ -1166,7 +1170,9 @@ class RunPlanningCoordinator {
                           })));
     }
     try {
-      long subDeadlineNanos = System.nanoTime() + java.time.Duration.ofMinutes(10).toNanos();
+      // Raised 2026-08-08 (10 → 30 min) for slow models — recursive EPIC sub-outline expansion is
+      // model-driven; the old half-of-LARGE budget was hit first on a slow route.
+      long subDeadlineNanos = System.nanoTime() + java.time.Duration.ofMinutes(30).toNanos();
       for (var future : subFutures) {
         long remainingNanos = subDeadlineNanos - System.nanoTime();
         if (remainingNanos <= 0) throw new java.util.concurrent.TimeoutException();

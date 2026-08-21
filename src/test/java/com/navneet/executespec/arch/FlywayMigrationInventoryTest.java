@@ -67,9 +67,48 @@ class FlywayMigrationInventoryTest {
     // the exact inventory to 357. V372 binds cost history to the exact effective route and task
     // complexity shape, bringing the exact inventory to 358. V373 binds existing-PR runs to their
     // immutable checkout branch, repository, pull request, and admitted head SHA, bringing the
-    // exact inventory to 359.
-    assertThat(migrations).hasSize(359);
-    assertThat(migrations.getLast().version()).isEqualTo("373");
+    // exact inventory to 359. V374 introduces the durable workspace-generation transaction,
+    // immutable verification receipts, and the accepted-generation run frontier, bringing the
+    // exact inventory to 360. V375 preserves original BUILD rejection evidence while recording
+    // recovery failures separately, bringing the exact inventory to 361. V376 seeds the
+    // default-off BUILD shared-code-change-loop rollout control, bringing the exact inventory to
+    // 362. V377 adds immutable BUILD attempt contract, route, token, call, and cost evidence,
+    // bringing the exact inventory to 363. V378 freezes the actually observed pre-provider BUILD
+    // failure evidence, bringing the exact inventory to 364. V379 adds the nullable, staged
+    // workspace-origin discriminator for new BUILD writes without rewriting historical rows,
+    // bringing the exact inventory to 365. V380 adds the replayable task-transition outbox that
+    // prevents a restored workspace from being resolved while its task row remains stale. V381
+    // database-fences rollback evidence and resolution against the exact current workspace owner.
+    // V382 preserves resolved-attempt immutability while permitting only the V380 task-transition
+    // receipt state machine, bringing the exact inventory to 368. V383 atomically binds BUILD
+    // admission, the physical LLM operation, workspace authority, and terminal convergence,
+    // bringing the exact inventory to 369. V384 adds the mixed-version-safe accepted
+    // MARK_COMPLETE task-transition intent and receipt, bringing the exact inventory to 370. V385
+    // pins immutable BUILD protocol identity on the run and each physical generation attempt,
+    // bringing the exact inventory to 371. V386 explicitly labels all pre-pin BUILD history
+    // LEGACY_UNKNOWN and persists its fail-closed historical disposition, bringing the exact
+    // inventory to 372. V387 adds immutable, byte-bound historical BUILD adjudication and an
+    // explicit retention-release fence, bringing the exact inventory to 373. V388 separates the
+    // canonical RUN sandbox from exact-generation VERIFICATION sandboxes, bringing it to 374.
+    // V389 journals every physical verification command and binds passing workspace receipts to
+    // immutable all-successful command receipts. V390 adds exact publication preparation,
+    // per-repository artifact receipts, and per-repository publication attempts, bringing the
+    // exact inventory to 376. V391 adds the unsettled-command recovery index required to recover
+    // both pre-dispatch ADMITTED and post-dispatch DISPATCHED crash windows, bringing it to 377.
+    // V392 applies the same split to remote publication/provision attempts, adds numbered retries,
+    // and atomically fences terminal settlement to live publication authority, bringing it to 378.
+    // V393 makes accepted-recovery scratch cleanup a durable retry queue. V394 binds checkpoint
+    // receipts to physical storage generation, size, CRC32C, and ETag. V395 preserves typed
+    // product/environment/internal verification causality, bringing the total to 381. V396 adds
+    // append-only ignored-environment cleanup/materialization receipts and database transition
+    // gates, bringing the total to 382. V397 journals filesystem/object-store saga intent and
+    // receipt, per-repository rollback, deterministic accepted replacement, and guarded orphan
+    // archive cleanup, bringing the total to 383. V398 adds durable poison-record reconciliation
+    // diagnostics and dead-letter indexes, bringing the total to 384. V399 persists the exact
+    // physical-operation terminal intent and completion receipt, bringing the total to 385. V400
+    // repairs pre-dispatch rollback identity and bounds durable recovery, bringing it to 386.
+    assertThat(migrations).hasSize(386);
+    assertThat(migrations.getLast().version()).isEqualTo("400");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))
@@ -113,6 +152,22 @@ class FlywayMigrationInventoryTest {
         readMigrations(classpathMigrationDir()).stream().map(MigrationFile::fileName).toList();
 
     assertThat(classpathFiles).containsExactlyElementsOf(sourceFiles);
+  }
+
+  @Test
+  void v399SuspendsResolvedAttemptGuardBeforeBackfillAndRestoresItAfter() throws IOException {
+    String migration =
+        Files.readString(MIGRATION_DIR.resolve("V399__persist_generation_operation_intents.sql"));
+    int dropGuard =
+        migration.indexOf(
+            "DROP TRIGGER workspace_generation_attempt_transition ON"
+                + " workspace_generation_attempt;");
+    int terminalBackfill = migration.indexOf("UPDATE workspace_generation_attempt a");
+    int restoreGuard = migration.indexOf("CREATE TRIGGER workspace_generation_attempt_transition");
+
+    assertThat(dropGuard).isGreaterThanOrEqualTo(0);
+    assertThat(terminalBackfill).isGreaterThan(dropGuard);
+    assertThat(restoreGuard).isGreaterThan(terminalBackfill);
   }
 
   private static List<MigrationFile> readMigrations() throws IOException {

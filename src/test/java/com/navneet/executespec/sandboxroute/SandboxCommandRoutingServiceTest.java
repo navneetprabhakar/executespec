@@ -2,7 +2,11 @@ package com.navneet.executespec.sandboxroute;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,11 +24,13 @@ import com.navneet.executespec.sandbox.RunSandbox;
 import com.navneet.executespec.sandbox.RunSandboxLifecycleService;
 import com.navneet.executespec.sandbox.RunSandboxRuntimeDispatcher;
 import com.navneet.executespec.sandbox.RunSandboxStore;
+import com.navneet.executespec.sandbox.SandboxCommandJournalStore;
 import com.navneet.executespec.sandbox.SandboxExecRequest;
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandbox.SandboxIsolationProfile;
 import com.navneet.executespec.sandbox.SandboxNetworkPolicy;
 import com.navneet.executespec.sandbox.SandboxProperties;
+import com.navneet.executespec.sandbox.SandboxPurpose;
 import com.navneet.executespec.sandbox.SandboxRetentionState;
 import com.navneet.executespec.sandbox.SandboxSecretPolicy;
 import com.navneet.executespec.sandbox.SandboxState;
@@ -33,6 +39,9 @@ import com.navneet.executespec.state.repository.PipelineRunRepository;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 /**
  * The caller-side contract for routing build/test/lint execution into a sandbox.
@@ -44,11 +53,14 @@ import org.junit.jupiter.api.Test;
  */
 class SandboxCommandRoutingServiceTest {
 
+  @TempDir Path sandboxRoot;
+
   private RunSandboxLifecycleService lifecycle;
   private RunSandboxRuntimeDispatcher dispatcher;
   private RunSandboxStore store;
   private FeatureFlagService flags;
   private PipelineRunRepository runs;
+  private SandboxCommandJournalStore commandJournal;
   private SandboxCommandRoutingService routing;
   private SandboxProperties properties;
 
@@ -59,12 +71,21 @@ class SandboxCommandRoutingServiceTest {
     store = mock(RunSandboxStore.class);
     flags = mock(FeatureFlagService.class);
     runs = mock(PipelineRunRepository.class);
+    commandJournal = mock(SandboxCommandJournalStore.class);
     properties = new SandboxProperties();
+    properties.setWorkspaceRoot(sandboxRoot.toString());
     properties.setImage(
         "registry.example/executespec-toolchain@sha256:"
             + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     routing =
-        new SandboxCommandRoutingService(lifecycle, dispatcher, store, properties, flags, runs);
+        new SandboxCommandRoutingService(
+            lifecycle, dispatcher, store, properties, flags, runs, commandJournal);
+    when(commandJournal.admit(any(), any(), any(), anyLong()))
+        .thenReturn(
+            new SandboxCommandJournalStore.Admission(UUID.randomUUID(), UUID.randomUUID(), 1L, 1L));
+    when(commandJournal.settle(any(), any(), any(), any(), anyString(), nullable(String.class)))
+        .thenAnswer(
+            invocation -> ((SandboxCommandJournalStore.Admission) invocation.getArgument(0)).id());
   }
 
   @Test
@@ -219,6 +240,163 @@ class SandboxCommandRoutingServiceTest {
   }
 
   @Test
+  void verificationAdmissionUsesASeparatePurposeAndSandboxOwnedWorkspace() {
+    routingOn();
+    PipelineRun run = admissibleRun();
+    RunSandbox verification = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1", SandboxPurpose.VERIFICATION)).thenReturn(Optional.empty());
+    when(lifecycle.create(any(), any())).thenReturn(verification);
+
+    VerificationSandboxAuthority authority =
+        routing.openVerification(
+            "run-1",
+            "a".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+
+    assertThat(authority.workspaceRoot())
+        .isEqualTo(
+            sandboxRoot
+                .toAbsolutePath()
+                .normalize()
+                .resolve(verification.id().toString())
+                .resolve("workspace"));
+    assertThat(authority.workspaceRoot().toString()).doesNotContain("/ws/run-1");
+    ArgumentCaptor<RunSandboxLifecycleService.SandboxAdmission> admission =
+        ArgumentCaptor.forClass(RunSandboxLifecycleService.SandboxAdmission.class);
+    verify(lifecycle).create(admission.capture(), any());
+    assertThat(admission.getValue().purpose()).isEqualTo(SandboxPurpose.VERIFICATION);
+  }
+
+  @Test
+  void staleVerificationCapabilityCannotFallThroughToTheOrdinaryRunSandbox() {
+    routingOn();
+    PipelineRun run = admissibleRun();
+    RunSandbox verification = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1", SandboxPurpose.VERIFICATION)).thenReturn(Optional.empty());
+    when(lifecycle.create(any(), any())).thenReturn(verification);
+    VerificationSandboxAuthority authority =
+        routing.openVerification(
+            "run-1",
+            "b".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+
+    routing.closeVerification(authority);
+    SandboxExecResult result =
+        routing.executeVerificationShell(authority, "mvn test", Duration.ofMinutes(1));
+
+    assertThat(result.status()).isEqualTo(SandboxExecResult.Status.REFUSED);
+    verify(dispatcher, never()).exec(any(), any(), any());
+    verify(store, never()).findActiveForRun("run-1");
+  }
+
+  @Test
+  void verificationVectorUsesOnlyTheCapabilityBoundRuntime() {
+    routingOn();
+    PipelineRun run = admissibleRun();
+    RunSandbox verification = sandbox(SandboxState.READY, SandboxPurpose.VERIFICATION);
+    RunSandbox.Lease lease =
+        new RunSandbox.Lease(verification.id(), "owner", 1L, Instant.now().plusSeconds(60));
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1", SandboxPurpose.VERIFICATION)).thenReturn(Optional.empty());
+    when(lifecycle.create(any(), any())).thenReturn(verification);
+    when(store.tryAcquire(any(), anyString(), any())).thenReturn(Optional.of(lease));
+    when(store.get(verification.id())).thenReturn(Optional.of(verification));
+    when(dispatcher.exec(any(), any(), any()))
+        .thenReturn(SandboxExecResult.completed(0, "ok", "", false, Duration.ofMillis(10)));
+    VerificationSandboxAuthority authority =
+        routing.openVerification(
+            "run-1",
+            "c".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+    routing.activateVerification(authority, "c".repeat(64));
+
+    SandboxExecResult result =
+        routing.executeVerification(
+            authority, List.of("npm", "test", "--", "--runInBand"), Duration.ofMinutes(1));
+
+    assertThat(result.status()).isEqualTo(SandboxExecResult.Status.COMPLETED);
+    assertThat(routing.verificationCommandReceiptIds(authority)).hasSize(1);
+    ArgumentCaptor<com.navneet.executespec.sandbox.SandboxExecRequest> request =
+        ArgumentCaptor.forClass(com.navneet.executespec.sandbox.SandboxExecRequest.class);
+    verify(dispatcher).exec(eq(verification), eq(lease), request.capture());
+    assertThat(request.getValue().argv()).containsExactly("npm", "test", "--", "--runInBand");
+    verify(store, never()).findActiveForRun("run-1");
+    InOrder durableOrder = inOrder(commandJournal, dispatcher);
+    durableOrder.verify(commandJournal).admit(any(), eq(verification), eq(lease), eq(1L));
+    durableOrder.verify(commandJournal).markDispatched(any(), eq(lease));
+    durableOrder.verify(dispatcher).exec(eq(verification), eq(lease), any());
+    durableOrder
+        .verify(commandJournal)
+        .settle(any(), any(), any(), eq(result), anyString(), nullable(String.class));
+  }
+
+  @Test
+  void successiveGenerationsReceiveDistinctSandboxAndCapabilityIdentity() {
+    routingOn();
+    PipelineRun run = admissibleRun();
+    RunSandbox first = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    RunSandbox second = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1", SandboxPurpose.VERIFICATION)).thenReturn(Optional.empty());
+    when(lifecycle.create(any(), any())).thenReturn(first, second);
+
+    VerificationSandboxAuthority firstAuthority =
+        routing.openVerification(
+            "run-1",
+            "d".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+    routing.closeVerification(firstAuthority);
+    VerificationSandboxAuthority secondAuthority =
+        routing.openVerification(
+            "run-1",
+            "e".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+
+    assertThat(secondAuthority.sandboxId()).isNotEqualTo(firstAuthority.sandboxId());
+    assertThat(secondAuthority.capabilityId()).isNotEqualTo(firstAuthority.capabilityId());
+    assertThat(secondAuthority.workspaceRoot()).isNotEqualTo(firstAuthority.workspaceRoot());
+    assertThat(secondAuthority.generation()).isEqualTo("e".repeat(64));
+  }
+
+  @Test
+  void forgedCrossRunAuthorityWithCopiedDurableIdsIsRefused() {
+    routingOn();
+    PipelineRun run = admissibleRun();
+    RunSandbox verification = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(store.findActiveForRun("run-1", SandboxPurpose.VERIFICATION)).thenReturn(Optional.empty());
+    when(lifecycle.create(any(), any())).thenReturn(verification);
+    VerificationSandboxAuthority real =
+        routing.openVerification(
+            "run-1",
+            "f".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+    VerificationSandboxAuthority forged =
+        new VerificationSandboxAuthority(
+            real.capabilityId(),
+            real.sandboxId(),
+            "run-2",
+            real.generation(),
+            real.phase(),
+            real.workspaceRoot());
+
+    SandboxExecResult result =
+        routing.executeVerification(forged, List.of("mvn", "test"), Duration.ofMinutes(1));
+
+    assertThat(result.status()).isEqualTo(SandboxExecResult.Status.REFUSED);
+    assertThat(result.detail()).contains("AUTHORITY_STALE");
+    verify(dispatcher, never()).exec(any(), any(), any());
+  }
+
+  @Test
   void terminalRunReleasesItsOwnedSandboxEvenWhenDispatchIsOff() {
     PipelineRun run = mock(PipelineRun.class);
     when(run.getStatus()).thenReturn("COMPLETE");
@@ -261,7 +439,20 @@ class SandboxCommandRoutingServiceTest {
     when(dispatcher.selectedProfile()).thenReturn(SandboxIsolationProfile.CONTAINER_STRICT_V1);
   }
 
+  private static PipelineRun admissibleRun() {
+    PipelineRun run = mock(PipelineRun.class);
+    when(run.getStatus()).thenReturn("WORKING");
+    when(run.getCreatedByUserId()).thenReturn("user-1");
+    when(run.getOrgId()).thenReturn("org-1");
+    when(run.getProjectId()).thenReturn("project-1");
+    return run;
+  }
+
   private static RunSandbox sandbox(SandboxState state) {
+    return sandbox(state, SandboxPurpose.RUN);
+  }
+
+  private static RunSandbox sandbox(SandboxState state, SandboxPurpose purpose) {
     return new RunSandbox(
         UUID.randomUUID(),
         "run-1",
@@ -271,6 +462,7 @@ class SandboxCommandRoutingServiceTest {
         "org-1",
         "revision",
         "[]",
+        purpose,
         state,
         SandboxIsolationProfile.CONTAINER_STRICT_V1,
         1,

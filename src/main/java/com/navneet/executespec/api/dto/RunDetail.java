@@ -231,6 +231,30 @@ public class RunDetail {
    */
   String runMode;
 
+  /** Exact durable BUILD frontier; null for PATCH and legacy pre-V374 runs. */
+  String acceptedWorkspaceGeneration;
+
+  /** Zero-based task index represented by the accepted frontier (-1 is the post-clone baseline). */
+  Integer acceptedTaskIndex;
+
+  /** Immutable generation-attempt receipt that advanced the frontier. */
+  String acceptedGenerationAttemptId;
+
+  /** Storage class of the accepted internal generation checkpoint; never the customer ZIP key. */
+  String acceptedCheckpointKind;
+
+  /** SHA-256 of the exact accepted internal checkpoint bytes. */
+  String acceptedCheckpointDigest;
+
+  /** Completion time of the exact checkpoint copied into the accepted frontier receipt. */
+  java.time.Instant acceptedCheckpointCompletedAt;
+
+  /**
+   * Bounded newest-first BUILD generation history. Failure reasons and rejected patches stay
+   * server-side; clients receive immutable digests and stable failure codes only.
+   */
+  List<WorkspaceGenerationAttemptEvidence> workspaceGenerationAttempts;
+
   /**
    * V183 — finding source key for autofix-triggered patch runs. {@code <TYPE>:<id>}. Null
    * otherwise.
@@ -323,6 +347,75 @@ public class RunDetail {
 
   /** Present if this run was triggered by an external integration. */
   public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
+
+  /** Customer-safe durable evidence for one accepted, rejected, or unresolved BUILD generation. */
+  public record WorkspaceGenerationAttemptEvidence(
+      String attemptId,
+      String taskId,
+      Integer taskIndex,
+      Integer attemptNumber,
+      String attemptKind,
+      String state,
+      String priorAcceptedGeneration,
+      String beforeGeneration,
+      String candidateGeneration,
+      String acceptedGeneration,
+      String taskContractDigest,
+      WorkspaceGenerationInitialFailureEvidence initialFailureEvidence,
+      String runtimeSurface,
+      String baselineKind,
+      String buildCommand,
+      String testCommand,
+      List<String> requiredPaths,
+      List<WorkspaceGenerationAcceptanceCheck> acceptanceChecks,
+      String requestedProvider,
+      String requestedModel,
+      String effectiveProvider,
+      String effectiveModel,
+      Integer workerIterations,
+      Integer workerToolCalls,
+      Long modelCalls,
+      Long inputTokens,
+      Long outputTokens,
+      Long cacheReadTokens,
+      Long cacheWriteTokens,
+      Long reasoningTokens,
+      java.math.BigDecimal costUsd,
+      String verificationReceiptId,
+      String verificationOutcome,
+      Boolean verificationBuildPassed,
+      Boolean verificationTestsExecuted,
+      Integer verificationTestsPassed,
+      Integer verificationTestsFailed,
+      String verificationFailureCategory,
+      String verificationEnvironmentCode,
+      String verificationExecutionBoundary,
+      com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection
+          failureProjection,
+      String verificationEvidenceDigest,
+      String rejectedDiffDigest,
+      String failureCode,
+      String recoveryFailureCode,
+      Instant recoveryFailureAt,
+      Integer recoveryAttemptCount,
+      Instant recoveryNextAttemptAt,
+      String recoverySupportId,
+      Instant recoveryExhaustedAt,
+      String recoveryStatus,
+      Boolean recoveryUserActionRequired,
+      Instant createdAt,
+      Instant resolvedAt) {}
+
+  public record WorkspaceGenerationInitialFailureEvidence(
+      String outcome,
+      String code,
+      String detail,
+      String command,
+      List<String> failedTargets,
+      Instant observedAt) {}
+
+  public record WorkspaceGenerationAcceptanceCheck(
+      String kind, String target, boolean hidden, String outcome, String detail) {}
 
   /** Token usage for a non-task agent (planner, reviewer, compiler). */
   public record AgentTokenEntry(

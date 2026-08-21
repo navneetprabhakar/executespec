@@ -23,7 +23,50 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 
 ## Key files
 
+- `RunningReleaseIdentityService.java` / `RunningReleaseIdentityController.java` — expose the
+  immutable source SHA, JAR SHA-256 and deployment-attempt tuple captured in the serving JVM's
+  startup environment for every SUPER_ADMIN/no-store `GET /api/admin/release-identity` call.
+  Missing or malformed tuple fields return 503. The deploy workflow first reconciles the atomic
+  host marker, then health-checks the restarted service, reads `/proc/<MainPID>/environ` through a
+  root-owned producer (`sudo cat`, not a non-root shell redirection), and only then generation-CAS
+  publishes `CURRENT_SHA`. The paired BUILD harness compares the endpoint tuple with its frozen
+  candidate before each paid submission, so mutable host files or caller labels cannot attest a
+  different running binary. Candidate evidence retains the tuple, canonical authority and read
+  timestamp for independent validation.
+
+- `ControlPlaneReleaseAttestationService.java` / `ControlPlaneSchemaEvidenceExporter.java` /
+  `ControlPlaneReleaseAttestationController.java` — R12's SUPER_ADMIN/no-store release bundle.
+  Under one repeatable-read transaction it combines the startup source/JAR tuple, complete applied
+  Flyway history (including checksums), full definitions plus independent digests for all required
+  BUILD indexes/triggers, persisted-versus-process flag parity, admitted protocol/config mode,
+  digest-pinned strict-sandbox configuration, and Graphify SQL/HCL provenance. The stable bundle
+  digest excludes observation timestamps but includes every authoritative value. Missing evidence
+  is returned as explicit reasons; it is never coerced into readiness. `evidenceComplete` is
+  separate from `safeDarkState`, which additionally requires shared BUILD admission to be false.
+  The deploy workflow generates a code-only graph from the exact checkout with pinned Graphify
+  0.9.13 SQL/HCL extras, retains the graph artifact, stamps hashes/parser versions into both the
+  atomic host marker and JVM environment, and verifies that process tuple after health. Use
+  `scripts/build-qualification/capture-control-plane-release-attestation.sh` for exact deployed
+  capture. `control-plane-graph-diff.mjs` separately compares the candidate with a Graphify extract
+  of the source SHA currently serving the target VM. Graphify 0.9.13 emits `edges`; the workflow and
+  diff tool accept that canonical collection, retain `links` only for legacy artifacts, and fail
+  closed on a missing or conflicting edge collection. Any control-plane node/edge change produces
+  schema-v3 advisory evidence containing deterministic filtered base/candidate control-subgraph
+  hashes, the exact diff digest, and impacted areas; whole-graph semantic and raw artifact hashes
+  remain retained provenance because unrelated Graphify output is not deterministic across
+  identical extractions. Deployment does not require a manual graph-review receipt; malformed extraction
+  or release-identity evidence still fails closed. The workflow requires exactly
+  one canonical source SHA in the atomic host marker, cross-checks it against the immutable deploy
+  pointer captured before qualification, fetches it fail-closed when absent locally, and proves it
+  shares repository history with the candidate without prohibiting explicit rollback. Graph
+  evidence is retained for RCA. Pre-activation failures skip host-candidate reconciliation because
+  no activation attempt occurred. This endpoint/config
+  proof does not replace the live container mount/containment matrix.
+
 - `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews owned by this process. **Distributed safety:** absence from the JVM-local `active` map is never treated as proof that a Docker/Cloud Run resource is orphaned unless the operator explicitly sets `PREVIEW_ORPHAN_DISCOVERY_ENABLED=true`; the default is false. JVM shutdown also preserves active previews by default so rolling deployment cannot destroy them (`PREVIEW_TEARDOWN_ON_SHUTDOWN=false`). **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
+- `PreviewServiceTest.freeTierLimit` pre-stubs both run/workspace paths before starting the virtual
+  preview worker. Mockito stubbing after the first `service.start` races worker invocations on the
+  same mocks and can intermittently produce `WrongTypeOfReturnValue`.
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings, and fail-safe cleanup gates. Docker/Cloud Run orphan discovery remains disabled until a durable cross-JVM resource registry is authoritative.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first via `DeclaredPreviewProjectTypeResolver`, then falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`. **Node toolchain bootstrap (2026-07-21, RR-385 partial):** the nine sites that grafted Node onto a JDK/Python/Rust base image used to run `curl -fsSL https://deb.nodesource.com/setup_20.x | bash -` — fetching a shell script at build time and executing it as root with no integrity check. They now emit `pinnedNodeInstall()`, which copies the interpreter out of the tagged `node:20-bookworm-slim` image via `COPY --from=<image>` (a direct image reference, so no `FROM` stage alias is needed). This is **tag-pinned, not digest-pinned**, and every call site's base is glibc — do not reuse the helper on an Alpine/musl base without switching to the matching source image. Proven by building all three generated full-stack Dockerfiles: node v20.20.2 / npm 10.8.2 present in each.
@@ -69,6 +112,10 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
   probe permission disables the store at boot even when object access would otherwise work.
   Construction is also disabled before ADC initialization when workspace GCS is off or the bucket
   is blank; local runs must never probe credentials or attempt `gs:///local/...` checkpoints.
+- `GcsTaskCheckpointService.java` — strict, synchronous V374/V383 generation archival only. The
+  legacy async post-task export/fallback was removed because it could race the next BUILD mutation;
+  accepted-frontier advancement consumes only the exact generation archive receipt produced while
+  the coordinator still owns workspace authority.
 - `WorkspaceRestoreService.java` — Materializes a run archive when local state has expired. Absence
   of a run row or durable object key is reported as `WorkspaceArchiveUnavailableException`, which
   lets run sync distinguish a permanent lifecycle 410 from retryable GCS/platform restoration
@@ -77,8 +124,20 @@ LOCAL-hands runs are excluded from GCS workspace upload queries and the event li
 - `WorkspaceExportService.java` — ZIP/repo handoff now applies `ArtifactPublicationGuard` to every
   included file and to restored GCS ZIP members before returning bytes. Secret-like content blocks
   the export; symlinks are omitted so an archive cannot follow a link outside the run workspace.
+  BUILD exports and retention uploads first recover unresolved corrections. A latest accepted
+  correction generation supersedes the initial BUILD task frontier; otherwise export runs
+  deterministic BUILD-generation recovery and proves the exact accepted initial frontier.
+  Unresolved/missing/mismatched proof fails closed; the download controller returns 409 and cannot
+  redirect to a repository archive in that case.
+  Canonical BUILD ZIP creation additionally acquires PUBLICATION authority, repeats the accepted
+  frontier proof under that lease, retains ownership through every traversed file and deletes a
+  partial archive on lease loss. `RunController` returns the bound generation in
+  `X-ExecuteSpec-Workspace-Generation`; absence or mismatch cannot qualify an accepted artifact.
   Runtime/test caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`,
   `*.pyc`, `*.pyo`) are excluded from both workspace and repo ZIPs, including nested paths.
+- `WorkspaceExportAcceptedFrontierTest` pins accepted BUILD recovery/proof before ZIP reads,
+  unresolved-candidate rejection, accepted-correction precedence, correction-generation mismatch
+  rejection, and unchanged PATCH behavior.
 - `WorkspaceArchiveJob.java` — Hourly archive + local cleanup. RR-163: `requireRemoteArchive`
   proves a nonblank object key AND a live `GcsWorkspaceStore.exists` hit before any local deletion,
   so a skipped upload (`uploadZip` returns `null` when the Storage client was disabled at startup)

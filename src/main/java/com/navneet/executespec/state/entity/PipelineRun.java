@@ -69,6 +69,21 @@ public class PipelineRun {
   private String runMode = com.navneet.executespec.state.RunMode.BUILD;
 
   /**
+   * V385 — immutable BUILD execution protocol selected once in the initial run INSERT. Null is
+   * reserved for historical/PATCH rows; candidate execution refuses an unpinned BUILD row rather
+   * than consulting the current rollout flag.
+   */
+  @Column(name = "build_protocol_version", length = 32)
+  private String buildProtocolVersion;
+
+  /**
+   * V386 — immutable historical protocol disposition; supported new admissions are not applicable.
+   */
+  @Column(name = "build_protocol_disposition", length = 32, nullable = false)
+  @lombok.Builder.Default
+  private String buildProtocolDisposition = "NOT_APPLICABLE";
+
+  /**
    * V183 (2026-05-08) — when a patch-mode run is dispatched in response to a project-side finding
    * (PR review, tech debt, code review, CI failure), this column stamps the originating finding id
    * so the dashboard can render "Triggered by ..." instead of an orphan run + the {@link
@@ -215,6 +230,13 @@ public class PipelineRun {
   private String repoMode; // "NEW" | "EXISTING" | null
 
   /**
+   * Immutable admission fact used by BUILD bootstrap. Null is tolerated only for historical rows
+   * created before V379.
+   */
+  @Column(name = "workspace_origin", length = 32)
+  private String workspaceOrigin;
+
+  /**
    * Exact existing SCM branch selected at admission time. A non-null value means this run must
    * clone and publish back to that branch (for example, a CI-fix run targeting an open PR) rather
    * than generating a new {@code executespec/<runId>} branch. Persisted so plan-gate, pause, and
@@ -246,6 +268,41 @@ public class PipelineRun {
   private String publicationHeadSha;
 
   private String workspacePath; // per-run path: ./workspace/projects/{runId}/
+
+  /**
+   * V374 — digest of the last workspace generation accepted by deterministic verification and an
+   * exact completed checkpoint. This is the durable execution frontier; later tasks, reviewer,
+   * recovery, and publication must not consume a different local tree.
+   */
+  @Column(name = "accepted_workspace_generation", length = 64)
+  private String acceptedWorkspaceGeneration;
+
+  /**
+   * Zero-based plan index represented by {@link #acceptedWorkspaceGeneration}. A freshly seeded
+   * post-clone frontier uses {@code -1}; null denotes a pre-V374 run with no durable frontier.
+   */
+  @Column(name = "accepted_task_index")
+  private Integer acceptedTaskIndex;
+
+  /** Exact accepted {@code workspace_generation_attempt}; null only for the seeded base tree. */
+  @Column(name = "accepted_generation_attempt_id")
+  private java.util.UUID acceptedGenerationAttemptId;
+
+  /** Storage class of the exact internal checkpoint accepted with the generation. */
+  @Column(name = "accepted_checkpoint_kind", length = 24)
+  private String acceptedCheckpointKind;
+
+  /** Internal checkpoint object/path. This is distinct from the customer workspace ZIP key. */
+  @Column(name = "accepted_checkpoint_key", columnDefinition = "TEXT")
+  private String acceptedCheckpointKey;
+
+  /** SHA-256 of the exact accepted internal checkpoint bytes. */
+  @Column(name = "accepted_checkpoint_digest", length = 64)
+  private String acceptedCheckpointDigest;
+
+  /** Completion time copied from the accepted attempt's immutable checkpoint receipt. */
+  @Column(name = "accepted_checkpoint_completed_at")
+  private Instant acceptedCheckpointCompletedAt;
 
   /**
    * Durable local-hands intent captured at submit time. Unlike the Redis marker, this survives a

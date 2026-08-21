@@ -63,7 +63,6 @@ class SequentialExecutorInitialRoutingTest {
             featureFlags,
             mock(ContextStore.class),
             mock(RunCostTracker.class),
-            mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
             availableProviders,
             mock(GoalContinuationAdvisor.class),
             null);
@@ -85,6 +84,7 @@ class SequentialExecutorInitialRoutingTest {
             .model("current")
             .runContext(new ExecutionContext("run-1", "T1", Path.of("/tmp")))
             .routePinned(false)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
   }
 
@@ -141,6 +141,7 @@ class SequentialExecutorInitialRoutingTest {
             .model("pinned")
             .runContext(request.runContext())
             .routePinned(true)
+            .workspaceOrigin(request.workspaceOrigin())
             .build();
 
     InitialRoutingDecision result =

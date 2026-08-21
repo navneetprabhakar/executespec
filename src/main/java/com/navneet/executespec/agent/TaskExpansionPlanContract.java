@@ -64,6 +64,16 @@ final class TaskExpansionPlanContract {
     return List.copyOf(new java.util.LinkedHashSet<>(violations));
   }
 
+  /** Fail-closed structural subset (see {@link PlanContractViolationClassifier}). */
+  public static List<String> structuralPlanContractViolations(Plan plan) {
+    return PlanContractViolationClassifier.structural(plan);
+  }
+
+  /** Advisory remainder (see {@link PlanContractViolationClassifier}). */
+  public static List<String> advisoryPlanContractViolations(Plan plan) {
+    return PlanContractViolationClassifier.advisory(plan);
+  }
+
   public static Plan normalizeFinalPlan(Plan plan) {
     return TaskExpansionPlanNormalizer.normalize(plan);
   }

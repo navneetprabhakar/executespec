@@ -301,6 +301,26 @@ export function publicationTrustFacts(
     testsPassed > 0 &&
     testsSkipped >= 0 &&
     testsPassed + testsSkipped === testsTotal;
+  const generationAttempts = run.workspaceGenerationAttempts ?? [];
+  const rejectedGenerations = generationAttempts.filter((attempt) =>
+    ['ROLLED_BACK', 'RECOVERY_FAILED'].includes(attempt.state),
+  );
+  const unresolvedGenerations = generationAttempts.filter(
+    (attempt) =>
+      !['ACCEPTED', 'ROLLED_BACK'].includes(attempt.state) &&
+      !(attempt.state === 'RECOVERY_FAILED' && attempt.resolvedAt),
+  );
+  const exhaustedGenerations = generationAttempts.filter(
+    (attempt) => attempt.state === 'RECOVERY_FAILED' && Boolean(attempt.recoveryExhaustedAt),
+  );
+  const latestGenerationFailure = generationAttempts.find(
+    (attempt) => attempt.failureCode || attempt.recoveryFailureCode,
+  );
+  const latestGeneration = generationAttempts[0];
+  const latestAcceptanceChecks = latestGeneration?.acceptanceChecks ?? [];
+  const failedAcceptanceChecks = latestAcceptanceChecks.filter(
+    (check) => check.outcome === 'FAILED' || check.outcome === 'UNAVAILABLE',
+  );
 
   const facts: PublicationTrustFact[] = [
     {
@@ -312,6 +332,172 @@ export function publicationTrustFacts(
           : failedOrBlocked > 0
             ? 'bad'
             : 'warn',
+    },
+    {
+      label: 'Accepted BUILD frontier',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : run.acceptedWorkspaceGeneration && run.acceptedGenerationAttemptId
+            ? `Task ${(run.acceptedTaskIndex ?? -1) + 1} · ${run.acceptedWorkspaceGeneration.slice(0, 12)} · receipt ${run.acceptedGenerationAttemptId.slice(0, 8)}${run.acceptedCheckpointKind && run.acceptedCheckpointDigest ? ` · ${run.acceptedCheckpointKind} ${run.acceptedCheckpointDigest.slice(0, 12)}` : ''}`
+            : 'No durable accepted generation',
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : run.acceptedWorkspaceGeneration && run.acceptedGenerationAttemptId
+            ? 'ok'
+            : 'bad',
+    },
+    {
+      label: 'BUILD generation attempts',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : generationAttempts.length === 0
+            ? 'No generation-attempt evidence'
+            : `${generationAttempts.length} recent · ${rejectedGenerations.length} rejected · ${unresolvedGenerations.length} unresolved${latestGenerationFailure ? ` · latest ${latestGenerationFailure.recoveryFailureCode || latestGenerationFailure.failureCode} · diff ${latestGenerationFailure.rejectedDiffDigest?.slice(0, 12) || 'unavailable'}${latestGenerationFailure.recoverySupportId ? ` · support ${latestGenerationFailure.recoverySupportId}` : ''}` : ''}`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : unresolvedGenerations.length > 0 || exhaustedGenerations.length > 0
+            ? 'bad'
+            : rejectedGenerations.length > 0
+              ? 'warn'
+              : generationAttempts.length > 0
+                ? 'ok'
+                : 'bad',
+    },
+    {
+      label: 'Generation failure causality',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration?.failureProjection
+            ? 'No structured generation failure on the latest attempt'
+            : `${latestGeneration.failureProjection.category} · stage ${latestGeneration.failureProjection.stage} · candidate ${latestGeneration.failureProjection.candidatePresent ? 'present' : 'absent'} · rollback ${latestGeneration.failureProjection.rollbackProven ? 'proven' : 'unproven'} · publication ${latestGeneration.failureProjection.publicationBlocked ? 'blocked' : 'eligible'} · action ${latestGeneration.failureProjection.recommendedAction}`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : !latestGeneration?.failureProjection
+            ? 'neutral'
+            : latestGeneration.failureProjection.category === 'ROLLBACK_PROVEN' ||
+                latestGeneration.failureProjection.category ===
+                  'VERIFICATION_ENVIRONMENT_UNAVAILABLE'
+              ? 'warn'
+              : 'bad',
+    },
+    {
+      label: 'Latest generated candidate',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No candidate attempt exists'
+            : latestGeneration.candidateGeneration
+              ? `Candidate ${latestGeneration.candidateGeneration.slice(0, 12)} · ${latestGeneration.state} · contract ${latestGeneration.taskContractDigest?.slice(0, 12) || 'legacy'}${latestGeneration.effectiveProvider ? ` · ${latestGeneration.effectiveProvider}/${latestGeneration.effectiveModel || 'unknown'}` : ''}`
+              : `Attempt ${latestGeneration.attemptId.slice(0, 8)} · ${latestGeneration.state} · candidate digest not frozen yet`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : latestGeneration?.state === 'ACCEPTED'
+            ? 'ok'
+            : latestGeneration
+              ? 'warn'
+              : 'neutral',
+    },
+    {
+      label: 'Initial deterministic failure',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No generation attempt'
+            : latestGeneration.initialFailureEvidence
+              ? `${latestGeneration.initialFailureEvidence.outcome || 'UNKNOWN'} · ${latestGeneration.initialFailureEvidence.code || 'unclassified'} · ${latestGeneration.initialFailureEvidence.detail || 'no detail'}`
+              : 'No actually observed pre-provider failure evidence',
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : latestGeneration?.initialFailureEvidence?.outcome === 'FAILURE_OBSERVED'
+            ? 'ok'
+            : 'bad',
+    },
+    {
+      label: 'Latest candidate verification',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No verification evidence'
+            : latestGeneration.verificationReceiptId
+              ? `${latestGeneration.verificationOutcome || 'UNKNOWN'} · ${latestGeneration.verificationFailureCategory === 'ENVIRONMENT' ? `environment unavailable (${latestGeneration.verificationEnvironmentCode || 'unclassified'})` : latestGeneration.verificationFailureCategory === 'INTERNAL_PROTOCOL' ? `verification evidence invalid (${latestGeneration.verificationEnvironmentCode || 'unclassified'})` : `build ${latestGeneration.verificationBuildPassed ? 'passed' : 'failed'} · tests ${latestGeneration.verificationTestsPassed ?? 0} passed / ${latestGeneration.verificationTestsFailed ?? 0} failed`} · boundary ${latestGeneration.verificationExecutionBoundary || 'legacy'} · receipt ${latestGeneration.verificationReceiptId.slice(0, 8)}`
+              : `No immutable verification receipt · current state ${latestGeneration.state}`,
+      kind:
+        latestGeneration?.verificationOutcome === 'PASSED'
+          ? 'ok'
+          : latestGeneration?.verificationFailureCategory === 'ENVIRONMENT'
+            ? 'warn'
+            : latestGeneration?.verificationOutcome
+              ? 'bad'
+              : 'warn',
+    },
+    {
+      label: 'Latest acceptance checks',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No generation attempt'
+            : latestAcceptanceChecks.length === 0
+              ? 'No per-check evidence (legacy or verification not reached)'
+              : failedAcceptanceChecks.length === 0
+                ? `${latestAcceptanceChecks.length}/${latestAcceptanceChecks.length} deterministic checks passed`
+                : `${latestAcceptanceChecks.length - failedAcceptanceChecks.length}/${latestAcceptanceChecks.length} passed · ${failedAcceptanceChecks[0].kind} ${failedAcceptanceChecks[0].outcome?.toLowerCase()}: ${failedAcceptanceChecks[0].detail || 'no detail'}`,
+      kind:
+        run.runMode !== 'BUILD'
+          ? 'neutral'
+          : failedAcceptanceChecks.length > 0
+            ? 'bad'
+            : latestAcceptanceChecks.length > 0
+              ? 'ok'
+              : 'warn',
+    },
+    ...latestAcceptanceChecks.map((check) => ({
+      label: `Acceptance · ${check.kind}`,
+      value: check.hidden
+        ? `${check.outcome || 'PENDING'} · hidden deterministic check`
+        : `${check.outcome || 'PENDING'} · ${check.target}${check.detail ? ` · ${check.detail}` : ''}`,
+      kind:
+        check.outcome === 'PASSED'
+          ? ('ok' as const)
+          : check.outcome === 'FAILED' || check.outcome === 'UNAVAILABLE'
+            ? ('bad' as const)
+            : ('warn' as const),
+    })),
+    {
+      label: 'Latest candidate rollback',
+      value:
+        run.runMode !== 'BUILD'
+          ? 'Not applicable to PATCH'
+          : !latestGeneration
+            ? 'No generation attempt'
+            : latestGeneration.state === 'ROLLED_BACK'
+              ? `Speculative code was rolled back · ${latestGeneration.failureCode || 'failure unclassified'} · rejected diff ${latestGeneration.rejectedDiffDigest?.slice(0, 12) || 'unavailable'} · accepted frontier remains ${(latestGeneration.priorAcceptedGeneration || latestGeneration.beforeGeneration || 'unknown').slice(0, 12)}`
+              : latestGeneration.state === 'RECOVERY_FAILED'
+                ? latestGeneration.recoveryExhaustedAt
+                  ? `Rollback recovery exhausted after ${latestGeneration.recoveryAttemptCount ?? 0} attempts · ${latestGeneration.recoveryFailureCode || 'operator action required'} · support ${latestGeneration.recoverySupportId || 'unavailable'}`
+                  : `Rollback recovery retry ${latestGeneration.recoveryAttemptCount ?? 0}/3 pending${latestGeneration.recoveryNextAttemptAt ? ` at ${latestGeneration.recoveryNextAttemptAt}` : ''} · ${latestGeneration.recoveryFailureCode || 'operator action required'} · support ${latestGeneration.recoverySupportId || 'unavailable'}`
+                : latestGeneration.state === 'ACCEPTED'
+                  ? 'Not rolled back; deterministic verification and frontier CAS accepted this generation'
+                  : `Rollback not terminal · current state ${latestGeneration.state}`,
+      kind:
+        latestGeneration?.state === 'ACCEPTED'
+          ? 'ok'
+          : latestGeneration?.state === 'ROLLED_BACK'
+            ? 'warn'
+            : latestGeneration?.state === 'RECOVERY_FAILED'
+              ? 'bad'
+              : 'neutral',
     },
     {
       label: 'Approved correction route',

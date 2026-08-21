@@ -292,6 +292,7 @@ public final class PlanExpansionDependencyEnricher {
         .description(task.description())
         .complexity(task.complexity())
         .touchesFiles(task.touchesFiles())
+        .requiredArtifacts(task.requiredArtifacts())
         .dependsOn(dependencies)
         .hardConstraints(task.hardConstraints())
         .meetsRequirements(task.meetsRequirements())

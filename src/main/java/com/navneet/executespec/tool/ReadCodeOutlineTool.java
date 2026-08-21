@@ -138,6 +138,11 @@ public class ReadCodeOutlineTool implements Tool, FlagGatedTool {
               .map(i -> i.getNameAsString() + (i.isAsterisk() ? ".*" : ""))
               .limit(40)
               .collect(Collectors.joining(", ")));
+      // Mark the cut so the model can't mistake the first 40 for the whole set and re-add an
+      // import that already exists past the cap.
+      if (imports.size() > 40) {
+        sb.append(", …(").append(imports.size() - 40).append(" more not shown)");
+      }
       sb.append("\n");
     }
     for (TypeDeclaration<?> type : cu.getTypes()) {
@@ -164,6 +169,18 @@ public class ReadCodeOutlineTool implements Tool, FlagGatedTool {
         .append(type.getNameAsString())
         .append(lines(type))
         .append("\n");
+    // Enum CONSTANTS live on getEntries(), not getMembers() — JavaParser keeps them separate. The
+    // constants are usually the entire reason to outline an enum, so omitting them made the model
+    // conclude a value was absent (and add a duplicate) or reference a nonexistent one.
+    if (type instanceof EnumDeclaration ed && !ed.getEntries().isEmpty()) {
+      sb.append(ind)
+          .append("  constants: ")
+          .append(
+              ed.getEntries().stream()
+                  .map(e -> e.getNameAsString())
+                  .collect(Collectors.joining(", ")))
+          .append("\n");
+    }
     for (BodyDeclaration<?> member : type.getMembers()) {
       if (member instanceof FieldDeclaration f) {
         for (var v : f.getVariables()) {
@@ -185,6 +202,17 @@ public class ReadCodeOutlineTool implements Tool, FlagGatedTool {
             .append("  ")
             .append(m.getDeclarationAsString(true, false, true))
             .append(lines(m))
+            .append("\n");
+      } else if (member instanceof com.github.javaparser.ast.body.AnnotationMemberDeclaration am) {
+        // @interface elements are AnnotationMemberDeclarations — none of the branches above match
+        // them, so a custom annotation used to render with an empty body.
+        sb.append(ind)
+            .append("  ")
+            .append(am.getType().asString())
+            .append(" ")
+            .append(am.getNameAsString())
+            .append("()")
+            .append(lines(am))
             .append("\n");
       } else if (member instanceof TypeDeclaration<?> nested) {
         appendType(sb, nested, depth + 1);

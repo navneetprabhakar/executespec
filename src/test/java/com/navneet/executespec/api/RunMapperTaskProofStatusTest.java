@@ -26,6 +26,7 @@ class RunMapperTaskProofStatusTest {
           null,
           new ObjectMapper(),
           null,
+          null,
           null);
 
   @Test
@@ -162,6 +163,7 @@ class RunMapperTaskProofStatusTest {
             new ObjectMapper(),
             new com.navneet.executespec.security.WorkspacePathRedaction(
                 new com.navneet.executespec.config.AgentProperties()),
+            null,
             null);
     AgentTask task =
         AgentTask.builder()
@@ -268,6 +270,7 @@ class RunMapperTaskProofStatusTest {
             null,
             new ObjectMapper(),
             null,
+            null,
             null);
     PipelineRun run = new PipelineRun();
     run.setRunId("run-list-1");
@@ -307,6 +310,7 @@ class RunMapperTaskProofStatusTest {
             taskRepo,
             null,
             new ObjectMapper(),
+            null,
             null,
             null);
     PipelineRun run = new PipelineRun();
@@ -450,6 +454,7 @@ class RunMapperTaskProofStatusTest {
         null,
         null,
         new ObjectMapper(),
+        null,
         null,
         null);
   }

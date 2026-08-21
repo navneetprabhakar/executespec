@@ -255,6 +255,7 @@ class CodeGenEngineImplTest {
     WorkerTaskRequest workerReq = req.getValue();
     assertThat(workerReq.provider()).isEqualTo("anthropic");
     assertThat(workerReq.model()).isEqualTo("claude-sonnet-4-6");
+    assertThat(workerReq.changeMode()).isEqualTo(CodeChangeMode.PATCH);
     assertThat(workerReq.systemPrompt()).isEqualTo("PATCH SYSTEM");
     assertThat(workerReq.userPrompt())
         .contains("<<<UNTRUSTED_PATCH_TASK")

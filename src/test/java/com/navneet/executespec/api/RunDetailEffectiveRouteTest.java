@@ -68,7 +68,8 @@ class RunDetailEffectiveRouteTest {
         runCostTracker,
         new ObjectMapper(),
         null,
-        runQuotaRefundRepository);
+        runQuotaRefundRepository,
+        null);
   }
 
   private static RunStepUsage success(String provider, String model) {

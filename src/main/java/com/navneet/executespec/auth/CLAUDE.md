@@ -1,5 +1,21 @@
 # Package: `auth`
 
+## Security filters must not force JPA at construction (2026-08-09)
+
+`JwtAuthenticationFilter` is a servlet `Filter` (a `ServletContextInitializer`), so Spring
+instantiates it — and everything in its constructor graph — during embedded-web-server creation in
+`onRefresh()`, BEFORE the shared JPA `EntityManagerFactory` singleton is initialized in
+`finishBeanFactoryInitialization()`. A hard constructor dependency that transitively reaches a Spring
+Data repository therefore forces the EntityManagerFactory too early and crash-loops boot under
+`prod,gcp` (`UnsatisfiedDependencyException` → `jpaSharedEM_entityManagerFactory` not ready; Tomcat
+never starts). This happened when `JwtUtil` gained a direct `FeatureFlagService` dependency for the
+force-logout epoch check (`FeatureFlagService.@PostConstruct` loads its cache from a JPA repo). Fix:
+`JwtUtil` injects `ObjectProvider<FeatureFlagService>` and resolves it lazily in `isTokenValid`, on
+the request path. **Do not inject a JPA-backed bean (directly or transitively) into any
+Filter/`ServletContextInitializer` constructor** — use `ObjectProvider`/`@Lazy`. `MigratedSchemaBootSmokeTest`
+runs `webEnvironment = RANDOM_PORT` (real servlet container) so this ordering regression fails CI;
+`JwtUtilLazyFeatureFlagTest` pins the lazy resolution at the unit level.
+
 ## Run completion email semantics (2026-08-02)
 
 Completion email consumes server-owned `RunTerminalOutcome`. Controlled budget, policy,

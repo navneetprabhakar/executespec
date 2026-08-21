@@ -159,11 +159,21 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
   echo "[build] JAR (skip tests — PR-gated)…"; mvn -B -q -DskipTests package
 fi
 JAR="$(ls target/*.jar | head -1)"; echo "[build] JAR: $JAR"
+JAR_SHA256="$(shasum -a 256 "$JAR" | awk '{print $1}')"
+DEPLOY_ATTEMPT_ID="local-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
-# ── 2. Upload JAR keyed by SHA + CURRENT_SHA ──────────────────────────────────
+# ── 2. Upload immutable candidate; do not publish CURRENT_SHA before activation ─
 echo "[upload] $BUCKET/releases/app-$SHA.jar"
-gsutil cp "$JAR" "$BUCKET/releases/app-$SHA.jar"
-echo "$SHA" | gsutil cp - "$BUCKET/CURRENT_SHA"
+JAR_URI="$BUCKET/releases/app-$SHA.jar"
+if gsutil -q stat "$JAR_URI"; then
+  RECORDED_SHA256="$(gcloud storage objects describe "$JAR_URI" --format='value(metadata.sha256)')"
+  [ "$RECORDED_SHA256" = "$JAR_SHA256" ] || {
+    echo "Immutable artifact collision: $JAR_URI" >&2; exit 6; }
+else
+  gsutil -h 'x-goog-if-generation-match:0' -h "x-goog-meta-sha256:$JAR_SHA256" cp "$JAR" "$JAR_URI"
+fi
+PREVIOUS_CURRENT_SHA="$(gsutil cat "$BUCKET/CURRENT_SHA" 2>/dev/null | tr -d '\r\n' || true)"
+PREVIOUS_CURRENT_GENERATION="$(gsutil stat "$BUCKET/CURRENT_SHA" 2>/dev/null | awk '/Generation:/ { print $2; exit }' || true)"
 
 # ── 3. Write env-patch.sh (verbatim from deploy.yml) ──────────────────────────
 cat > /tmp/env-patch.sh << 'SCRIPT'
@@ -208,18 +218,36 @@ chmod +x /tmp/env-patch.sh
 echo "[deploy] scp env-patch + swap JAR + restart…"
 gcloud compute scp /tmp/env-patch.sh "$INSTANCE":/tmp/env-patch.sh \
   --project "$GCP_PROJECT" --zone "$GCE_ZONE" --tunnel-through-iap --strict-host-key-checking=no
+set +e
 "${SSH_BASE[@]}" --command="
   set -e
   sudo mkdir -p /opt/app/releases
   sudo gsutil cp $BUCKET/releases/app-$SHA.jar /opt/app/releases/
+  echo '$JAR_SHA256  app-$SHA.jar' | sudo tee /opt/app/releases/app-$SHA.jar.sha256 >/dev/null
+  cd /opt/app/releases
+  sudo sha256sum -c app-$SHA.jar.sha256
   sudo bash /tmp/env-patch.sh '$PUBLIC_URL' '$BUCKET_NAME'
   rm -f /tmp/env-patch.sh
+  sudo sed -i '/^EXECUTESPEC_RELEASE_SOURCE_SHA=/d; /^EXECUTESPEC_RELEASE_ARTIFACT_SHA256=/d; /^EXECUTESPEC_RELEASE_ATTEMPT_ID=/d' /opt/app/executespec.env
+  printf '%s\n' 'EXECUTESPEC_RELEASE_SOURCE_SHA=$SHA' 'EXECUTESPEC_RELEASE_ARTIFACT_SHA256=$JAR_SHA256' 'EXECUTESPEC_RELEASE_ATTEMPT_ID=$DEPLOY_ATTEMPT_ID' | sudo tee -a /opt/app/executespec.env >/dev/null
   sudo ln -sf /opt/app/releases/app-$SHA.jar /opt/app/app.jar
-  echo '$SHA' | sudo tee /opt/app/RUNNING_SHA
+  printf '%s\n' 'source_sha=$SHA' 'artifact_sha256=$JAR_SHA256' 'attempt_id=$DEPLOY_ATTEMPT_ID' | sudo tee /opt/app/.RUNNING_RELEASE.$DEPLOY_ATTEMPT_ID.tmp >/dev/null
+  sudo mv /opt/app/.RUNNING_RELEASE.$DEPLOY_ATTEMPT_ID.tmp /opt/app/RUNNING_RELEASE
+  echo '$SHA' | sudo tee /opt/app/RUNNING_SHA >/dev/null
   sudo systemctl restart executespec
   echo 'Deploy done — service restarting'
 "
+ACTIVATION_EXIT=$?
+set -e
 
+# The SSH response can be lost after a successful switch. Reconcile the exact host tuple rather
+# than treating the transport exit code as deployment truth.
+EXPECTED_MARKER="$(printf '%s\n' "source_sha=$SHA" "artifact_sha256=$JAR_SHA256" "attempt_id=$DEPLOY_ATTEMPT_ID")"
+OBSERVED_MARKER="$("${SSH_BASE[@]}" --command='sudo cat /opt/app/RUNNING_RELEASE' | tr -d '\r')"
+[ "$OBSERVED_MARKER" = "$EXPECTED_MARKER" ] || {
+  printf 'Activation not proven (ssh=%s).\nexpected:\n%s\nobserved:\n%s\n' "$ACTIVATION_EXIT" "$EXPECTED_MARKER" "${OBSERVED_MARKER:-missing}" >&2
+  exit 7
+}
 # ── 5. Wait + health check (mirrors deploy.yml) ───────────────────────────────
 echo "[health] waiting 45s for boot…"; sleep 45
 for i in $(seq 1 20); do
@@ -231,6 +259,19 @@ for i in $(seq 1 20); do
   [ "$i" -eq 20 ] && { echo "[health] FAILED after 20 attempts"; exit 1; }
   sleep 10
 done
+
+EXPECTED_PROCESS="$(printf '%s\n' "EXECUTESPEC_RELEASE_SOURCE_SHA=$SHA" "EXECUTESPEC_RELEASE_ARTIFACT_SHA256=$JAR_SHA256" "EXECUTESPEC_RELEASE_ATTEMPT_ID=$DEPLOY_ATTEMPT_ID" | sort)"
+OBSERVED_PROCESS="$("${SSH_BASE[@]}" --command="PID=\$(sudo systemctl show executespec --property MainPID --value); test \"\$PID\" -gt 0; sudo cat /proc/\$PID/environ | tr '\\0' '\\n' | grep '^EXECUTESPEC_RELEASE_' | sort" | tr -d '\r')"
+[ "$OBSERVED_PROCESS" = "$EXPECTED_PROCESS" ] || {
+  echo "Healthy JVM does not carry the exact release tuple" >&2; exit 9; }
+
+# Publish only after the restarted JVM has been identified. The shared CAS protocol has behavioral
+# tests for normal publication, stale writers, idempotent replay and lost-response replay.
+CURRENT_SHA_BUCKET="$BUCKET/CURRENT_SHA" \
+TARGET_SHA="$SHA" \
+PREVIOUS_CURRENT_SHA="$PREVIOUS_CURRENT_SHA" \
+PREVIOUS_CURRENT_GENERATION="$PREVIOUS_CURRENT_GENERATION" \
+bash scripts/publish-release-pointer.sh
 
 # ── 6. Provider-key verify (read-only) ────────────────────────────────────────
 PROV="$("${SSH_BASE[@]}" --command="curl -s http://localhost:8080/api/health/providers" 2>/dev/null || echo SSH_FAIL)"

@@ -20,6 +20,10 @@ import lombok.Builder;
  *     injected
  * @param userPrompt user message — typically the task description
  * @param context per-task execution context (workspace + ids)
+ * @param changeMode explicit orchestration policy identity for the shared code-change loop. BUILD
+ *     and PATCH callers set this rather than asking the loop to infer pipeline ownership from
+ *     mutable run state. Null is retained only for historical/specialized callers and falls back to
+ *     the persisted run mode.
  * @param maxIterations max LLM calls; 0/null defaults to {@link WorkerAgent#DEFAULT_MAX_ITER}
  * @param temperature sampling temperature; null defaults to 0.0
  * @param maxTokensPerCall max output tokens per LLM call; null defaults per-provider
@@ -151,6 +155,10 @@ import lombok.Builder;
  *     stall class is structurally avoided), deterministic (fires for every model, including ones
  *     too weak to self-verify), bounded per task, inert on remote runs and when no runner resolves.
  *     This is the edit→run→observe loop; supersedes V209/V217 on graduation.
+ * @param initialFailureSnapshot optional server-observed deterministic red state that seeds BUILD
+ *     auto-verification. It lets the first post-edit verifier classify improvement, regression or
+ *     repetition against the admitted failure instead of relabelling that result INITIAL_FAILURE.
+ *     PATCH and historical callers leave it null.
  * @param strictProvider operator/evaluation route pin. When true, this worker pass must not enter
  *     the router's YAML failover chain; an explicit handoff harness may start a second pass on an
  *     allow-listed fallback instead. Null/false preserves normal routing.
@@ -189,6 +197,7 @@ public record WorkerTaskRequest(
     String systemPrompt,
     String userPrompt,
     ExecutionContext context,
+    CodeChangeMode changeMode,
     Integer maxIterations,
     Double temperature,
     Integer maxTokensPerCall,
@@ -207,6 +216,7 @@ public record WorkerTaskRequest(
     Boolean verifyBeforeComplete,
     Boolean progressV2,
     Boolean autoVerify,
+    DeterministicFailureDelta.Snapshot initialFailureSnapshot,
     Boolean strictProvider,
     Integer mutationChurnForceAfter,
     Long absoluteDeadlineEpochMs,

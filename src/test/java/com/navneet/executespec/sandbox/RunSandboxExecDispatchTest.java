@@ -179,6 +179,7 @@ class RunSandboxExecDispatchTest {
         "org-1",
         "abc1234",
         "[]",
+        SandboxPurpose.RUN,
         state,
         SandboxIsolationProfile.CONTAINER_STRICT_V1,
         1,

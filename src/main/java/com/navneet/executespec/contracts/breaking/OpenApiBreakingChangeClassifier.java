@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.navneet.executespec.contracts.ContractRegistry;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Component;
 
@@ -40,20 +41,45 @@ public class OpenApiBreakingChangeClassifier implements BreakingChangeClassifier
 
   @Override
   public ContractDiff classify(String oldContent, String newContent) {
+    return classifyInternal(null, oldContent, newContent);
+  }
+
+  @Override
+  public ContractDiff classify(ExecutionContext context, String oldContent, String newContent) {
+    return classifyInternal(context, oldContent, newContent);
+  }
+
+  private ContractDiff classifyInternal(
+      ExecutionContext context, String oldContent, String newContent) {
     CliBreakingChangeRunner.CliResult result =
-        runner.run(
-            oldContent,
-            newContent,
-            "oasdiff",
-            (oldPath, newPath) ->
-                List.of(
-                    "oasdiff",
-                    "breaking",
-                    oldPath.toString(),
-                    newPath.toString(),
-                    "--format",
-                    "text"),
-            30);
+        context == null
+            ? runner.run(
+                oldContent,
+                newContent,
+                "oasdiff",
+                (oldPath, newPath) ->
+                    List.of(
+                        "oasdiff",
+                        "breaking",
+                        oldPath.toString(),
+                        newPath.toString(),
+                        "--format",
+                        "text"),
+                30)
+            : runner.run(
+                context,
+                oldContent,
+                newContent,
+                "oasdiff",
+                (oldPath, newPath) ->
+                    List.of(
+                        "oasdiff",
+                        "breaking",
+                        oldPath.toString(),
+                        newPath.toString(),
+                        "--format",
+                        "text"),
+                30);
     if (!result.executed()) {
       return unclassified(result.unavailableReason());
     }

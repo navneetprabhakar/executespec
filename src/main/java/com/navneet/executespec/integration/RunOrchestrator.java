@@ -131,12 +131,15 @@ public class RunOrchestrator implements RunControlPort {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
 
-  /** RR-034 — bounded final-commit of the run workspace (extracted from this god class). */
-  private final WorkspaceGitCommitService workspaceGitCommitService;
+  private final LegacyWorkspaceGitCommitService legacyWorkspaceGitCommitService;
 
   private final OutlinePlannerAgent outlinePlanner;
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
   private final SequentialExecutor executor;
+  private final com.navneet.executespec.harness.TaskStatusPersistenceService taskStatusPersistence;
+  private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+      workspaceGenerationRecovery;
+  private final AcceptedGenerationVerificationRunner acceptedVerification;
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
@@ -172,7 +175,7 @@ public class RunOrchestrator implements RunControlPort {
   private final RunContextComposer contextComposer;
   private final RunPlanningCoordinator planningCoordinator;
   private final RunStandardsEnforcer standardsEnforcer;
-  private final RunInvariantEnforcer invariantEnforcer;
+  private final RunEnterpriseVerificationService enterpriseVerification;
   private final RunValidationKickoff validationKickoff;
   private final RunResourceCleaner resourceCleaner;
   private final TestGenOrchestrator testGenOrchestrator;
@@ -199,6 +202,8 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+  private final com.navneet.executespec.workspacegeneration.BuildProtocolVersionService
+      buildProtocolVersions;
 
   /**
    * Enterprise-knowledge planner injection (flag {@code enterprise.inject.enabled}, default OFF).
@@ -222,8 +227,6 @@ public class RunOrchestrator implements RunControlPort {
    * com.navneet.executespec.contracts.gate.PlanContractGateService} is the one that can actually
    * refuse: it fires at the plan gate, before worker spend or publication.
    */
-  private final RunBreakingChangeDetector runBreakingChangeDetector;
-
   private final com.navneet.executespec.contracts.gate.PlanContractGateService planContractGate;
 
   private final RunPublicationFence publicationFence;
@@ -233,9 +236,7 @@ public class RunOrchestrator implements RunControlPort {
       brownfieldHttpContractGuard;
 
   /** Reversible workspace and durable-ledger lifecycle for automatic correction attempts. */
-  private final AutomaticCorrectionLifecycle automaticCorrectionLifecycle;
-
-  private final CorrectionValidationAdmission correctionValidationAdmission;
+  private final ContinuationActionRecorder continuationActionRecorder;
 
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
@@ -387,6 +388,10 @@ public class RunOrchestrator implements RunControlPort {
 
   /** Resolves the durable provider/model route a submitted run advertises. */
   private final RunRouteContractResolver routeContractResolver;
+
+  /** Persists and resolves the typed greenfield/brownfield workspace boundary. */
+  private final com.navneet.executespec.workspacegeneration.RunWorkspaceOriginService
+      workspaceOrigins;
 
   /**
    * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with status {@code
@@ -1043,6 +1048,10 @@ public class RunOrchestrator implements RunControlPort {
     // whose project, quota and audit trail it actually belongs to. The actor stays on
     // createdByUserId.
     RunSubmitAuthority submitAuthority = RunSubmitAuthority.resolve(policy, orgId, runId);
+    String normalizedRunMode =
+        runMode == null || runMode.isBlank()
+            ? com.navneet.executespec.state.RunMode.BUILD
+            : runMode;
 
     PipelineRun run =
         PipelineRun.builder()
@@ -1050,13 +1059,18 @@ public class RunOrchestrator implements RunControlPort {
             .userRequest(userRequest)
             .status("PLANNING")
             .harnessVersion("v2")
-            .runMode(
-                runMode == null || runMode.isBlank()
-                    ? com.navneet.executespec.state.RunMode.BUILD
-                    : runMode)
+            .runMode(normalizedRunMode)
+            .buildProtocolVersion(buildProtocolVersions.selectForSubmission(normalizedRunMode))
             .sourceType(source != null ? source : "MANUAL")
             .repoUrl(repoUrl)
             .repoMode(repoMode)
+            .workspaceOrigin(
+                workspaceOrigins.submittedName(
+                    projectId,
+                    submitSourceRunIntent.get(),
+                    Boolean.TRUE.equals(submitLocalExecutionIntent.get()),
+                    repoMode,
+                    selectedRepoIds))
             .branchOverride(branchOverrideFinal)
             .checkoutBranch(checkoutBranchFinal)
             .publicationRepoFullName(policy.publicationRepoFullName())
@@ -1613,6 +1627,7 @@ public class RunOrchestrator implements RunControlPort {
         try {
           List<ProjectRepo> repos =
               projectRepoService.resolveForRunStrict(projectId, selectedRepoIds);
+          workspaceOrigins.refineProjectAdmission(runId, sourceRunId, repos.size());
           if (repos.isEmpty()) {
             log.info("V2 run={} project has no linked brownfield repositories", runId);
           } else {
@@ -2121,6 +2136,7 @@ public class RunOrchestrator implements RunControlPort {
                     .lowComplexityWorkerStartTier(lowComplexityWorkerStartTierOverride)
                     .originalGoal(userRequest)
                     .designBlock(designBlock)
+                    .workspaceOrigin(workspaceOrigins.load(runId, selectedRepoIds))
                     .projectId(projectId)
                     // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
                     // WORKSPACE" header + the per-repo subdir list — without it the worker
@@ -2216,30 +2232,11 @@ public class RunOrchestrator implements RunControlPort {
 
       op = runOperationLifecycle.claimReview(baseRootCtx, runId, provider, model);
       ExecutionContext reviewRootCtx = op.context();
-      // Run deterministic formatters against the workspace before the LLM reviewer sees it.
-      // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
-      // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
-      // "fix this whitespace" noise per task. Gated by feature flag so ops can disable in
-      // environments without prettier / black / gofmt on PATH (the per-tool timeout already
-      // makes failure non-fatal, but the flag short-circuits the whole pass when known broken).
-      if (featureFlagService.isEnabled("lint.autofix.enabled")) {
-        try {
-          com.navneet.executespec.lint.LintPass.LintReport lintReport =
-              lintPass.run(runId, reviewRootCtx.workspaceRoot());
-          if (lintReport.changedAnything()) {
-            log.info("RunOrchestrator run={} lint auto-fix: {}", runId, lintReport.summary());
-            broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
-          } else if (!lintReport.skipped()) {
-            log.debug("RunOrchestrator run={} lint auto-fix: no changes", runId);
-          }
-        } catch (Exception e) {
-          // Never abort the run on a formatter error — reviewer still runs against unmodified code.
-          log.warn(
-              "RunOrchestrator run={} lint auto-fix failed (continuing): {}",
-              runId,
-              e.getMessage());
-        }
-      }
+      // The accepted task frontier is immutable at this point. Post-task formatter writes used to
+      // mutate it outside any generation transaction, making the review/report evidence stale by
+      // construction. Formatting must happen inside a task generation or a durable correction.
+      workspaceGenerationRecovery.assertAcceptedFrontier(
+          runId, reviewRootCtx.workspaceRoot(), "REVIEWER");
 
       persistenceWriter.updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
@@ -2285,23 +2282,35 @@ public class RunOrchestrator implements RunControlPort {
               reviewerRoute.provider(),
               reviewerRoute.model());
         }
+        Plan acceptedReviewPlan = plan;
         reviewResult =
-            reviewer.review(
-                InitialReviewerRequestPolicy.builder()
-                    .provider(reviewerRoute.provider())
-                    .model(reviewerRoute.model())
-                    .context(reviewRootCtx)
-                    .buildCommand(plan.buildCommand())
-                    .skipWiringPass(skipWiring)
-                    .maxIterationsPerPass(reviewerMaxIter)
-                    .brownfield(linkedRepoCount > 0)
-                    .allowedRepoRoots(
-                        RunReviewerScope.repoRoots(projectRepoService, projectId, selectedRepoIds))
-                    .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
-                    .allowBuildManifestCreation(false)
-                    .originalGoal(userRequest)
-                    .requirements(plan.requirements())
-                    .build());
+            acceptedVerification.execute(
+                reviewRootCtx,
+                "REVIEWER",
+                disposableReviewContext ->
+                    reviewer.review(
+                        InitialReviewerRequestPolicy.builder()
+                            .provider(reviewerRoute.provider())
+                            .model(reviewerRoute.model())
+                            .context(disposableReviewContext)
+                            .buildCommand(acceptedReviewPlan.buildCommand())
+                            .skipWiringPass(skipWiring)
+                            .maxIterationsPerPass(reviewerMaxIter)
+                            .brownfield(linkedRepoCount > 0)
+                            .allowedRepoRoots(
+                                RunReviewerScope.repoRoots(
+                                    projectRepoService, projectId, selectedRepoIds))
+                            .approvedNewFiles(RunReviewerScope.approvedNewFiles(acceptedReviewPlan))
+                            .allowBuildManifestCreation(false)
+                            .readOnly(true)
+                            .originalGoal(userRequest)
+                            .requirements(acceptedReviewPlan.requirements())
+                            .planAdvisories(
+                                com.navneet.executespec.agent.TaskExpanderAgent
+                                    .advisoryPlanContractViolations(acceptedReviewPlan))
+                            .build()));
+        workspaceGenerationRecovery.assertAcceptedFrontier(
+            runId, reviewRootCtx.workspaceRoot(), "REVIEWER");
         persistenceWriter.persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
         RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
@@ -2357,70 +2366,8 @@ public class RunOrchestrator implements RunControlPort {
         brownfieldHttpContractGuard.assertCompatible(runId);
       }
 
-      // 3b. Enterprise enforcement (project runs only) — make the formerly
-      // "decorative" engines real (RL-2026-05-037). StandardsRunner persists
-      // standards violations so /standards/report is populated; the breaking-
-      // change classifier surfaces touched-contract breaks as report-only run
-      // issues. Both project-gated + flag-gated (default OFF) + non-fatal.
       java.util.List<com.navneet.executespec.reviewer.model.ReviewIssue> contractBreakingIssues =
-          new java.util.ArrayList<>();
-      if (projectId != null) {
-        if (featureFlagService.isEnabled("standards.enforcement.enabled")) {
-          try {
-            var standardsReport =
-                standardsEnforcer.runStandardsEnforcement(
-                    runId, projectId, reviewRootCtx.workspaceRoot(), selectedRepoIds);
-            contractBreakingIssues.addAll(RunStandardsEnforcer.toReviewIssues(standardsReport));
-          } catch (Exception e) {
-            log.warn(
-                "RunOrchestrator run={} standards enforcement unavailable: {}",
-                runId,
-                e.getClass().getSimpleName());
-            contractBreakingIssues.add(
-                com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                    .id("SYNTH-STANDARD-UNAVAILABLE-RUN")
-                    .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-                    .category(com.navneet.executespec.reviewer.model.IssueCategory.CODE_QUALITY)
-                    .description("Configured engineering standards could not be verified.")
-                    .fixInstruction("Restore standards enforcement and rerun.")
-                    .autoFixed(false)
-                    .fixSucceeded(false)
-                    .build());
-          }
-        }
-        try {
-          contractBreakingIssues.addAll(
-              invariantEnforcer.enforce(runId, projectId, reviewRootCtx.workspaceRoot()));
-        } catch (Exception e) {
-          log.warn(
-              "RunOrchestrator run={} architecture invariant enforcement unavailable: {}",
-              runId,
-              e.getClass().getSimpleName());
-          contractBreakingIssues.add(
-              com.navneet.executespec.reviewer.model.ReviewIssue.builder()
-                  .id("SYNTH-INVARIANT-UNAVAILABLE-RUN")
-                  .severity(com.navneet.executespec.reviewer.model.IssueSeverity.CRITICAL)
-                  .category(
-                      com.navneet.executespec.reviewer.model.IssueCategory.CROSS_TASK_MISMATCH)
-                  .description("Configured architecture invariants could not be verified.")
-                  .fixInstruction("Restore invariant enforcement and rerun.")
-                  .autoFixed(false)
-                  .fixSucceeded(false)
-                  .build());
-        }
-        if (featureFlagService.isEnabled("contracts.breaking-change.enabled")) {
-          try {
-            contractBreakingIssues.addAll(
-                runBreakingChangeDetector.detect(
-                    runId, projectId, reviewRootCtx.workspaceRoot(), selectedRepoIds));
-          } catch (Exception e) {
-            log.warn(
-                "RunOrchestrator run={} breaking-change detection skipped: {}",
-                runId,
-                e.getMessage());
-          }
-        }
-      }
+          enterpriseVerification.verify(reviewRootCtx, projectId, selectedRepoIds);
 
       // 4. Pre-resolve terminal status BEFORE the validation report.
       // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
@@ -2457,9 +2404,21 @@ public class RunOrchestrator implements RunControlPort {
 
       // 5. Generate validation report + kick off test generation
       op = runOperationLifecycle.finishReviewAndClear(op, reviewerErrored);
+      ExecutionResult validationExecResult = execResult;
+      ReviewerResult validationReviewResult = reviewResult;
+      Plan validationPlan = plan;
       Optional<ValidationReport> validationReport =
-          validationKickoff.generateValidationReport(
-              runId, execResult, reviewResult, plan, contractBreakingIssues, "validation");
+          acceptedVerification.execute(
+              baseRootCtx,
+              "VALIDATION",
+              disposableContext ->
+                  validationKickoff.generateValidationReport(
+                      disposableContext,
+                      validationExecResult,
+                      validationReviewResult,
+                      validationPlan,
+                      contractBreakingIssues,
+                      "validation"));
       Optional<PostReviewContinuation> postValidationContinuation =
           maybeEmitPostValidationContinuationDecision(
               runId,
@@ -2497,14 +2456,21 @@ public class RunOrchestrator implements RunControlPort {
                 : new StatusAndReason(
                     mapOverallToV1Status(execResult.overall()), srDerived.reason());
         stampRunStatusReason(runId, sr);
+        ExecutionResult rerunValidationExecResult = execResult;
+        ReviewerResult rerunValidationReviewResult = reviewResult;
+        Plan rerunValidationPlan = plan;
         Optional<ValidationReport> rerunValidationReport =
-            validationKickoff.generateValidationReport(
-                runId,
-                execResult,
-                reviewResult,
-                plan,
-                contractBreakingIssues,
-                "post-validation-revalidation");
+            acceptedVerification.execute(
+                baseRootCtx,
+                "POST_VALIDATION",
+                disposableContext ->
+                    validationKickoff.generateValidationReport(
+                        disposableContext,
+                        rerunValidationExecResult,
+                        rerunValidationReviewResult,
+                        rerunValidationPlan,
+                        contractBreakingIssues,
+                        "post-validation-revalidation"));
         ValidationReport effectiveValidationReport =
             rerunValidationReport.orElse(validationReport.orElse(null));
         if (validationReportProvenanceFailed(effectiveValidationReport)) {
@@ -2538,7 +2504,7 @@ public class RunOrchestrator implements RunControlPort {
         // Baseline CLI smoke: invoke the inferred entry point with no stdin,
         // record exit code + head of stdout. Full stdin/stdout fixture harness
         // (planner-emitted cliTestCases with expected stdout) is follow-up work.
-        var cliResult = cliSmokeRunner.run(runId, workspace);
+        var cliResult = acceptedVerification.execute(baseRootCtx, "CLI_SMOKE", cliSmokeRunner::run);
         log.info(
             "RunOrchestrator run={} CLI smoke status={} exit={} cmd='{}' dur={}ms",
             runId,
@@ -2553,8 +2519,17 @@ public class RunOrchestrator implements RunControlPort {
             plan.runtimeSurface());
       }
 
-      // 6. Final workspace commit so `/push-github` has refs to push
-      commitWorkspaceOutputs(runId, workspace);
+      // Rolling-deployment compatibility only. V2 never enters this host Git path; it constructs
+      // exact immutable commit objects under PUBLICATION_PREPARE authority at publication time.
+      PipelineRun publicationCompatibilityRun = runRepo.findById(runId).orElse(null);
+      if (publicationCompatibilityRun != null
+          && com.navneet.executespec.state.RunMode.BUILD.equals(
+              publicationCompatibilityRun.getRunMode())
+          && com.navneet.executespec.workspacegeneration.BuildProtocolVersion.LEGACY_V1
+              .name()
+              .equals(publicationCompatibilityRun.getBuildProtocolVersion())) {
+        legacyWorkspaceGitCommitService.commit(runId, workspace);
+      }
 
       // 6b. Project memory: append compressed ledger entry for project-scoped runs.
       // Non-fatal — any failure is swallowed inside the agent.
@@ -3003,20 +2978,6 @@ public class RunOrchestrator implements RunControlPort {
             pushEx.getMessage());
       }
     }
-  }
-
-  /**
-   * Stages and commits every change in the workspace as a single "V2 run output" commit after
-   * execution + review complete. Required so {@code /push-github} has concrete refs to push — V2
-   * workers use {@code writeFile/editFile} tools directly on the filesystem and don't always commit
-   * per task.
-   *
-   * <p>Best-effort — a failed commit (e.g. nothing to commit, user had a .git/index.lock problem)
-   * is logged but doesn't fail the run.
-   */
-  /** RR-034 — bounded, kill-on-timeout final commit delegated out of this orchestrator. */
-  private void commitWorkspaceOutputs(String runId, Path workspace) {
-    workspaceGitCommitService.commitWorkspaceOutputs(runId, workspace);
   }
 
   // cancel(runId) moved to RunLifecycleService (god-class split inc-6, audit #43).
@@ -3690,7 +3651,7 @@ public class RunOrchestrator implements RunControlPort {
     ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
     if (candidate == null
         || action.targetTask() == null
-        || AutomaticCorrectionLifecycle.sameRoute(
+        || sameContinuationRoute(
             candidate,
             action.targetTask().dispatchedProvider(),
             action.targetTask().dispatchedModel())) {
@@ -3706,28 +3667,6 @@ public class RunOrchestrator implements RunControlPort {
           targetTaskKey);
       return Optional.empty();
     }
-    final CorrectionWorkspaceTransaction.Checkpoint correctionCheckpoint;
-    final AutomaticCorrectionLifecycle.EvidenceCheckpoint correctionEvidenceCheckpoint;
-    try {
-      correctionCheckpoint =
-          automaticCorrectionLifecycle.begin(runId, targetTaskKey, rootCtx.workspaceRoot());
-      correctionEvidenceCheckpoint = automaticCorrectionLifecycle.invalidateEvidence(runId);
-    } catch (RuntimeException checkpointFailure) {
-      log.error(
-          "RunOrchestrator run={} automatic correction refused — workspace checkpoint failed: {}",
-          runId,
-          checkpointFailure.getMessage(),
-          checkpointFailure);
-      broadcaster.emit(
-          runId,
-          RunEvent.log(
-              runId,
-              targetTaskId,
-              "Automatic correction refused: the current workspace could not be checkpointed"
-                  + " safely."));
-      return Optional.empty();
-    }
-
     RunLlmOperationLifecycleService.PhaseLease postValidationOperation = null;
     if ("POST_VALIDATION_REPORT".equals(continuationActionSource(decision))) {
       postValidationOperation =
@@ -3780,7 +3719,7 @@ public class RunOrchestrator implements RunControlPort {
             limitData.used(),
             limitData.max()));
     broadcaster.emit(runId, RunEvent.log(runId, targetTaskId, summary));
-    automaticCorrectionLifecycle.recordExecuted(
+    continuationActionRecorder.recordExecuted(
         taskRow.get(),
         decision.decision().name(),
         candidate.provider(),
@@ -3791,15 +3730,9 @@ public class RunOrchestrator implements RunControlPort {
         limitData.max(),
         continuationActionSource(decision));
 
-    var task = taskRow.get();
-    var previousTaskState = automaticCorrectionLifecycle.snapshotTask(task);
-    task.setStatus("PENDING");
-    task.setStartedAt(null);
-    task.setCompletedAt(null);
-    taskRepo.save(task);
-    broadcaster.emit(runId, RunEvent.taskStatus(runId, targetTaskId, "PENDING"));
-
-    CorrectionWorkspaceTransaction.DiffEvidence correctionDiff = null;
+    workspaceGenerationRecovery.recoverRunOrThrow(runId);
+    workspaceGenerationRecovery.assertAcceptedFrontier(
+        runId, rootCtx.workspaceRoot(), "BUILD_CONTINUATION");
     try {
       ExecutionRequest correctionRequest =
           AutomaticCorrectionExecutionRequestFactory.create(
@@ -3814,11 +3747,10 @@ public class RunOrchestrator implements RunControlPort {
               runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null),
               designBlock,
               projectId,
-              contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds));
+              contextComposer.buildMultiRepoSummary(projectId, selectedRepoIds),
+              workspaceOrigins.load(runId, selectedRepoIds));
       ExecutionResult rerunResult =
-          automaticCorrectionLifecycle.executeWithToolFence(
-              correctionCheckpoint,
-              executor,
+          executor.execute(
               correctionRequest,
               new SequentialExecutor.ResumeRequest(
                   targetTaskKey,
@@ -3840,34 +3772,44 @@ public class RunOrchestrator implements RunControlPort {
           candidate.provider().toUpperCase(Locale.ROOT),
           candidate.model());
 
-      automaticCorrectionLifecycle.assertAuthority(correctionCheckpoint);
-      automaticCorrectionLifecycle.runLintAutofix(runId, rootCtx.workspaceRoot());
-
-      String preReviewerGeneration =
-          automaticCorrectionLifecycle.currentGeneration(correctionCheckpoint);
+      workspaceGenerationRecovery.assertAcceptedFrontier(
+          runId, rootCtx.workspaceRoot(), "POST_CONTINUATION_REVIEWER");
       ProviderModel reviewerRoute = new ProviderModel(candidate.provider(), candidate.model());
       ReviewerResult rerunReviewResult = null;
       try {
+        String postReviewRunId = runId;
+        ExecutionContext acceptedPostReviewContext = rootCtx;
         rerunReviewResult =
-            reviewer.review(
-                InitialReviewerRequestPolicy.builder()
-                    .provider(reviewerRoute.provider())
-                    .model(reviewerRoute.model())
-                    .strictProvider(true)
-                    .context(rootCtx)
-                    .buildCommand(plan.buildCommand())
-                    .skipWiringPass(skipWiring)
-                    .maxIterationsPerPass(reviewerMaxIter)
-                    .brownfield(selectedRepoIds != null && !selectedRepoIds.isEmpty())
-                    .allowedRepoRoots(
-                        RunReviewerScope.repoRoots(projectRepoService, projectId, selectedRepoIds))
-                    .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
-                    .allowBuildManifestCreation(false)
-                    .readOnly(true)
-                    .originalGoal(
-                        runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
-                    .requirements(plan.requirements())
-                    .build());
+            acceptedVerification.execute(
+                acceptedPostReviewContext,
+                "POST_CONTINUATION_REVIEWER",
+                disposableReviewContext ->
+                    reviewer.review(
+                        InitialReviewerRequestPolicy.builder()
+                            .provider(reviewerRoute.provider())
+                            .model(reviewerRoute.model())
+                            .strictProvider(true)
+                            .context(disposableReviewContext)
+                            .buildCommand(plan.buildCommand())
+                            .skipWiringPass(skipWiring)
+                            .maxIterationsPerPass(reviewerMaxIter)
+                            .brownfield(selectedRepoIds != null && !selectedRepoIds.isEmpty())
+                            .allowedRepoRoots(
+                                RunReviewerScope.repoRoots(
+                                    projectRepoService, projectId, selectedRepoIds))
+                            .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
+                            .allowBuildManifestCreation(false)
+                            .readOnly(true)
+                            .originalGoal(
+                                runRepo
+                                    .findById(runId)
+                                    .map(PipelineRun::getUserRequest)
+                                    .orElse(null))
+                            .requirements(plan.requirements())
+                            .planAdvisories(
+                                com.navneet.executespec.agent.TaskExpanderAgent
+                                    .advisoryPlanContractViolations(plan))
+                            .build()));
         RunCostTracker.Snapshot afterRerunReview = costTracker.snapshot(runId);
         long reviewerIn = afterRerunReview.inputTokens() - afterPostReviewExec.inputTokens();
         long reviewerOut = afterRerunReview.outputTokens() - afterPostReviewExec.outputTokens();
@@ -3886,84 +3828,16 @@ public class RunOrchestrator implements RunControlPort {
             ex);
         rerunReviewResult = reviewerFailedResult(ex);
       }
-      AutomaticCorrectionLifecycle.ReviewAssessment reviewAssessment =
-          automaticCorrectionLifecycle.assessReadOnlyReview(
-              runId,
-              targetTaskId,
-              rootCtx.workspaceRoot(),
-              correctionCheckpoint,
-              preReviewerGeneration,
-              rerunResult,
-              rerunReviewResult);
-      correctionDiff = reviewAssessment.diff();
-      CorrectionAcceptancePolicy.Decision acceptance = reviewAssessment.decision();
-      if (!acceptance.accepted()) {
-        automaticCorrectionLifecycle.rollbackRejectedAttempt(
-            targetTaskKey,
-            correctionCheckpoint,
-            correctionEvidenceCheckpoint,
-            correctionDiff,
-            previousTaskState,
-            acceptance,
-            reviewAssessment.attemptValidation());
-        broadcaster.emit(
-            runId,
-            RunEvent.log(
-                runId,
-                targetTaskId,
-                "Automatic correction rolled back: "
-                    + acceptance.code()
-                    + " — "
-                    + acceptance.reason()));
-        if (postValidationOperation != null) {
-          runOperationLifecycle.terminateOneShot(
-              postValidationOperation, "POST_VALIDATION_CORRECTION_ROLLED_BACK");
-          postValidationOperation = null;
-        }
-        return Optional.empty();
-      }
-      automaticCorrectionLifecycle.assertAuthority(correctionCheckpoint);
-      correctionValidationAdmission.regenerateAndAssert(
-          runId,
-          rerunResult,
-          rerunReviewResult,
-          plan,
-          correctionCheckpoint,
-          reviewAssessment.workspaceGeneration());
-      if (automaticCorrectionLifecycle.rollbackIfEvidenceRegressed(
-          runId,
-          targetTaskId,
-          targetTaskKey,
-          correctionCheckpoint,
-          correctionEvidenceCheckpoint,
-          correctionDiff,
-          previousTaskState)) {
-        return Optional.empty();
-      }
-      var delta = automaticCorrectionLifecycle.captureValidationDelta(correctionEvidenceCheckpoint);
-      CorrectionWorkspaceTransaction.Accepted generations =
-          automaticCorrectionLifecycle.previewAcceptance(correctionCheckpoint);
+      workspaceGenerationRecovery.assertAcceptedFrontier(
+          runId, rootCtx.workspaceRoot(), "POST_CONTINUATION_REVIEWER");
       persistenceWriter.applyExecutionResultToTasks(runId, rerunResult);
       persistenceWriter.persistReview(runId, rerunReviewResult);
-      automaticCorrectionLifecycle.recordResolution(
-          targetTaskKey,
-          "ACCEPTED",
-          acceptance.code(),
-          acceptance.reason(),
-          generations.beforeGeneration(),
-          generations.afterGeneration(),
-          correctionDiff,
-          delta,
-          true);
-      automaticCorrectionLifecycle.accept(correctionCheckpoint);
       if (postValidationOperation != null) {
         runOperationLifecycle.complete(postValidationOperation);
         postValidationOperation = null;
       }
       return Optional.of(new PostReviewContinuationResult(rerunResult, rerunReviewResult));
     } catch (Exception ex) {
-      automaticCorrectionLifecycle.rollbackFailedAttempt(
-          targetTaskKey, correctionCheckpoint, correctionEvidenceCheckpoint, correctionDiff, ex);
       if (postValidationOperation != null) {
         try {
           runOperationLifecycle.terminateOneShot(
@@ -3982,13 +3856,28 @@ public class RunOrchestrator implements RunControlPort {
           runId,
           RunEvent.log(
               runId, targetTaskId, "Post-review continuation action failed: " + ex.getMessage()));
-      automaticCorrectionLifecycle.restoreTask(targetTaskKey, previousTaskState);
+      taskStatusPersistence.persist(
+          runId,
+          targetTaskId,
+          "PARTIAL",
+          "BUILD continuation failed before terminal reconciliation",
+          null,
+          taskRow.get().getRecoveryAttempt());
       return Optional.empty();
     }
   }
 
   private record PostReviewContinuationResult(
       ExecutionResult execResult, ReviewerResult reviewResult) {}
+
+  private static boolean sameContinuationRoute(
+      ModelProviderScore candidate, String dispatchedProvider, String dispatchedModel) {
+    return candidate != null
+        && candidate
+            .provider()
+            .equalsIgnoreCase(dispatchedProvider == null ? "" : dispatchedProvider)
+        && candidate.model().equalsIgnoreCase(dispatchedModel == null ? "" : dispatchedModel);
+  }
 
   static ReviewerResult reviewerFailedResult(Exception ex) {
     return PostReviewQualityPolicy.reviewerFailedResult(ex);

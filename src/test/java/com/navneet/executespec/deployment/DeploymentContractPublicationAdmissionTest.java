@@ -191,8 +191,12 @@ class DeploymentContractPublicationAdmissionTest {
       RunWorkspaceAuthorityService.Lease lease) throws Exception {
     var constructor =
         PublicationAdmissionService.Admission.class.getDeclaredConstructor(
-            String.class, String.class, RunWorkspaceAuthorityService.Lease.class);
+            String.class,
+            String.class,
+            RunWorkspaceAuthorityService.Lease.class,
+            com.navneet.executespec.integration.scm.PublicationPreparationService
+                .RequiredPreparation.class);
     constructor.setAccessible(true);
-    return constructor.newInstance("a".repeat(64), "PUBLICATION_ELIGIBLE", lease);
+    return constructor.newInstance("a".repeat(64), "PUBLICATION_ELIGIBLE", lease, null);
   }
 }

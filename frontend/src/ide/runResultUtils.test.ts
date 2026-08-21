@@ -208,6 +208,57 @@ describe('publicationTrustFacts', () => {
       totalInputTokens: 100,
       totalOutputTokens: 20,
       actualCostUsd: 0.25,
+      runMode: 'BUILD',
+      acceptedWorkspaceGeneration: 'b'.repeat(64),
+      acceptedTaskIndex: 0,
+      acceptedGenerationAttemptId: '12345678-1234-1234-1234-123456789012',
+      acceptedCheckpointKind: 'GCS',
+      acceptedCheckpointDigest: 'c'.repeat(64),
+      acceptedCheckpointCompletedAt: '2026-08-10T12:00:00Z',
+      workspaceGenerationAttempts: [
+        {
+          attemptId: '12345678-1234-1234-1234-123456789012',
+          taskId: 'T1',
+          taskIndex: 0,
+          attemptNumber: 1,
+          attemptKind: 'BUILD_TASK',
+          state: 'ACCEPTED',
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          initialFailureEvidence: {
+            outcome: 'FAILURE_OBSERVED',
+            code: 'REQUIRED_PATH_MISSING',
+            detail: 'Required path assertions are red: [src/app.ts]',
+            failedTargets: ['src/app.ts'],
+            observedAt: '2026-08-10T11:59:05Z',
+          },
+          acceptanceChecks: [
+            {
+              kind: 'BUILD_PASSED',
+              target: 'candidate',
+              hidden: false,
+              outcome: 'PASSED',
+              detail: 'exact frozen build passed',
+            },
+            {
+              kind: 'TESTS_PASSED',
+              target: 'candidate',
+              hidden: false,
+              outcome: 'PASSED',
+              detail: 'non-empty exact frozen test suite passed',
+            },
+            {
+              kind: 'ENDPOINT_CONTRACT',
+              target: 'openapi',
+              hidden: true,
+              outcome: 'PASSED',
+              detail: 'must not be exposed',
+            },
+          ],
+          createdAt: '2026-08-10T11:59:00Z',
+          resolvedAt: '2026-08-10T12:00:00Z',
+        },
+      ],
     } as unknown as RunDetail;
     const publication = {
       eligible: true,
@@ -225,6 +276,19 @@ describe('publicationTrustFacts', () => {
 
     expect(Object.fromEntries(facts.map((fact) => [fact.label, fact.value]))).toMatchObject({
       'Tasks terminal': '1/1 terminal · 1/1 completed',
+      'Accepted BUILD frontier': 'Task 1 · bbbbbbbbbbbb · receipt 12345678 · GCS cccccccccccc',
+      'BUILD generation attempts': '1 recent · 0 rejected · 0 unresolved',
+      'Latest generated candidate': expect.stringContaining('Candidate bbbbbbbbbbbb · ACCEPTED'),
+      'Initial deterministic failure': expect.stringContaining(
+        'FAILURE_OBSERVED · REQUIRED_PATH_MISSING',
+      ),
+      'Latest candidate verification': 'No immutable verification receipt · current state ACCEPTED',
+      'Latest acceptance checks': '3/3 deterministic checks passed',
+      'Acceptance · BUILD_PASSED': 'PASSED · candidate · exact frozen build passed',
+      'Acceptance · TESTS_PASSED': 'PASSED · candidate · non-empty exact frozen test suite passed',
+      'Acceptance · ENDPOINT_CONTRACT': 'PASSED · hidden deterministic check',
+      'Latest candidate rollback':
+        'Not rolled back; deterministic verification and frontier CAS accepted this generation',
       'Approved correction route': 'OPENROUTER/x-ai/grok-4.20',
       'Actual worker route': 'OPENROUTER/x-ai/grok-4.20 (LEDGER · 1 physical attempt)',
       Build: 'Passed',
@@ -269,6 +333,183 @@ describe('publicationTrustFacts', () => {
     expect(facts.find((fact) => fact.label === 'Evidence freshness')).toMatchObject({kind: 'bad'});
     expect(facts.find((fact) => fact.label === 'Publication')).toMatchObject({kind: 'bad'});
   });
+
+  it('surfaces rejected and unresolved BUILD generation evidence independently of the frontier', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-recovery',
+          taskId: 'T2',
+          taskIndex: 1,
+          attemptNumber: 2,
+          attemptKind: 'BUILD_TASK',
+          state: 'RECOVERY_FAILED',
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          rejectedDiffDigest: 'c'.repeat(64),
+          failureCode: 'TASK_VERIFICATION_REJECTED',
+          recoveryFailureCode: 'ROLLBACK_PROOF_FAILED',
+          recoveryAttemptCount: 2,
+          recoveryNextAttemptAt: '2026-08-10T12:01:00Z',
+          recoverySupportId: 'support-retry',
+          createdAt: '2026-08-10T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'BUILD generation attempts')).toMatchObject({
+      value:
+        '1 recent · 1 rejected · 1 unresolved · latest ROLLBACK_PROOF_FAILED · diff cccccccccccc · support support-retry',
+      kind: 'bad',
+    });
+    expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
+      value:
+        'Rollback recovery retry 2/3 pending at 2026-08-10T12:01:00Z · ROLLBACK_PROOF_FAILED · support support-retry',
+      kind: 'bad',
+    });
+  });
+
+  it('renders exhausted recovery as terminal quarantine with a stable support id', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-exhausted',
+          taskId: 'T2',
+          taskIndex: 1,
+          attemptNumber: 2,
+          attemptKind: 'BUILD_TASK',
+          state: 'RECOVERY_FAILED',
+          rejectedDiffDigest: 'd'.repeat(64),
+          recoveryFailureCode: 'ROLLBACK_PROOF_FAILED',
+          recoveryAttemptCount: 3,
+          recoverySupportId: 'support-exhausted',
+          recoveryExhaustedAt: '2026-08-10T12:03:00Z',
+          resolvedAt: '2026-08-10T12:03:00Z',
+          createdAt: '2026-08-10T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'BUILD generation attempts')).toMatchObject({
+      value:
+        '1 recent · 1 rejected · 0 unresolved · latest ROLLBACK_PROOF_FAILED · diff dddddddddddd · support support-exhausted',
+      kind: 'bad',
+    });
+    expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
+      value:
+        'Rollback recovery exhausted after 3 attempts · ROLLBACK_PROOF_FAILED · support support-exhausted',
+      kind: 'bad',
+    });
+  });
+
+  it('uses the explicit prior accepted frontier for rolled-back candidate evidence', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-rollback',
+          taskId: 'T2',
+          taskIndex: 1,
+          attemptNumber: 2,
+          attemptKind: 'BUILD_TASK',
+          state: 'ROLLED_BACK',
+          priorAcceptedGeneration: 'f'.repeat(64),
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          rejectedDiffDigest: 'c'.repeat(64),
+          failureCode: 'TASK_VERIFICATION_REJECTED',
+          createdAt: '2026-08-10T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Latest candidate rollback')).toMatchObject({
+      value: expect.stringContaining('accepted frontier remains ffffffffffff'),
+      kind: 'warn',
+    });
+  });
+
+  it('reports verification infrastructure unavailability without calling it product failure', () => {
+    const facts = publicationTrustFacts({
+      runMode: 'BUILD',
+      tasks: [],
+      workspaceGenerationAttempts: [
+        {
+          attemptId: 'attempt-environment',
+          taskId: 'T1',
+          taskIndex: 0,
+          attemptNumber: 1,
+          attemptKind: 'BUILD_TASK',
+          state: 'ROLLED_BACK',
+          beforeGeneration: 'a'.repeat(64),
+          candidateGeneration: 'b'.repeat(64),
+          verificationReceiptId: 'receipt-environment',
+          verificationOutcome: 'UNAVAILABLE',
+          verificationFailureCategory: 'ENVIRONMENT',
+          verificationEnvironmentCode: 'BUILD_POLICY_DENIED',
+          verificationExecutionBoundary: 'DISPOSABLE_EXACT_GENERATION',
+          createdAt: '2026-08-12T12:00:00Z',
+        },
+      ],
+    } as unknown as RunDetail);
+
+    expect(facts.find((fact) => fact.label === 'Latest candidate verification')).toMatchObject({
+      value: expect.stringContaining('environment unavailable (BUILD_POLICY_DENIED)'),
+      kind: 'warn',
+    });
+  });
+
+  it.each([
+    ['ROLLBACK_PROVEN', true, true, 'REVIEW_FAILED_CHECKS'],
+    ['ROLLBACK_UNPROVEN', true, false, 'CONTACT_SUPPORT'],
+    ['NO_CANDIDATE', false, false, 'RETRY_GENERATION'],
+    ['VERIFICATION_ENVIRONMENT_UNAVAILABLE', true, true, 'RETRY_AFTER_ENVIRONMENT_RECOVERY'],
+    ['CHECKPOINT_FAILED', true, true, 'CONTACT_SUPPORT'],
+    ['FRONTIER_CONFLICT', true, false, 'WAIT_FOR_RECONCILIATION'],
+    ['INTERNAL_PROTOCOL_CONFLICT', true, false, 'CONTACT_SUPPORT'],
+  ] as const)(
+    'renders %s as explicit technical causality',
+    (category, candidatePresent, rollbackProven, recommendedAction) => {
+      const facts = publicationTrustFacts({
+        runMode: 'BUILD',
+        tasks: [],
+        workspaceGenerationAttempts: [
+          {
+            attemptId: `attempt-${category}`,
+            taskId: 'T1',
+            taskIndex: 0,
+            attemptNumber: 1,
+            attemptKind: 'BUILD_TASK',
+            state: rollbackProven ? 'ROLLED_BACK' : 'VERIFYING',
+            beforeGeneration: 'a'.repeat(64),
+            candidateGeneration: candidatePresent ? 'b'.repeat(64) : null,
+            failureProjection: {
+              category,
+              stage: category === 'CHECKPOINT_FAILED' ? 'CHECKPOINT' : 'VERIFICATION',
+              retryable: rollbackProven,
+              candidatePresent,
+              rollbackProven,
+              publicationBlocked: true,
+              recommendedAction,
+            },
+            createdAt: '2026-08-12T12:00:00Z',
+          },
+        ],
+      } as unknown as RunDetail);
+
+      expect(facts.find((fact) => fact.label === 'Generation failure causality')).toMatchObject({
+        value: expect.stringContaining(category),
+      });
+      expect(facts.find((fact) => fact.label === 'Generation failure causality')?.value).toContain(
+        `action ${recommendedAction}`,
+      );
+    },
+  );
 
   it('treats a verified green suite with explicit skips as passing evidence', () => {
     const facts = publicationTrustFacts({

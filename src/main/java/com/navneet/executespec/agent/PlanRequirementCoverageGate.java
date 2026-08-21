@@ -258,6 +258,7 @@ final class PlanRequirementCoverageGate {
         .description(description)
         .complexity(source.complexity())
         .touchesFiles(source.touchesFiles())
+        .requiredArtifacts(source.requiredArtifacts())
         .dependsOn(source.dependsOn())
         .hardConstraints(source.hardConstraints())
         .meetsRequirements(source.meetsRequirements())

@@ -1,6 +1,5 @@
 package com.navneet.executespec.api;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -58,6 +57,8 @@ public class RunMapper {
    */
   private final com.navneet.executespec.billing.repository.RunQuotaRefundRepository
       runQuotaRefundRepository;
+
+  private final WorkspaceGenerationEvidenceProjection workspaceGenerationEvidenceProjection;
 
   public RunSummary toSummary(PipelineRun r) {
     return toSummary(r, null, null, null);
@@ -140,6 +141,9 @@ public class RunMapper {
       List<AgentTask> tasks) {
     String displayStatus = displayRunStatus(r.getStatus(), tasks);
     Double actualCostUsd = actualCostForRead(r);
+    String displayStatusReason =
+        RunDisplayPolicy.displayRunStatusReason(
+            r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus);
     return new RunSummary(
         r.getRunId(),
         displayStatus,
@@ -170,20 +174,22 @@ public class RunMapper {
         r.getSourceRunId(),
         r.getHarnessVersion(),
         actualCostUsd,
-        RunDisplayPolicy.displayRunStatusReason(
-            r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
+        displayStatusReason,
         com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.project(
             r.getRunId(),
             displayStatus,
-            RunDisplayPolicy.displayRunStatusReason(
-                r.getStatusReason(), r.getFailureReason(), r.getStatus(), displayStatus),
+            displayStatusReason,
             RunDisplayPolicy.displayRunFailureReason(
                 r.getFailureReason(), r.getStatus(), displayStatus),
             actualCostUsd,
             r.getHardCapUsd() != null ? r.getHardCapUsd() : r.getUserCostCap(),
             r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
             com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
-                r)),
+                r),
+            creditsRefunded(r, displayStatus),
+            workspaceGenerationEvidenceProjection == null
+                ? null
+                : workspaceGenerationEvidenceProjection.latestFailureForRun(r.getRunId())),
         // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
         // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
         // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
@@ -249,6 +255,10 @@ public class RunMapper {
     // Validation report scoring snapshot — mirrored into RunDetail so UI doesn't
     // need a second request for the headline verifiedScore / accuracyScore.
     ValidationReport report = validationReportRepository.findByRunId(r.getRunId()).orElse(null);
+    List<RunDetail.WorkspaceGenerationAttemptEvidence> generationAttempts =
+        workspaceGenerationEvidenceProjection == null
+            ? List.of()
+            : workspaceGenerationEvidenceProjection.forRun(r.getRunId());
     // C1 (G4) — DERIVED effective route. Read from the physical-attempt ledger rather than stored,
     // so it can never drift from the usage facts it summarises.
     EffectiveRouteProjection effectiveRoute = runEffectiveRouteService.forRun(r.getRunId());
@@ -273,7 +283,10 @@ public class RunMapper {
             r.getScmPrUrl() != null ? r.getScmPrUrl() : r.getGithubPrUrl(),
             com.navneet.executespec.run.outcome.RunTerminalOutcomeContract.autoPublicationExpected(
                 r),
-            creditsRefunded);
+            creditsRefunded,
+            generationAttempts.isEmpty()
+                ? null
+                : generationAttempts.getFirst().failureProjection());
 
     RunDetail.RunDetailBuilder builder =
         RunDetail.builder()
@@ -378,6 +391,16 @@ public class RunMapper {
             .routePinned(r.isRoutePinned())
             .harnessVersion(r.getHarnessVersion())
             .runMode(r.getRunMode())
+            .acceptedWorkspaceGeneration(r.getAcceptedWorkspaceGeneration())
+            .acceptedTaskIndex(r.getAcceptedTaskIndex())
+            .acceptedGenerationAttemptId(
+                r.getAcceptedGenerationAttemptId() == null
+                    ? null
+                    : r.getAcceptedGenerationAttemptId().toString())
+            .acceptedCheckpointKind(r.getAcceptedCheckpointKind())
+            .acceptedCheckpointDigest(r.getAcceptedCheckpointDigest())
+            .acceptedCheckpointCompletedAt(r.getAcceptedCheckpointCompletedAt())
+            .workspaceGenerationAttempts(generationAttempts)
             .triggeredByFinding(r.getTriggeredByFinding())
             .isRetry(r.getSourceRunId() != null)
             .sourceRunId(r.getSourceRunId())
@@ -416,13 +439,7 @@ public class RunMapper {
    * decoration-only tiebreaker, and it is the sole ordering for legacy rows that predate plan_index
    * (they sort after every indexed task).
    */
-  static final Comparator<AgentTask> TASK_DISPLAY_ORDER =
-      Comparator.comparingInt((AgentTask t) -> planOrder(t.getPlanIndex()))
-          .thenComparingInt(t -> TaskPresentation.statusOrder(t.getStatus()));
-
-  private static int planOrder(Integer planIndex) {
-    return planIndex == null ? Integer.MAX_VALUE : planIndex;
-  }
+  static final java.util.Comparator<AgentTask> TASK_DISPLAY_ORDER = TaskPresentation.DISPLAY_ORDER;
 
   /**
    * Viewer-less task projection: operator-grade continuation-policy internals are withheld
@@ -515,27 +532,9 @@ public class RunMapper {
     if (!"COMPLETE".equals(persistedStatus) || tasks == null || tasks.isEmpty()) {
       return persistedStatus;
     }
-    boolean allTasksProvenComplete = tasks.stream().allMatch(this::isTaskProvenCompleteForDisplay);
+    boolean allTasksProvenComplete =
+        tasks.stream().allMatch(task -> TaskPresentation.isProvenComplete(task, objectMapper, log));
     return allTasksProvenComplete ? persistedStatus : "PARTIAL";
-  }
-
-  private boolean isTaskProvenCompleteForDisplay(AgentTask task) {
-    if (!"COMPLETE".equals(task.getStatus())) return false;
-    String json = task.getGoalDonenessJson();
-    if (json == null || json.isBlank()) return true;
-    try {
-      JsonNode proof = objectMapper.readTree(json);
-      String state = proof.path("state").asText("");
-      return state.isBlank()
-          || "DONE".equals(state)
-          || RunDisplayPolicy.downstreamValidationDeferred(proof);
-    } catch (Exception error) {
-      log.warn(
-          "Malformed goal proof cannot certify run completion: taskId={} ({})",
-          task.getTaskId(),
-          error.getMessage());
-      return false;
-    }
   }
 
   /** Null-tolerant path redaction so bare test constructions without the bean stay usable. */

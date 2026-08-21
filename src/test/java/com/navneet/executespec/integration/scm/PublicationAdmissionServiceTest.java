@@ -3,10 +3,12 @@ package com.navneet.executespec.integration.scm;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
@@ -32,6 +34,7 @@ import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +62,10 @@ class PublicationAdmissionServiceTest {
       mock(RunWorkspaceAuthorityService.class);
   private final RunWorkspaceAuthorityService.Lease publicationLease =
       mock(RunWorkspaceAuthorityService.Lease.class);
+  private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery =
+      mock(WorkspaceGenerationRecoveryService.class);
+  private final PublicationPreparationService publicationPreparations =
+      mock(PublicationPreparationService.class);
   private final PublicationAdmissionService service =
       new PublicationAdmissionService(
           reports,
@@ -69,7 +76,9 @@ class PublicationAdmissionServiceTest {
           brownfieldGuard,
           effectiveRoutes,
           durableCorrections,
-          workspaceAuthorities);
+          workspaceAuthorities,
+          workspaceGenerationRecovery,
+          publicationPreparations);
 
   @BeforeEach
   void setUp() {
@@ -81,11 +90,84 @@ class PublicationAdmissionServiceTest {
         .thenReturn(GENERATION);
     when(tasks.findByRunId(RUN_ID)).thenReturn(List.of());
     when(brownfieldGuard.hasBaseline(RUN_ID)).thenReturn(false);
+    when(publicationPreparations.requirePrepared(any(PipelineRun.class)))
+        .thenReturn(
+            new PublicationPreparationService.RequiredPreparation(
+                new PublicationPreparationStore.PreparedPublication(
+                    java.util.UUID.randomUUID(),
+                    RUN_ID,
+                    GENERATION,
+                    "report-1",
+                    "c".repeat(64),
+                    java.time.Instant.now()),
+                List.of(
+                    new PublicationPreparationStore.PreparedRepository(
+                        java.util.UUID.randomUUID(),
+                        "GITHUB:owner/repo",
+                        "d".repeat(64),
+                        ".",
+                        "executespec/run",
+                        "1".repeat(40),
+                        "2".repeat(40),
+                        "3".repeat(40),
+                        true,
+                        false,
+                        "prepared commit",
+                        java.time.Instant.parse("2026-08-12T12:00:00Z")))));
   }
 
   @Test
   void admitsFreshBuildAndVerifiedTests() {
     assertThat(service.assertEligible(run()).workspaceGeneration()).isEqualTo(GENERATION);
+    verify(workspaceGenerationRecovery, org.mockito.Mockito.times(2))
+        .assertAcceptedFrontier(RUN_ID, GENERATION, "PUBLICATION");
+  }
+
+  @Test
+  void unpinnedAndUnknownBuildHistoryCannotPublish() {
+    PipelineRun unpinned = run();
+    unpinned.setBuildProtocolVersion(null);
+    PipelineRun unknown = run();
+    unknown.setBuildProtocolVersion("LEGACY_UNKNOWN");
+    unknown.setBuildProtocolDisposition("MISSING_EVIDENCE");
+
+    assertThat(service.evaluate(unpinned).code())
+        .isEqualTo("BUILD_PROTOCOL_HISTORICAL_EVIDENCE_INCOMPLETE");
+    assertThat(service.evaluate(unknown).code())
+        .isEqualTo("BUILD_PROTOCOL_HISTORICAL_EVIDENCE_INCOMPLETE");
+    verifyNoInteractions(durableCorrections);
+  }
+
+  @Test
+  void acceptedCorrectionSupersedesInitialBuildFrontierForPublication() {
+    when(durableCorrections.latestAcceptedGeneration(RUN_ID)).thenReturn(Optional.of(GENERATION));
+
+    assertThat(service.evaluate(run()).eligible()).isTrue();
+
+    verify(workspaceGenerationRecovery, never())
+        .assertAcceptedFrontier(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void workspaceMustEqualLatestAcceptedCorrectionGeneration() {
+    when(durableCorrections.latestAcceptedGeneration(RUN_ID))
+        .thenReturn(Optional.of("b".repeat(64)));
+
+    assertBlocked("CORRECTION_GENERATION_FRONTIER_MISMATCH");
+
+    verify(workspaceGenerationRecovery, never())
+        .assertAcceptedFrontier(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void malformedAcceptedCorrectionFailsClosed() {
+    when(durableCorrections.latestAcceptedGeneration(RUN_ID))
+        .thenThrow(new IllegalStateException("CORRECTION_ACCEPTED_GENERATION_INVALID"));
+
+    assertBlocked("CORRECTION_ACCEPTANCE_INVALID");
+
+    verify(workspaceGenerationRecovery, never())
+        .assertAcceptedFrontier(anyString(), anyString(), anyString());
   }
 
   @Test
@@ -585,7 +667,11 @@ class PublicationAdmissionServiceTest {
   }
 
   private static PipelineRun run() {
-    return PipelineRun.builder().runId(RUN_ID).status("COMPLETE").build();
+    return PipelineRun.builder()
+        .runId(RUN_ID)
+        .status("COMPLETE")
+        .buildProtocolVersion("LEGACY_V1")
+        .build();
   }
 
   private static void bindApprovalIdentity(

@@ -36,9 +36,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@code ddl-auto: validate}, matching prod/dev). Context startup is the assertion — a
  * schema/entity mismatch or an uninstantiable bean fails here instead of after merge. Skips only
  * when Docker is unavailable; GitHub CI runners always have Docker.
+ *
+ * <p><b>webEnvironment = RANDOM_PORT (2026-08-09):</b> it starts the real embedded servlet
+ * container, not a mock. This matters because Spring gathers {@code ServletContextInitializer}
+ * beans — every servlet {@code Filter}, including the security chain — during {@code onRefresh()},
+ * BEFORE the JPA {@code EntityManagerFactory} singleton is initialized in {@code
+ * finishBeanFactoryInitialization()}. The 2026-08-09 {@code prod,gcp} crash-loop was exactly this
+ * ordering: {@code JwtAuthenticationFilter -> JwtUtil -> FeatureFlagService -> JPA repository}
+ * forced the EntityManagerFactory during filter gathering and Tomcat never started. The previous
+ * {@code webEnvironment = NONE} started no servlet container, so filters were never gathered early
+ * and the bug was invisible in CI. With a real container this class of filter->JPA ordering
+ * regression fails here instead of on the VM.
  */
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("integration-test")
 class MigratedSchemaBootSmokeTest {
 

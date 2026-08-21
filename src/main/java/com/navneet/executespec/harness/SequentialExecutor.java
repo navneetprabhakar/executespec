@@ -20,6 +20,8 @@ import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.context.ContextPlanner;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.engine.CodeChangeLoop;
+import com.navneet.executespec.engine.CodeChangeMode;
 import com.navneet.executespec.engine.WorkerAgent;
 import com.navneet.executespec.engine.WorkerResult;
 import com.navneet.executespec.engine.WorkerTaskRequest;
@@ -66,27 +68,15 @@ import lombok.extern.slf4j.Slf4j;
  *       hint
  *   <li>Invoke {@link WorkerAgent} with the composed prompts and the run's ExecutionContext
  *       (substituting the task ID)
- *   <li>If worker didn't reach {@code COMPLETED}: record {@code WORKER_FAILED}, continue to next
- *       task (current policy — Phase 5 baseline. A future supervisor could upgrade to ABORT on
- *       catastrophic failures.)
+ *   <li>If worker didn't reach {@code COMPLETED}: record {@code WORKER_FAILED} and stop before a
+ *       dependent task can consume the unaccepted workspace generation.
  *   <li>Worker completed → run smoke test via {@link BuildProjectTool} using the plan's {@code
  *       buildCommand}
  *   <li>Smoke test passed → {@code SUCCESS}, next task
  *   <li>Smoke test failed → ONE retry: re-invoke worker with the build error injected into the user
  *       message
- *   <li>Retry passed → {@code SUCCESS_AFTER_RETRY}; retry failed → {@code COMPLETED_WITH_WARNING},
- *       continue anyway (reviewer phase — Phase 7 — will catch residual issues)
+ *   <li>Retry passed → {@code SUCCESS_AFTER_RETRY}; retry failure stops before the next task.
  * </ol>
- *
- * <p>Phase 5 baseline scope:
- *
- * <ul>
- *   <li>Rule-based failure handling (retry once, then warn). A future TaskSupervisorV2 can add
- *       LLM-tier triage (CASCADING / FIXABLE / STRUCTURAL) for smarter decisions.
- *   <li>No SSE events, no Redis context persistence, no cross-task context sharing.
- *   <li>Smoke tests default to the plan's {@code smokeTestStrategy} (currently only BUILD is fully
- *       wired — PREVIEW_HEALTH / TEST_SUITE planned for later phases).
- * </ul>
  */
 @Service
 @Slf4j
@@ -325,7 +315,7 @@ completeTask:
 This applies ONLY to apps meant to run; pure libraries, scripts, and config-only tasks have nothing
 to boot — skip it for those.""";
 
-  private final WorkerAgent worker;
+  private final CodeChangeLoop worker;
   private final BuildProjectTool buildProjectTool;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
@@ -354,10 +344,6 @@ to boot — skip it for those.""";
   /** Proxied transaction boundary for locked task-status transitions. */
   private final TaskStatusPersistenceService taskStatusPersistenceService;
 
-  // RL-2026-05-041 (audit #2) — mid-run durability: GCS checkpoint at each task boundary.
-  private final com.navneet.executespec.deployment.GcsTaskCheckpointService
-      gcsTaskCheckpointService;
-
   private final com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver;
 
   /** Optional in source-compatible test constructors; Spring supplies the routing seam. */
@@ -379,12 +365,14 @@ to boot — skip it for those.""";
   private com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
       brownfieldHttpContractGuard;
 
+  private BuildTaskGenerationCoordinator buildTaskGenerations;
+
   /**
    * Legacy construction seam retained for focused unit tests. Production uses the fully injected
    * constructor below and always supplies {@link TaskStatusPersistenceService}.
    */
   public SequentialExecutor(
-      WorkerAgent worker,
+      CodeChangeLoop worker,
       BuildProjectTool buildProjectTool,
       ObjectMapper objectMapper,
       Metrics metrics,
@@ -397,7 +385,6 @@ to boot — skip it for those.""";
       com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
-      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService) {
@@ -416,14 +403,13 @@ to boot — skip it for those.""";
         contextStore,
         costTracker,
         null,
-        gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         repoOrientationService);
   }
 
   public SequentialExecutor(
-      WorkerAgent worker,
+      CodeChangeLoop worker,
       BuildProjectTool buildProjectTool,
       ObjectMapper objectMapper,
       Metrics metrics,
@@ -436,7 +422,6 @@ to boot — skip it for those.""";
       com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService,
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
-      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
@@ -456,7 +441,6 @@ to boot — skip it for those.""";
         contextStore,
         costTracker,
         null,
-        gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         repoOrientationService);
@@ -465,7 +449,7 @@ to boot — skip it for those.""";
 
   @Autowired
   public SequentialExecutor(
-      WorkerAgent worker,
+      CodeChangeLoop worker,
       BuildProjectTool buildProjectTool,
       ObjectMapper objectMapper,
       Metrics metrics,
@@ -479,7 +463,6 @@ to boot — skip it for those.""";
       com.navneet.executespec.context.ContextStore contextStore,
       com.navneet.executespec.cost.RunCostTracker costTracker,
       TaskStatusPersistenceService taskStatusPersistenceService,
-      com.navneet.executespec.deployment.GcsTaskCheckpointService gcsTaskCheckpointService,
       com.navneet.executespec.router.AvailableProviderResolver availableProviderResolver,
       GoalContinuationAdvisor goalContinuationAdvisor,
       com.navneet.executespec.engine.RepoOrientationService repoOrientationService,
@@ -487,7 +470,8 @@ to boot — skip it for those.""";
       com.navneet.executespec.router.TaskOutcomeMetricService taskOutcomeMetricService,
       RunChangeEvidenceService runChangeEvidenceService,
       com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
-          brownfieldHttpContractGuard) {
+          brownfieldHttpContractGuard,
+      BuildTaskGenerationCoordinator buildTaskGenerations) {
     this(
         worker,
         buildProjectTool,
@@ -503,7 +487,6 @@ to boot — skip it for those.""";
         contextStore,
         costTracker,
         taskStatusPersistenceService,
-        gcsTaskCheckpointService,
         availableProviderResolver,
         goalContinuationAdvisor,
         repoOrientationService);
@@ -511,6 +494,7 @@ to boot — skip it for those.""";
     this.initialRoutingService = initialRoutingService;
     this.runChangeEvidenceService = runChangeEvidenceService;
     this.brownfieldHttpContractGuard = brownfieldHttpContractGuard;
+    this.buildTaskGenerations = buildTaskGenerations;
   }
 
   private final ConcurrentMap<String, AtomicInteger> continuationProviderSwitchesPerRun =
@@ -518,6 +502,8 @@ to boot — skip it for those.""";
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepUpsPerTask =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, AtomicInteger> continuationModelStepDownsPerTask =
+      new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, AtomicInteger> continuationSameProviderRetriesPerTask =
       new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Boolean> continuationConfirmationRequiredByRun =
       new ConcurrentHashMap<>();
@@ -664,7 +650,7 @@ to boot — skip it for those.""";
     List<TaskOutcome> outcomes = new ArrayList<>();
     Plan plan = req.plan();
     String runId = req.runContext().runId();
-    boolean abortedByGoalDecision = false;
+    boolean abortedByExecutionPolicy = false;
     boolean cancelled = false;
     continuationConfirmationRequiredByRun.put(
         runId,
@@ -754,45 +740,7 @@ to boot — skip it for those.""";
         //   - run fresh
         TaskOutcome outcome;
         try {
-          if (resume != null) {
-            ResumeAction action =
-                resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
-            ProviderModelOverride approvedRoute =
-                providerModelOverrideFor(resume, runId, task.id());
-            switch (action.kind()) {
-              case SKIP_TERMINAL -> {
-                log.info(
-                    "Executor RESUME skip task={} status={} (already terminal pre-resume)",
-                    task.id(),
-                    action.persistedStatus());
-                outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
-              }
-              case RESUME_FROM_SNAPSHOT -> {
-                log.info(
-                    "Executor RESUME task={} from snapshot iter={}",
-                    task.id(),
-                    action.snapshot() == null ? "n/a" : action.snapshot().iteration());
-                outcome =
-                    executeOne(
-                        task, plan, req, isFinalTask, action.snapshot(), approvedRoute, runJournal);
-              }
-              case RUN_FRESH ->
-                  outcome =
-                      executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
-              default ->
-                  outcome =
-                      executeOne(task, plan, req, isFinalTask, null, approvedRoute, runJournal);
-            }
-          } else {
-            outcome = executeOne(task, plan, req, isFinalTask, null, runJournal);
-          }
-
-          // A continuation action is another provider dispatch. Re-check the durable fence after
-          // the primary task and before the continuation policy can spend again.
-          throwIfCancellationRequested(runId, task.id());
-          if (resume == null) {
-            outcome = maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
-          }
+          outcome = executeTaskGeneration(i, task, plan, req, resume, isFinalTask, runJournal);
         } catch (CancellationException cancelledTask) {
           // A raw thread interrupt/provider unwind is not proof that the durable run was
           // cancelled. Leave the task non-terminal so startup recovery can resume it. Only the
@@ -824,10 +772,6 @@ to boot — skip it for those.""";
         metrics.recordTaskLatency(
             outcome.status().name(), java.time.Duration.ofMillis(outcome.totalLatencyMs()));
 
-        // RL-2026-05-041 (audit #2) — checkpoint the workspace to GCS at this task boundary so
-        // mid-run work survives a node loss. Async + no-op when GCS is unconfigured (local dev).
-        gcsTaskCheckpointService.checkpointAfterTask(runId, task.id());
-
         GoalDonenessDecision goalDecision = outcome.goalDonenessDecision();
         if (shouldEnforceGoalStop(goalDecision)) {
           int remaining = taskCount - i - 1;
@@ -853,14 +797,22 @@ to boot — skip it for those.""";
                       + " remaining task"
                       + (remaining == 1 ? "" : "s")));
           appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
-          abortedByGoalDecision = true;
+          abortedByExecutionPolicy = true;
+          break;
+        }
+
+        int remaining = taskCount - i - 1;
+        if (BuildTaskGenerationCoordinator.emitStopIfUnaccepted(
+            outcome, runId, task, remaining, broadcaster)) {
+          if (remaining > 0) appendSkippedGoalStopOutcomes(outcomes, plan, i + 1);
+          abortedByExecutionPolicy = true;
           break;
         }
       }
 
       ExecutionResult result =
           ExecutionResultSummarizer.summarize(
-              outcomes, System.currentTimeMillis() - runStart, abortedByGoalDecision, cancelled);
+              outcomes, System.currentTimeMillis() - runStart, abortedByExecutionPolicy, cancelled);
       log.info(
           "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
               + " latency={}ms",
@@ -923,6 +875,95 @@ to boot — skip it for those.""";
     return result;
   }
 
+  private TaskOutcome executeTaskGeneration(
+      int taskIndex,
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      ResumeRequest resume,
+      boolean isFinalTask,
+      List<String> runJournal) {
+    String runId = req.runContext().runId();
+    ResumeAction resumeAction =
+        resume == null
+            ? new ResumeAction(ResumeKind.RUN_FRESH, null, null)
+            : resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
+    if (resumeAction.kind() == ResumeKind.SKIP_TERMINAL) {
+      log.info(
+          "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+          task.id(),
+          resumeAction.persistedStatus());
+      return synthesizeSkippedOutcome(task, resumeAction.persistedStatus());
+    }
+
+    ProviderModelOverride approvedRoute =
+        resume == null ? null : providerModelOverrideFor(resume, runId, task.id());
+    java.util.function.Function<ExecutionContext, TaskOutcome> dispatch =
+        generationContext -> {
+          TaskOutcome outcome;
+          if (resumeAction.kind() == ResumeKind.RESUME_FROM_SNAPSHOT) {
+            log.info(
+                "Executor RESUME task={} from snapshot iter={}",
+                task.id(),
+                resumeAction.snapshot() == null ? "n/a" : resumeAction.snapshot().iteration());
+            outcome =
+                executeOne(
+                    task,
+                    plan,
+                    req,
+                    isFinalTask,
+                    resumeAction.snapshot(),
+                    approvedRoute,
+                    runJournal,
+                    generationContext);
+          } else {
+            outcome =
+                executeOne(
+                    task,
+                    plan,
+                    req,
+                    isFinalTask,
+                    null,
+                    approvedRoute,
+                    runJournal,
+                    generationContext);
+          }
+          throwIfCancellationRequested(runId, task.id());
+          return outcome;
+        };
+    if (buildTaskGenerations == null) {
+      throw new IllegalStateException("BUILD_ATTEMPT_SUPERVISOR_REQUIRED");
+    }
+    BuildTaskGenerationCoordinator.TaskStatusSink taskStatus =
+        (status, reason) ->
+            BuildTaskStatusWriter.persist(
+                taskStatusPersistenceService,
+                taskRepo,
+                costTracker,
+                taskRecoveryAttemptByTask,
+                runId,
+                task.id(),
+                status,
+                reason);
+    boolean supervisedContinuation = resume != null && resume.targets(runId, task.id());
+    TaskOutcome outcome =
+        supervisedContinuation
+            ? buildTaskGenerations.executeContinuation(
+                taskIndex,
+                task,
+                plan,
+                req,
+                approvedRoute == null ? req.provider() : approvedRoute.provider(),
+                approvedRoute == null ? req.model() : approvedRoute.model(),
+                taskRecoveryAttempt(runId, task.id()),
+                resume.mayReopenTerminalRun(),
+                dispatch,
+                taskStatus)
+            : buildTaskGenerations.execute(taskIndex, task, plan, req, dispatch, taskStatus);
+    if (resume != null) return outcome;
+    return maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
+  }
+
   private void recordTaskOutcomeMetric(
       ExecutionRequest req, PlannedTask task, TaskOutcome outcome) {
     if (taskOutcomeMetricService == null || req == null || task == null || outcome == null) return;
@@ -937,34 +978,16 @@ to boot — skip it for those.""";
         runId,
         TaskCategoryClassifier.classify(task),
         task.complexity().name(),
-        taskLanguage(task),
+        TaskOutcomeMetricDimensions.language(task),
         outcome.retryAttempted() ? 2 : 1,
         outcome,
         usage == null ? 0 : RunCostTracker.saturatedInt(usage.outputTokens()),
-        maxOutputTokens(task.complexity()),
+        ModelOutputTokenBudget.clamp(
+            matrixProps,
+            outcome.dispatchedModel(),
+            TaskOutcomeMetricDimensions.desiredOutputTokens(task.complexity())),
         iterations,
         usage == null ? 0.0 : usage.costUsd());
-  }
-
-  private static int maxOutputTokens(PlannedTask.Complexity complexity) {
-    return switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
-      case LOW -> 4096;
-      case MEDIUM -> 8192;
-      case HIGH -> 16384;
-    };
-  }
-
-  private static String taskLanguage(PlannedTask task) {
-    for (String file : taskValues(task.touchesFiles())) {
-      String lower = file.toLowerCase(Locale.ROOT);
-      if (lower.endsWith(".java")) return "java";
-      if (lower.endsWith(".ts") || lower.endsWith(".tsx")) return "typescript";
-      if (lower.endsWith(".js") || lower.endsWith(".jsx")) return "javascript";
-      if (lower.endsWith(".py")) return "python";
-      if (lower.endsWith(".rs")) return "rust";
-      if (lower.endsWith(".go")) return "go";
-    }
-    return null;
   }
 
   /** Conservative, provider-neutral task prompt budget used before model selection. */
@@ -1025,7 +1048,7 @@ to boot — skip it for those.""";
   /** Resume target and optional exact approved continuation route. */
   public static final class ResumeRequest extends ExecutorResumeRequest {
     public ResumeRequest(String targetTaskId) {
-      this(targetTaskId, null, null, null, null);
+      super(targetTaskId, null, null, null, null, false);
     }
 
     public ResumeRequest(
@@ -1034,7 +1057,29 @@ to boot — skip it for those.""";
         String approvedModel,
         RunContinuationDecision approvedAction,
         String approvedProposalDigest) {
-      super(targetTaskId, approvedProvider, approvedModel, approvedAction, approvedProposalDigest);
+      super(
+          targetTaskId,
+          approvedProvider,
+          approvedModel,
+          approvedAction,
+          approvedProposalDigest,
+          false);
+    }
+
+    public ResumeRequest(
+        String targetTaskId,
+        String approvedProvider,
+        String approvedModel,
+        RunContinuationDecision approvedAction,
+        String approvedProposalDigest,
+        boolean mayReopenTerminalRun) {
+      super(
+          targetTaskId,
+          approvedProvider,
+          approvedModel,
+          approvedAction,
+          approvedProposalDigest,
+          mayReopenTerminalRun);
     }
   }
 
@@ -1111,9 +1156,12 @@ to boot — skip it for those.""";
       isResumeTarget = true;
     }
 
-    if (isTerminal) {
+    // An explicitly targeted retry/continuation must reach the BUILD supervisor, which owns the
+    // transactional terminal-task reopen. Untargeted crash recovery still skips terminal rows.
+    if (isTerminal && !isResumeTarget) {
       return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted, null);
     }
+    if (isTerminal) return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     if (!isResumeTarget) {
       return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
     }
@@ -1212,6 +1260,13 @@ to boot — skip it for those.""";
       return outcome;
     }
     GoalContinuationPolicyDecision decision = outcome.continuationDecision();
+    if (BuildContinuationOutcomes.sameProviderRetryRequired(decision, outcome)) {
+      ModelProviderScore sameRoute = BuildContinuationOutcomes.sameRouteScore(task, outcome);
+      GoalContinuationPolicyDecision retryDecision =
+          BuildContinuationOutcomes.sameRouteDecision(sameRoute);
+      return executeContinuationAction(
+          task, plan, req, isFinalTask, outcome, retryDecision, sameRoute, true);
+    }
     if (!actionableContinuationDecision(decision)) {
       return outcome;
     }
@@ -1278,66 +1333,66 @@ to boot — skip it for those.""";
     appendContinuationActionHistory(
         runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
 
-    ProviderHandoffDossier.write(
-        req.runContext().workspaceRoot(),
-        runId,
-        task.id(),
-        outcome.dispatchedProvider(),
-        outcome.dispatchedModel(),
-        candidate.provider(),
-        candidate.model(),
-        decision.decision().name(),
-        reason,
-        outcome.smokeTestOutput());
-
-    // Clear the primary attempt's terminal marker before executeOne() publishes WORKING; otherwise
-    // persistTaskStatus() rejects the rerun's WORKING/COMPLETE writes as a "terminal overwrite".
-    // RR-266: a false return means a concurrent cancellation or a rolling-restart takeover owns the
-    // terminal state, so this (possibly stale) executor keeps the primary outcome — no rerun.
-    if (!prepareTaskForContinuation(runId, task.id())) {
-      log.warn(
-          "SequentialExecutor continuation run={} task={} — reopen fenced; keeping primary outcome",
-          runId,
-          task.id());
-      return outcome;
-    }
-
     // A different provider/model gets the current workspace plus a compact deterministic dossier,
     // never the previous model's full transcript. Replaying that transcript across models grows
     // every subsequent prompt and anchors the replacement model to the failed reasoning path.
-    String recoveryNote =
-        ProviderHandoffDossier.read(req.runContext().workspaceRoot(), runId, task.id())
-            .map(ProviderHandoffDossier::recoveryNote)
-            .orElse(null);
-    TaskOutcome rerun =
-        executeOne(
+    java.util.function.Function<ExecutionContext, ProviderModelOverride> routeOverride =
+        generationContext -> {
+          String recoveryNote =
+              ProviderHandoffDossier.writeAndReadRecoveryNote(
+                  generationContext,
+                  req.runContext().workspaceRoot(),
+                  runId,
+                  task.id(),
+                  outcome.dispatchedProvider(),
+                  outcome.dispatchedModel(),
+                  candidate.provider(),
+                  candidate.model(),
+                  decision.decision().name(),
+                  reason,
+                  outcome.smokeTestOutput());
+          return new ProviderModelOverride(
+              candidate.provider(), candidate.model(), decision.decision(), recoveryNote);
+        };
+    if (buildTaskGenerations == null) {
+      throw new IllegalStateException("BUILD_ATTEMPT_SUPERVISOR_REQUIRED_FOR_CONTINUATION");
+    }
+    TaskOutcome rerunOutcome =
+        buildTaskGenerations.executeContinuation(
+            plan.tasks().indexOf(task),
             task,
             plan,
             req,
-            isFinalTask,
-            null,
-            new ProviderModelOverride(
-                candidate.provider(), candidate.model(), decision.decision(), recoveryNote));
-    return mergeContinuationAttempt(outcome, rerun, decision, candidate);
+            candidate.provider(),
+            candidate.model(),
+            taskRecoveryAttempt(runId, task.id()),
+            false,
+            generationContext ->
+                executeOne(
+                    task,
+                    plan,
+                    req,
+                    isFinalTask,
+                    null,
+                    routeOverride.apply(generationContext),
+                    null,
+                    generationContext),
+            (status, statusReason) ->
+                BuildTaskStatusWriter.persist(
+                    taskStatusPersistenceService,
+                    taskRepo,
+                    costTracker,
+                    taskRecoveryAttemptByTask,
+                    runId,
+                    task.id(),
+                    status,
+                    statusReason));
+    return BuildContinuationOutcomes.merge(outcome, rerunOutcome, decision, candidate);
   }
 
-  /**
-   * RR-266: reopen a terminal task for a selected continuation rerun via the atomic, row-locked
-   * compare-and-set in {@link TaskStatusPersistenceService#reopenForContinuation} (inline-
-   * constructed when the injected bean is absent, mirroring {@link #persistTaskStatus}). Returns
-   * {@code true} only when this executor won the reopen; otherwise it has no authority to rerun.
-   */
-  private boolean prepareTaskForContinuation(String runId, String taskIdShort) {
-    if (taskRepo == null || runId == null || runId.length() < 8 || taskIdShort == null) {
-      return false;
-    }
-    String key = runId.substring(0, 8) + "_" + taskIdShort;
-    TaskStatusPersistenceService persistence =
-        taskStatusPersistenceService != null
-            ? taskStatusPersistenceService
-            : new TaskStatusPersistenceService(taskRepo, costTracker);
-    return persistence.reopenForContinuation(
-        runId, taskIdShort, taskRecoveryAttemptByTask.get(key));
+  private Integer taskRecoveryAttempt(String runId, String taskIdShort) {
+    if (runId == null || runId.length() < 8 || taskIdShort == null) return null;
+    return taskRecoveryAttemptByTask.get(runId.substring(0, 8) + "_" + taskIdShort);
   }
 
   private boolean actionableContinuationDecision(GoalContinuationPolicyDecision decision) {
@@ -1385,7 +1440,13 @@ to boot — skip it for those.""";
               continuationTaskKey(runId, taskId),
               "maxModelStepDowns",
               maxModelStepDowns());
-      case CONTINUE_SAME_MODEL_PROVIDER, STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
+      case CONTINUE_SAME_MODEL_PROVIDER ->
+          reserveLimit(
+              continuationSameProviderRetriesPerTask,
+              continuationTaskKey(runId, taskId),
+              "maxSameProviderRetries",
+              maxContinuationReruns());
+      case STOP_DONE, STOP_BLOCKED, STOP_FAILED, STOP_WASTE_GUARD ->
           new ContinuationActionLimit("notActionable", 0, 0, false);
     };
   }
@@ -1626,41 +1687,6 @@ to boot — skip it for those.""";
   private record ContinuationActionLimit(
       String limitName, int usedAfterReserve, int maxAllowed, boolean allowed) {}
 
-  private static TaskOutcome mergeContinuationAttempt(
-      TaskOutcome initial,
-      TaskOutcome rerun,
-      GoalContinuationPolicyDecision decision,
-      ModelProviderScore candidate) {
-    if (rerun == null) {
-      return initial;
-    }
-    return TaskOutcome.builder()
-        .taskId(rerun.taskId())
-        .taskTitle(rerun.taskTitle())
-        .status(rerun.status())
-        .workerOutcome(rerun.workerOutcome())
-        .retryAttempted(rerun.retryAttempted())
-        .retryWorkerOutcome(rerun.retryWorkerOutcome())
-        .smokeTestPassed(rerun.smokeTestPassed())
-        .smokeTestExitCode(rerun.smokeTestExitCode())
-        .smokeTestOutput(rerun.smokeTestOutput())
-        .totalLatencyMs(initial.totalLatencyMs() + rerun.totalLatencyMs())
-        .toolCallsDispatched(initial.toolCallsDispatched() + rerun.toolCallsDispatched())
-        .dispatchedProvider(rerun.dispatchedProvider())
-        .dispatchedModel(rerun.dispatchedModel())
-        .goalDonenessDecision(rerun.goalDonenessDecision())
-        .continuationDecision(rerun.continuationDecision())
-        .continuationAction(decision == null ? null : decision.decision())
-        .continuationActionProvider(candidate == null ? null : candidate.provider())
-        .continuationActionModel(candidate == null ? null : candidate.model())
-        .build();
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task, Plan plan, ExecutionRequest req, boolean isFinalTask) {
-    return executeOne(task, plan, req, isFinalTask, null);
-  }
-
   /**
    * Resolves the route for a first worker attempt through the canonical candidate/ranking seam.
    * Retries and resumed workers deliberately bypass this method's selection path.
@@ -1778,41 +1804,14 @@ to boot — skip it for those.""";
       Plan plan,
       ExecutionRequest req,
       boolean isFinalTask,
-      com.navneet.executespec.context.SavedContext resumeFrom) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, null);
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      boolean isFinalTask,
-      com.navneet.executespec.context.SavedContext resumeFrom,
-      List<String> runJournal) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, null, runJournal);
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      boolean isFinalTask,
-      com.navneet.executespec.context.SavedContext resumeFrom,
-      ProviderModelOverride providerModelOverride) {
-    return executeOne(task, plan, req, isFinalTask, resumeFrom, providerModelOverride, null);
-  }
-
-  private TaskOutcome executeOne(
-      PlannedTask task,
-      Plan plan,
-      ExecutionRequest req,
-      boolean isFinalTask,
       com.navneet.executespec.context.SavedContext resumeFrom,
       ProviderModelOverride providerModelOverride,
-      List<String> runJournal) {
+      List<String> runJournal,
+      ExecutionContext generationContext) {
     long taskStart = System.currentTimeMillis();
     rememberRecoveryAttempt(req.runContext().runId(), task.id());
-    ExecutionContext taskCtx = req.runContext().child(task.id());
+    ExecutionContext taskCtx =
+        generationContext == null ? req.runContext().child(task.id()) : generationContext;
     String requestedProvider =
         providerModelOverride == null ? req.provider() : providerModelOverride.provider();
     String requestedModel =
@@ -1866,6 +1865,9 @@ to boot — skip it for those.""";
             requestedProvider,
             requestedModel,
             req.localHandsMode());
+    if (taskCtx.buildAcceptance() != null) {
+      systemPrompt = systemPrompt + taskCtx.buildAcceptance().systemDirective();
+    }
     String workerEvidence =
         PromptComposer.assembleWorkerEvidence(
             task,
@@ -1964,6 +1966,7 @@ to boot — skip it for those.""";
             .systemPrompt(systemPrompt)
             .userPrompt(userPrompt)
             .context(taskCtx)
+            .changeMode(CodeChangeMode.BUILD)
             .maxIterations(
                 req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
             .temperature(0.0)
@@ -1978,25 +1981,18 @@ to boot — skip it for those.""";
             .strictProvider(providerModelOverride != null || Boolean.TRUE.equals(req.routePinned()))
             .zeroWriteSalvageAllowed(providerModelOverride == null)
             .mutationChurnForceAfter(maxEditChurn())
-            // VBC verify-before-complete (RL-2026-06-…, V235, default OFF) — server-RUN the
-            // project's tests at completeTask and refuse if red. Gated to the FINAL task (mirrors
-            // the smoke gate at executeOne's multiTask check) so an intermediate task isn't blocked
-            // by a later task's not-yet-implemented tests. Decoupled from V217 (runner called
-            // directly), no model-visible schema change. Byte-identical until the flag flips.
             .verifyBeforeComplete(
-                isFinalTask
-                    && featureFlagService != null
-                    && featureFlagService.isEnabled("worker.verify-before-complete.enabled"))
+                sharedWorkerControl(taskCtx, "worker.verify-before-complete.enabled"))
             // progress-v2 (V255, default OFF): novelty-based progress + repetition-based force +
             // bounded text-only retries; the v1 write-only engine is byte-identical when off.
-            .progressV2(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.progress-v2.enabled"))
+            .progressV2(sharedWorkerControl(taskCtx, "worker.progress-v2.enabled"))
             // auto-verify (V259, default ON): server-side edit-burst test runs with
             // failure-output injection (schema-free; supersedes V209/V217 on graduation).
-            .autoVerify(
-                featureFlagService != null
-                    && featureFlagService.isEnabled("worker.auto-verify.enabled"))
+            .autoVerify(sharedWorkerControl(taskCtx, "worker.auto-verify.enabled"))
+            .initialFailureSnapshot(
+                taskCtx.buildAcceptance() == null
+                    ? null
+                    : taskCtx.buildAcceptance().initialFailureSnapshot())
             .workerStartedAtEpochMs(taskStart)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
@@ -2147,50 +2143,18 @@ to boot — skip it for those.""";
     if (!req.enableSmokeTests()) {
       TaskOutcome.Status status =
           softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
+      String persistedStatus =
+          softCompletion ? "PARTIAL" : acceptancePendingStatus(taskCtx, "COMPLETE");
       log.info(
           "Executor task={} {}{}",
           task.id(),
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
           " (smoke tests disabled)");
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      persistTaskStatus(runId, task.id(), persistedStatus, softWarnReason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model);
-      return TaskOutcome.builder()
-          .taskId(task.id())
-          .taskTitle(task.title())
-          .status(status)
-          .workerOutcome(primary)
-          .totalLatencyMs(System.currentTimeMillis() - taskStart)
-          .toolCallsDispatched(primary.toolCallsDispatched())
-          .dispatchedProvider(cfg.provider)
-          .dispatchedModel(cfg.model)
-          .goalDonenessDecision(goalDecision.doneness())
-          .continuationDecision(goalDecision.continuation())
-          .build();
-    }
-
-    // Skip per-task smoke for non-final tasks in multi-task plans:
-    // intermediate tasks (T1 scaffold, T2 partial wiring, ...) cannot
-    // possibly satisfy a full project build because later tasks haven't
-    // landed yet. The reviewer's final build at the end of the run is
-    // the authoritative gate. This eliminates false-negative PARTIAL
-    // statuses on tasks whose code is later wired up correctly.
-    boolean multiTask = plan.tasks().size() > 1;
-    if (multiTask && !isFinalTask) {
-      TaskOutcome.Status status =
-          softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
-      log.info(
-          "Executor task={} {} (intermediate smoke skipped — multi-task plan, final task +"
-              + " reviewer are authoritative)",
-          task.id(),
-          softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS");
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
-      GoalTaskDecision goalDecision =
-          emitGoalDecision(
-              runId, task, primary, status, null, softWarnReason, cfg.provider, cfg.model, true);
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
@@ -2209,14 +2173,16 @@ to boot — skip it for those.""";
     if (smoke.passed()) {
       TaskOutcome.Status status =
           softCompletion ? TaskOutcome.Status.COMPLETED_WITH_WARNING : TaskOutcome.Status.SUCCESS;
+      String persistedStatus =
+          softCompletion ? "PARTIAL" : acceptancePendingStatus(taskCtx, "COMPLETE");
       log.info(
           "Executor task={} {} (smoke exit={}, took {}ms)",
           task.id(),
           softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
           smoke.exitCode(),
           smoke.latencyMs());
-      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      persistTaskStatus(runId, task.id(), persistedStatus, softWarnReason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId, task, primary, status, true, softWarnReason, cfg.provider, cfg.model);
@@ -2346,6 +2312,7 @@ to boot — skip it for those.""";
                 .systemPrompt(systemPrompt)
                 .userPrompt(retryPrompt)
                 .context(taskCtx)
+                .changeMode(CodeChangeMode.BUILD)
                 .maxIterations(retryMaxIter)
                 .temperature(0.0)
                 .maxTokensPerCall(cfg.maxTokens)
@@ -2440,8 +2407,9 @@ to boot — skip it for those.""";
     SmokeTestResult retrySmoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (retrySmoke.passed()) {
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
-      persistTaskStatus(runId, task.id(), "COMPLETE");
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+      String persistedStatus = acceptancePendingStatus(taskCtx, "COMPLETE");
+      persistTaskStatus(runId, task.id(), persistedStatus);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
       GoalTaskDecision goalDecision =
           emitGoalDecision(
               runId,
@@ -2541,6 +2509,7 @@ to boot — skip it for those.""";
                   .systemPrompt(systemPrompt)
                   .userPrompt(retry2Prompt)
                   .context(taskCtx)
+                  .changeMode(CodeChangeMode.BUILD)
                   .maxIterations(
                       req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
                   .temperature(0.0)
@@ -2571,8 +2540,9 @@ to boot — skip it for those.""";
         SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
         if (retry2Smoke.passed()) {
           log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
-          persistTaskStatus(runId, task.id(), "COMPLETE");
-          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          String persistedStatus = acceptancePendingStatus(taskCtx, "COMPLETE");
+          persistTaskStatus(runId, task.id(), persistedStatus);
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), persistedStatus));
           GoalTaskDecision goalDecision =
               emitGoalDecision(
                   runId,
@@ -2783,7 +2753,8 @@ to boot — skip it for those.""";
             cfg.provider,
             cfg.model,
             providerBehaviorPoor(primary, reason));
-    if (approvalBlockedContinuationProposal(continuationDecision)) {
+    continuationDecision = BuildContinuationOutcomes.requireSmokeRetry(continuationDecision);
+    if (BuildContinuationOutcomes.approvalBlocked(continuationDecision)) {
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
@@ -2791,10 +2762,20 @@ to boot — skip it for those.""";
           task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
     }
     if (!actionableContinuationDecision(continuationDecision)) {
+      if (buildTaskGenerations != null) {
+        emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+        return preRetryContinuationOutcome(
+            task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+      }
       return null;
     }
     ModelProviderScore candidate = continuationDecision.selectedCandidate().orElse(null);
     if (candidate == null || sameProviderModel(candidate, cfg.provider, cfg.model)) {
+      if (buildTaskGenerations != null) {
+        emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
+        return preRetryContinuationOutcome(
+            task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+      }
       return null;
     }
     if (!continuationActionCapacityAvailable(runId, task.id(), continuationDecision.decision())) {
@@ -2804,37 +2785,11 @@ to boot — skip it for those.""";
     TaskOutcome preRetryOutcome =
         preRetryContinuationOutcome(
             task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
+    if (buildTaskGenerations != null) {
+      return preRetryOutcome;
+    }
     return executeContinuationAction(
         task, plan, req, isFinalTask, preRetryOutcome, continuationDecision, candidate, false);
-  }
-
-  private static boolean approvalBlockedContinuationProposal(
-      GoalContinuationPolicyDecision decision) {
-    return decision != null
-        && decision.decision() == RunContinuationDecision.STOP_BLOCKED
-        && decision.selectedCandidate().isPresent()
-        && approvalEligibleBlockedReason(decision);
-  }
-
-  private static boolean approvalEligibleBlockedReason(GoalContinuationPolicyDecision decision) {
-    Map<String, Object> policy = decision.policy();
-    Object blockedReason = policy == null ? null : policy.get("blockedAutomaticContinuationReason");
-    if ("ROUTE_PINNED".equals(String.valueOf(blockedReason))) {
-      return false;
-    }
-    if ("BENCHMARK_PRIOR_REQUIRED".equals(String.valueOf(blockedReason))
-        || "EXPENSIVE_CONTINUATION_CONFIRMATION_REQUIRED".equals(String.valueOf(blockedReason))) {
-      return true;
-    }
-    ModelProviderScore candidate = decision.selectedCandidate().orElse(null);
-    if (candidate == null || policy == null) {
-      return false;
-    }
-    if (Boolean.TRUE.equals(policy.get("requireBenchmarkPriorForAutomaticContinuation"))
-        && !candidate.benchmarkQualityPriorAvailable()) {
-      return true;
-    }
-    return Boolean.TRUE.equals(policy.get("requireConfirmationBeforeExpensiveContinuation"));
   }
 
   private static TaskOutcome preRetryContinuationOutcome(
@@ -4088,6 +4043,7 @@ to boot — skip it for those.""";
       LlmProvider p =
           runProvider == null ? LlmProvider.OPENAI : LlmProvider.valueOf(runProvider.toUpperCase());
       ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
+      maxTokens = ModelOutputTokenBudget.clamp(matrixProps, resolved.getModel(), maxTokens);
       int[] profileThresholds =
           capabilityStagnationThresholds(resolved.providerName(), resolved.getModel());
       return new TierConfig(
@@ -4108,6 +4064,7 @@ to boot — skip it for those.""";
           runProvider,
           runModel);
       int[] profileThresholds = capabilityStagnationThresholds(runProvider, runModel);
+      maxTokens = ModelOutputTokenBudget.clamp(matrixProps, runModel, maxTokens);
       return new TierConfig(
           runProvider,
           runModel,
@@ -4119,6 +4076,15 @@ to boot — skip it for those.""";
           wallClockSeconds,
           forceSalvageTool);
     }
+  }
+
+  private boolean sharedWorkerControl(ExecutionContext context, String flag) {
+    boolean configured = featureFlagService != null && featureFlagService.isEnabled(flag);
+    return context != null
+            && context.buildAcceptance() != null
+            && context.buildAcceptance().sharedWorkerControls()
+        ? true
+        : configured;
   }
 
   /**
@@ -4215,6 +4181,15 @@ to boot — skip it for those.""";
     persistTaskStatus(runId, taskIdShort, status, null);
   }
 
+  private static String acceptancePendingStatus(ExecutionContext context, String terminalStatus) {
+    return "COMPLETE".equals(terminalStatus)
+            && context != null
+            && context.buildAcceptance() != null
+            && context.buildAcceptance().acceptancePending()
+        ? "VERIFYING"
+        : terminalStatus;
+  }
+
   /**
    * v2.5.12 — overload that stores an optional failure reason on the task row. The reason lands in
    * {@code lastLlmFailure} (already read as a fallback by {@code RunMapper.extractFailureReason})
@@ -4287,6 +4262,9 @@ to boot — skip it for those.""";
                 "persistTaskStatus: fenced terminal overwrite id={} incomingStatus={}",
                 key,
                 status);
+        case CANCELLED_WINS ->
+            log.info(
+                "persistTaskStatus: cancellation retained id={} incomingStatus={}", key, status);
       }
     } catch (Exception e) {
       log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);

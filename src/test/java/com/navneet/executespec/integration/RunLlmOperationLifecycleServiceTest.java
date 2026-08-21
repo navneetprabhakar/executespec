@@ -142,7 +142,7 @@ class RunLlmOperationLifecycleServiceTest {
   }
 
   @Test
-  void explicitRetryStartsANewInvocationAndBindsItsAuthority() {
+  void buildTaskReplacementStartsANewInvocationAndBindsItsAuthority() {
     LlmExecutionOperationService operations = mock(LlmExecutionOperationService.class);
     RunLlmOperationLifecycleService service =
         new RunLlmOperationLifecycleService(
@@ -158,7 +158,7 @@ class RunLlmOperationLifecycleServiceTest {
     ExecutionContext base =
         new ExecutionContext("run-1", "__root__", Path.of("/tmp").toAbsolutePath(), reference);
 
-    var lease = service.beginExecutionRetry(base, "run-1", "openai", "gpt");
+    var lease = service.beginBuildTaskAttempt(base, "run-1", "T1", 0, "contract|attempt=2");
 
     assertThat(lease.context().llmExecutionOperationAuthority()).isNotNull();
     verify(operations)

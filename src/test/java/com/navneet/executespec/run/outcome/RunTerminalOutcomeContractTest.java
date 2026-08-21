@@ -2,6 +2,8 @@ package com.navneet.executespec.run.outcome;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -148,6 +150,113 @@ class RunTerminalOutcomeContractTest {
     assertThat(outcome.customerMessage()).doesNotContain("SQLException", "secret");
     assertThat(outcome.supportCode()).isEqualTo("ES-RUN-123E4567E89B12D3A456426614174000");
     assertThat(outcome.automationExitCode()).isEqualTo(1);
+  }
+
+  @Test
+  void workspaceRecoveryFailureIsSpecificLeakSafeAndPublicationBlocked() {
+    RunTerminalOutcome outcome =
+        project(
+            "FAILED",
+            "WORKSPACE_GENERATION_RECOVERY_FAILED",
+            "WORKSPACE_IGNORED_ARTIFACT_CLASSIFICATION_CHANGED:/secret/path",
+            0.25,
+            5.0,
+            null);
+
+    assertThat(outcome.code()).isEqualTo("WORKSPACE_GENERATION_RECOVERY_FAILED");
+    assertThat(outcome.category()).isEqualTo(RunTerminalOutcome.Category.PLATFORM_FAILURE);
+    assertThat(outcome.customerMessage())
+        .contains("could not prove that the workspace was restored")
+        .contains("Publication was blocked")
+        .doesNotContain("IGNORED_ARTIFACT", "/secret/path");
+    assertThat(outcome.supportCode()).isNotBlank();
+  }
+
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "ROLLBACK_PROVEN|Generated code was rejected"
+            + " safely|REVIEW_EVIDENCE|REVIEW_FAILED_CHECKS|failed deterministic checks",
+        "ROLLBACK_UNPROVEN|Workspace recovery is unresolved|CONTACT_SUPPORT|CONTACT_SUPPORT|contact"
+            + " support",
+        "NO_CANDIDATE|Generation did not produce a candidate|RETRY_RUN|RETRY_GENERATION|Retry"
+            + " generation",
+        "VERIFICATION_ENVIRONMENT_UNAVAILABLE|Verification environment"
+            + " unavailable|RETRY_RUN|RETRY_AFTER_ENVIRONMENT_RECOVERY|verification environment is"
+            + " available",
+        "CHECKPOINT_FAILED|Candidate checkpoint was not"
+            + " proven|CONTACT_SUPPORT|CONTACT_SUPPORT|contact support",
+        "FRONTIER_CONFLICT|Accepted workspace frontier"
+            + " changed|CONTACT_SUPPORT|WAIT_FOR_RECONCILIATION|contact support",
+        "INTERNAL_PROTOCOL_CONFLICT|Generation protocol"
+            + " conflict|CONTACT_SUPPORT|CONTACT_SUPPORT|contact support"
+      })
+  void workspaceGenerationCausalityOwnsPrimaryRecoveryCopyAndAction(
+      WorkspaceGenerationFailureProjection.Category category,
+      String title,
+      String actionType,
+      WorkspaceGenerationFailureProjection.RecommendedAction recommendedAction,
+      String actionCopy) {
+    WorkspaceGenerationFailureProjection failure =
+        new WorkspaceGenerationFailureProjection(
+            category,
+            WorkspaceGenerationFailureProjection.Stage.VERIFICATION,
+            category != WorkspaceGenerationFailureProjection.Category.ROLLBACK_UNPROVEN,
+            category != WorkspaceGenerationFailureProjection.Category.NO_CANDIDATE,
+            category == WorkspaceGenerationFailureProjection.Category.ROLLBACK_PROVEN,
+            true,
+            recommendedAction);
+
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "run-123e4567-e89b-12d3-a456-426614174000",
+            "FAILED",
+            "ALL_TASKS_FAILED",
+            "raw provider error",
+            0.25,
+            5.0,
+            null,
+            false,
+            false,
+            failure);
+
+    assertThat(outcome.code()).isEqualTo("WORKSPACE_GENERATION_" + category.name());
+    assertThat(outcome.customerTitle()).isEqualTo(title);
+    assertThat(outcome.nextAction().type()).isEqualTo(actionType);
+    assertThat(outcome.nextAction().label()).contains(actionCopy);
+    assertThat(outcome.customerMessage()).doesNotContain("raw provider error");
+  }
+
+  @ParameterizedTest
+  @CsvSource({"COMPLETE,CLEAN_COMPLETION", "CANCELLED,RUN_CANCELLED", "ABORTED,RUN_ABORTED"})
+  void generationFailureCannotOverrideSuccessOrUserStoppedTerminalStates(
+      String status, String expectedCode) {
+    WorkspaceGenerationFailureProjection failure =
+        new WorkspaceGenerationFailureProjection(
+            WorkspaceGenerationFailureProjection.Category.ROLLBACK_UNPROVEN,
+            WorkspaceGenerationFailureProjection.Stage.ROLLBACK,
+            false,
+            true,
+            false,
+            true,
+            WorkspaceGenerationFailureProjection.RecommendedAction.CONTACT_SUPPORT);
+
+    RunTerminalOutcome outcome =
+        RunTerminalOutcomeContract.project(
+            "run-123e4567-e89b-12d3-a456-426614174000",
+            status,
+            null,
+            null,
+            0.25,
+            5.0,
+            null,
+            false,
+            null,
+            failure);
+
+    assertThat(outcome.code()).isEqualTo(expectedCode);
+    assertThat(outcome.customerTitle()).doesNotContain("recovery is unresolved");
   }
 
   @Test

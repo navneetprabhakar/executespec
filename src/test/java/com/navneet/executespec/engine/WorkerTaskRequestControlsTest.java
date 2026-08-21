@@ -44,12 +44,17 @@ class WorkerTaskRequestControlsTest {
   }
 
   @Test
-  void retryPreservesCumulativeLimitsStartAndStrictRoute() {
+  void retryPreservesCumulativeLimitsStrictRouteAndSharedLoopPolicy() {
     WorkerTaskRequest primary =
         request(1_000L, 2.0, false).toBuilder()
+            .changeMode(CodeChangeMode.BUILD)
             .workerStartedAtEpochMs(456L)
             .strictProvider(true)
             .zeroWriteSalvageAllowed(false)
+            .verifyBeforeComplete(true)
+            .progressV2(true)
+            .autoVerify(true)
+            .initialFailureSnapshot(DeterministicFailureDelta.snapshot(1, 1, 0, 2, "one failed"))
             .agentRole("ReviewerAgent")
             .stepPrefix("reviewer.general")
             .build();
@@ -62,6 +67,11 @@ class WorkerTaskRequestControlsTest {
     assertThat(retry.workerStartedAtEpochMs()).isEqualTo(456L);
     assertThat(retry.strictProvider()).isTrue();
     assertThat(retry.zeroWriteSalvageAllowed()).isFalse();
+    assertThat(retry.changeMode()).isEqualTo(CodeChangeMode.BUILD);
+    assertThat(retry.verifyBeforeComplete()).isTrue();
+    assertThat(retry.progressV2()).isTrue();
+    assertThat(retry.autoVerify()).isTrue();
+    assertThat(retry.initialFailureSnapshot()).isEqualTo(primary.initialFailureSnapshot());
     assertThat(retry.agentRole()).isEqualTo("ReviewerAgent");
     assertThat(retry.stepPrefix()).isEqualTo("reviewer.general");
   }

@@ -1,7 +1,6 @@
 // Typed API definitions; runtime transport remains re-exported for stable `@/lib/api/core` imports.
 export * from './transport';
 export type {GoalProofEvidenceReference} from './validationReportTypes';
-
 import type {GoalProofEvidenceReference, WorkspaceGenerationBound} from './validationReportTypes';
 import type {GoalDonenessDecisionData} from './goalEvidenceTypes';
 import type {RunEvidenceDetail} from './runEvidence';
@@ -154,6 +153,19 @@ export interface AgentTokenEntry {
 }
 
 export interface RunDetail extends RunSummary, RunEvidenceDetail {
+  /** Exact accepted BUILD generation (V374); null for PATCH and legacy runs. */
+  acceptedWorkspaceGeneration?: string | null;
+  /** Zero-based accepted task index; -1 is the post-clone baseline. */
+  acceptedTaskIndex?: number | null;
+  /** Immutable generation attempt that advanced the accepted frontier. */
+  acceptedGenerationAttemptId?: string | null;
+  /** Storage class of the accepted internal generation checkpoint. */
+  acceptedCheckpointKind?: 'LOCAL_SAME_HOST' | 'GCS' | string | null;
+  /** SHA-256 of the exact accepted internal checkpoint bytes. */
+  acceptedCheckpointDigest?: string | null;
+  /** Completion timestamp copied from the accepted checkpoint receipt. */
+  acceptedCheckpointCompletedAt?: string | null;
+  workspaceGenerationAttempts?: import('./workspaceGenerationEvidence').WorkspaceGenerationAttemptEvidence[];
   /** Durable caller-selected route contract; effective per-call evidence lives in /cost. */
   requestedProvider?: string | null;
   requestedModel?: string | null;

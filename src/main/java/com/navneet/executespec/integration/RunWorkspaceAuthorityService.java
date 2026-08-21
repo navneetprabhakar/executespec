@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -30,6 +31,7 @@ public class RunWorkspaceAuthorityService {
 
   private final JdbcTemplate jdbc;
   private final AgentProperties agentProperties;
+  private final WorkspaceGenerationTelemetry telemetry;
   private final Map<UUID, Lease> localLeases = new ConcurrentHashMap<>();
 
   public Lease acquire(String runId, Authority authority) {
@@ -42,7 +44,10 @@ public class RunWorkspaceAuthorityService {
 
   public Optional<Lease> tryAcquire(String runId, Authority authority) {
     LocalFileAuthority fileAuthority = tryAcquireLocalFile(runId);
-    if (fileAuthority == null) return Optional.empty();
+    if (fileAuthority == null) {
+      telemetry.authority("BUSY", authority.name());
+      return Optional.empty();
+    }
     UUID token = UUID.randomUUID();
     int acquired;
     try {
@@ -69,10 +74,12 @@ public class RunWorkspaceAuthorityService {
     }
     if (acquired != 1) {
       fileAuthority.close();
+      telemetry.authority("BUSY", authority.name());
       return Optional.empty();
     }
     Lease lease = new Lease(runId, authority, token, this, fileAuthority);
     localLeases.put(token, lease);
+    telemetry.authority("ACQUIRED", authority.name());
     return Optional.of(lease);
   }
 
@@ -85,12 +92,7 @@ public class RunWorkspaceAuthorityService {
    */
   public static void assertCorrectionToolDispatch(String runId) {
     Lease correction = CORRECTION_TOOL_LEASE.get();
-    if (correction != null) {
-      if (!correction.runId().equals(runId)) {
-        throw new IllegalStateException("CORRECTION_TOOL_LEASE_RUN_MISMATCH");
-      }
-      correction.assertOwned();
-    }
+    assertToolLease(runId, correction, "CORRECTION_TOOL_LEASE_RUN_MISMATCH");
   }
 
   public static Lease currentCorrectionToolLease() {
@@ -110,6 +112,12 @@ public class RunWorkspaceAuthorityService {
     }
   }
 
+  private static void assertToolLease(String runId, Lease lease, String mismatchCode) {
+    if (lease == null) return;
+    if (!lease.runId().equals(runId)) throw new IllegalStateException(mismatchCode);
+    lease.assertOwned();
+  }
+
   @Scheduled(fixedDelayString = "${execution.workspace-authority.heartbeat-ms:30000}")
   void heartbeatLocalLeases() {
     for (Lease lease : localLeases.values()) {
@@ -120,6 +128,7 @@ public class RunWorkspaceAuthorityService {
                  SET lease_expires_at = NOW() + (? * INTERVAL '1 millisecond'),
                      heartbeat_at = NOW(), updated_at = NOW()
                WHERE run_id = ? AND owner_token = ? AND authority_type = ?
+                 AND lease_expires_at >= NOW()
               """,
               LEASE_TTL.toMillis(),
               lease.runId(),
@@ -128,25 +137,61 @@ public class RunWorkspaceAuthorityService {
       if (renewed != 1) {
         localLeases.remove(lease.ownerToken());
         lease.lost = true;
+        telemetry.authority("LOST", lease.authority().name());
       }
     }
   }
 
   public void assertOwned(Lease lease) {
-    Integer count =
-        jdbc.queryForObject(
+    int renewed =
+        jdbc.update(
             """
-            SELECT COUNT(*) FROM run_workspace_authority
+            UPDATE run_workspace_authority
+               SET lease_expires_at = NOW() + (? * INTERVAL '1 millisecond'),
+                   heartbeat_at = NOW(), updated_at = NOW()
              WHERE run_id = ? AND owner_token = ? AND authority_type = ?
                AND lease_expires_at >= NOW()
             """,
-            Integer.class,
+            LEASE_TTL.toMillis(),
             lease.runId(),
             lease.ownerToken(),
             lease.authority().name());
-    if (lease.lost || count == null || count != 1) {
+    if (lease.lost || renewed != 1) {
+      lease.lost = true;
+      localLeases.remove(lease.ownerToken());
       throw new IllegalStateException("RUN_WORKSPACE_AUTHORITY_LOST");
     }
+  }
+
+  /**
+   * Releases only the exact BUILD authority whose durable terminal generation, task receipt, and
+   * physical LLM operation have converged. This is restart-safe and cannot delete a newer or
+   * non-generation authority.
+   */
+  public boolean releaseConvergedGeneration(String runId) {
+    int deleted =
+        jdbc.update(
+            """
+            DELETE FROM run_workspace_authority w
+             WHERE w.run_id=? AND w.authority_type='BUILD_GENERATION'
+               AND EXISTS (
+                 SELECT 1
+                   FROM workspace_generation_attempt a
+                   JOIN llm_execution_operation o ON o.id=a.llm_operation_id
+                  WHERE a.run_id=w.run_id AND a.workspace_lease_token=w.owner_token
+                    AND (a.state IN ('ACCEPTED','ROLLED_BACK')
+                      OR (a.state='RECOVERY_FAILED' AND a.resolved_at IS NOT NULL))
+                    AND a.task_transition_state='COMPLETED'
+                    AND a.operation_transition_state='COMPLETED'
+                    AND ((a.state='ACCEPTED' AND o.status='SUCCEEDED')
+                      OR (a.state IN ('ROLLED_BACK','RECOVERY_FAILED') AND o.status='FAILED'))
+               )
+            """,
+            runId);
+    if (deleted > 1) {
+      throw new IllegalStateException("RUN_WORKSPACE_TERMINAL_AUTHORITY_DELETE_INVALID");
+    }
+    return deleted == 1;
   }
 
   private void release(Lease lease) {
@@ -158,6 +203,7 @@ public class RunWorkspaceAuthorityService {
           lease.ownerToken());
     } finally {
       lease.fileAuthority.close();
+      telemetry.authority("RELEASED", lease.authority().name());
     }
   }
 
@@ -207,8 +253,10 @@ public class RunWorkspaceAuthorityService {
   }
 
   public enum Authority {
+    BUILD_GENERATION,
     CORRECTION,
     RECOVERY,
+    PUBLICATION_PREPARE,
     PUBLICATION
   }
 

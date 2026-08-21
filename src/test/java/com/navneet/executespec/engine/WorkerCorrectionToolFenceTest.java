@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.navneet.executespec.integration.RunWorkspaceAuthorityService;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.junit.jupiter.api.Test;
 
@@ -61,5 +63,58 @@ class WorkerCorrectionToolFenceTest {
         });
 
     verify(lease).assertOwned();
+  }
+
+  @Test
+  void explicitBuildCapabilityFencesParallelDispatchWithoutThreadLocalPropagation()
+      throws Exception {
+    RunWorkspaceAuthorityService.Lease lease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(lease.runId()).thenReturn("run-build");
+    WorkspaceGenerationLifecycle lifecycle = mock(WorkspaceGenerationLifecycle.class);
+    WorkspaceGenerationLifecycle.Prepared prepared =
+        new WorkspaceGenerationLifecycle.Prepared(java.util.UUID.randomUUID(), null, lease);
+    WorkspaceGenerationDispatchAuthority authority =
+        new WorkspaceGenerationDispatchAuthority(
+            "run-build",
+            "T1",
+            prepared,
+            WorkspaceGenerationDispatchAuthority.Phase.MUTATION,
+            lifecycle);
+    ExecutionContext matching =
+        new ExecutionContext("run-build", "T1", Path.of("/tmp/run-build"))
+            .withWorkspaceGenerationAuthority(authority);
+    WorkerTaskRequest request =
+        WorkerTaskRequest.builder()
+            .provider("anthropic")
+            .model("sonnet")
+            .userPrompt("fix")
+            .context(matching)
+            .changeMode(CodeChangeMode.BUILD)
+            .build();
+
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      WorkerCorrectionToolFence.submitCurrent(
+              executor, () -> WorkerCorrectionToolFence.assertAttemptAdmission(request))
+          .get();
+    }
+
+    verify(lease).assertOwned();
+    verify(lifecycle).assertMutationDispatch(prepared);
+  }
+
+  @Test
+  void buildAttemptAdmissionFailsBeforeProviderOrToolWorkWithoutGenerationFence() {
+    WorkerTaskRequest request =
+        WorkerTaskRequest.builder()
+            .provider("anthropic")
+            .model("sonnet")
+            .userPrompt("fix")
+            .context(new ExecutionContext("run-build", "T1", Path.of("/tmp/run-build")))
+            .changeMode(CodeChangeMode.BUILD)
+            .build();
+
+    assertThatThrownBy(() -> WorkerCorrectionToolFence.assertAttemptAdmission(request))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("WORKSPACE_GENERATION_AUTHORITY_REQUIRED");
   }
 }

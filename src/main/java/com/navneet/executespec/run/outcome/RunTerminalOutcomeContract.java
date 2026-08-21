@@ -10,6 +10,7 @@ import com.navneet.executespec.run.outcome.RunTerminalOutcome.Impact;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.NextAction;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.Publication;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection;
 
 /** Single policy for customer-facing terminal semantics across API, Web, email, and CLI. */
 public final class RunTerminalOutcomeContract {
@@ -24,6 +25,10 @@ public final class RunTerminalOutcomeContract {
           "CANCELLED",
           "ABORTED",
           "REJECTED");
+
+  /** Only terminal failure states may be refined by generation-attempt failure causality. */
+  private static final Set<String> GENERATION_FAILURE_STATUSES =
+      Set.of("PARTIAL", "FAILED", "ERROR");
 
   private static final Set<String> SUCCESS_CODES = Set.of("CLEAN_COMPLETION");
 
@@ -76,7 +81,12 @@ public final class RunTerminalOutcomeContract {
           "PATCH_ITER_LIMIT");
 
   private static final Set<String> PLATFORM_CODES =
-      Set.of("INTERNAL_ERROR", "PATCH_ENGINE_ERROR", "PATCH_UNKNOWN_OUTCOME");
+      Set.of(
+          "INTERNAL_ERROR",
+          "PATCH_ENGINE_ERROR",
+          "PATCH_UNKNOWN_OUTCOME",
+          "WORKSPACE_GENERATION_FAILED",
+          "WORKSPACE_GENERATION_RECOVERY_FAILED");
 
   /**
    * Bounded marker persisted by the auto-push path when a clean run's publication was blocked. Only
@@ -162,6 +172,30 @@ public final class RunTerminalOutcomeContract {
       String prUrl,
       boolean autoPublicationExpected,
       Boolean creditsRefunded) {
+    return project(
+        runId,
+        status,
+        statusReason,
+        failureReason,
+        actualCostUsd,
+        hardCapUsd,
+        prUrl,
+        autoPublicationExpected,
+        creditsRefunded,
+        null);
+  }
+
+  public static RunTerminalOutcome project(
+      String runId,
+      String status,
+      String statusReason,
+      String failureReason,
+      Double actualCostUsd,
+      Double hardCapUsd,
+      String prUrl,
+      boolean autoPublicationExpected,
+      Boolean creditsRefunded,
+      WorkspaceGenerationFailureProjection generationFailure) {
     String normalizedStatus = normalize(status);
     if (!TERMINAL_STATUSES.contains(normalizedStatus)) return null;
 
@@ -172,15 +206,22 @@ public final class RunTerminalOutcomeContract {
             : normalize(failureReason);
     Publication publication =
         prUrl == null || prUrl.isBlank() ? Publication.NOT_CREATED : Publication.PR_CREATED;
+    WorkspaceGenerationFailureProjection applicableGenerationFailure =
+        GENERATION_FAILURE_STATUSES.contains(normalizedStatus) ? generationFailure : null;
     RunTerminalOutcomeDefinitions.Definition definition =
-        definition(
-            normalizedStatus,
-            code,
-            reasonDetail,
-            publication,
-            autoPublicationExpected,
-            publicationBlockCode(failureReason),
-            PlannerRecoveryOutcomeCopy.blockCode(failureReason));
+        applicableGenerationFailure == null
+            ? definition(
+                normalizedStatus,
+                code,
+                reasonDetail,
+                publication,
+                autoPublicationExpected,
+                publicationBlockCode(failureReason),
+                PlannerRecoveryOutcomeCopy.blockCode(failureReason))
+            : RunTerminalOutcomeDefinitions.workspaceGeneration(applicableGenerationFailure);
+    if (applicableGenerationFailure != null) {
+      code = "WORKSPACE_GENERATION_" + applicableGenerationFailure.category().name();
+    }
     Impact impact =
         new Impact(
             actualCostUsd,
@@ -398,6 +439,11 @@ public final class RunTerminalOutcomeContract {
           "Execution stopped",
           "Execution stopped before the run could complete.",
           "Review the run evidence before deciding whether to retry.");
+    }
+    if ("WORKSPACE_GENERATION_FAILED".equals(code)
+        || "WORKSPACE_GENERATION_RECOVERY_FAILED".equals(code)) {
+      return RunTerminalOutcomeDefinitions.workspaceGenerationFailure(
+          "WORKSPACE_GENERATION_RECOVERY_FAILED".equals(code));
     }
     if ("PARTIAL".equals(status)) {
       return RunTerminalOutcomeDefinitions.warning(

@@ -10,10 +10,12 @@ import java.util.Optional;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.sandbox.SandboxExecResult;
 import com.navneet.executespec.sandboxroute.SandboxCommandRoutingService;
+import com.navneet.executespec.sandboxroute.VerificationSandboxAuthority;
 import com.navneet.executespec.smoketest.TestCommandResolver.TestCommand;
 import com.navneet.executespec.swebench.SwebenchContainerStore;
 import com.navneet.executespec.testgen.BoundedProcess;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
+import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.ShellSandboxPolicy;
 
 import org.springframework.stereotype.Component;
@@ -73,6 +75,35 @@ public class WorkspaceTestRunner {
   public record DetailedResult(
       TestExecutionSummary summary, String outputTail, String command, int exitCode) {}
 
+  public enum ExecutionStatus {
+    PASSED,
+    PRODUCT_FAILED,
+    UNSUPPORTED_FRAMEWORK,
+    POLICY_DENIED,
+    TIMED_OUT,
+    LAUNCH_FAILED,
+    MALFORMED_EVIDENCE,
+    TOOLCHAIN_UNAVAILABLE
+  }
+
+  /** Typed result that keeps environment failure separate from product failure. */
+  public record ExecutionEvidence(
+      ExecutionStatus status,
+      DetailedResult result,
+      String detail,
+      String command,
+      boolean executed) {
+
+    public boolean productFailure() {
+      return status == ExecutionStatus.PRODUCT_FAILED;
+    }
+
+    static ExecutionEvidence unavailable(
+        ExecutionStatus status, String detail, String command, boolean executed) {
+      return new ExecutionEvidence(status, null, detail, command, executed);
+    }
+  }
+
   static final int DETAIL_TAIL_CHARS = 3_000;
 
   /**
@@ -83,15 +114,45 @@ public class WorkspaceTestRunner {
     return runTestsDetailed(runId, workspaceRoot).map(DetailedResult::summary);
   }
 
+  /**
+   * Whether a supported test framework is detected in the workspace, independent of whether it ran
+   * or produced parseable counts. Lets a caller distinguish "no runner here" from "a runner exists
+   * but produced no trustworthy count" — because {@link #runTests} collapses both to {@link
+   * Optional#empty()}, and reporting the second as the first tells the model its tests don't exist
+   * when in fact the suite failed to compile / crashed / hit a coverage gate / could not be run.
+   */
+  public boolean frameworkDetected(Path workspaceRoot) {
+    return workspaceRoot != null && resolver.resolve(workspaceRoot).isPresent();
+  }
+
   /** Detailed sibling of {@link #runTests} — same fail-safe contract. */
   public Optional<DetailedResult> runTestsDetailed(String runId, Path workspaceRoot) {
-    if (workspaceRoot == null) return Optional.empty();
+    return Optional.ofNullable(executeTests(runId, workspaceRoot, null).result());
+  }
+
+  /** Exact physical-verification sibling; a bound authority forbids host and RUN-sandbox paths. */
+  public Optional<DetailedResult> runTestsDetailed(ExecutionContext context) {
+    return Optional.ofNullable(executeTests(context).result());
+  }
+
+  public ExecutionEvidence executeTests(ExecutionContext context) {
+    return executeTests(
+        context.runId(), context.workspaceRoot(), context.verificationSandboxAuthority());
+  }
+
+  private ExecutionEvidence executeTests(
+      String runId, Path workspaceRoot, VerificationSandboxAuthority verificationAuthority) {
+    if (workspaceRoot == null) {
+      return ExecutionEvidence.unavailable(
+          ExecutionStatus.TOOLCHAIN_UNAVAILABLE, "workspace root is absent", null, false);
+    }
 
     Optional<TestCommand> resolved = resolver.resolve(workspaceRoot);
     if (resolved.isEmpty()) {
       log.debug(
           "WorkspaceTestRunner run={} no recognized test runner — fallback to coverage", runId);
-      return Optional.empty();
+      return ExecutionEvidence.unavailable(
+          ExecutionStatus.UNSUPPORTED_FRAMEWORK, "no recognized test framework", null, false);
     }
     TestCommand cmd = resolved.get();
 
@@ -105,19 +166,20 @@ public class WorkspaceTestRunner {
           runId,
           cmd.command(),
           v.reason());
-      return Optional.empty();
+      return ExecutionEvidence.unavailable(
+          ExecutionStatus.POLICY_DENIED, v.reason(), cmd.command(), false);
     }
 
     String containerId = null;
     String workdir = null;
-    if (swebenchContainers != null) {
+    if (verificationAuthority == null && swebenchContainers != null) {
       String c = swebenchContainers.get(runId);
       if (c != null) {
         containerId = c;
         workdir = swebenchContainers.getWorkdir(runId);
       }
     }
-    if (containerId == null && programBenchContainers != null) {
+    if (verificationAuthority == null && containerId == null && programBenchContainers != null) {
       String c = programBenchContainers.get(runId);
       if (c != null) {
         containerId = c;
@@ -147,7 +209,36 @@ public class WorkspaceTestRunner {
       int exit;
       // RR-282 / RR-1674 — sandbox dispatch, ahead of any host ProcessBuilder. Bench cleanrooms
       // keep their own container boundary and are left exactly as they were.
-      if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
+      if (verificationAuthority != null) {
+        if (sandboxRouting == null) {
+          log.warn("WorkspaceTestRunner run={} verification routing unavailable", runId);
+          return ExecutionEvidence.unavailable(
+              ExecutionStatus.TOOLCHAIN_UNAVAILABLE,
+              "verification sandbox routing unavailable",
+              cmd.command(),
+              false);
+        }
+        SandboxExecResult sandboxed =
+            sandboxRouting.executeVerificationShell(
+                verificationAuthority, cmd.command(), Duration.ofSeconds(cmd.timeoutSeconds()));
+        if (!sandboxed.completed()) {
+          log.warn(
+              "WorkspaceTestRunner run={} verification sandbox status={} ({})",
+              runId,
+              sandboxed.status(),
+              sandboxed.detail());
+          ExecutionStatus status =
+              switch (sandboxed.status()) {
+                case TIMED_OUT -> ExecutionStatus.TIMED_OUT;
+                case REFUSED -> ExecutionStatus.POLICY_DENIED;
+                case UNAVAILABLE -> ExecutionStatus.TOOLCHAIN_UNAVAILABLE;
+                case COMPLETED -> throw new IllegalStateException("completed handled above");
+              };
+          return ExecutionEvidence.unavailable(status, sandboxed.detail(), cmd.command(), false);
+        }
+        output = SandboxCommandRoutingService.combinedOutput(sandboxed);
+        exit = sandboxed.exitCode();
+      } else if (containerId == null && sandboxRouting != null && sandboxRouting.routingEnabled()) {
         SandboxExecResult sandboxed =
             sandboxRouting.executeShell(
                 runId, workspaceRoot, cmd.command(), Duration.ofSeconds(cmd.timeoutSeconds()));
@@ -161,7 +252,14 @@ public class WorkspaceTestRunner {
               runId,
               sandboxed.status(),
               sandboxed.detail());
-          return Optional.empty();
+          ExecutionStatus status =
+              switch (sandboxed.status()) {
+                case TIMED_OUT -> ExecutionStatus.TIMED_OUT;
+                case REFUSED -> ExecutionStatus.POLICY_DENIED;
+                case UNAVAILABLE -> ExecutionStatus.TOOLCHAIN_UNAVAILABLE;
+                case COMPLETED -> throw new IllegalStateException("completed handled above");
+              };
+          return ExecutionEvidence.unavailable(status, sandboxed.detail(), cmd.command(), false);
         }
         output = SandboxCommandRoutingService.combinedOutput(sandboxed);
         exit = sandboxed.exitCode();
@@ -194,7 +292,11 @@ public class WorkspaceTestRunner {
               runId,
               cmd.timeoutSeconds(),
               cmd.command());
-          return Optional.empty();
+          return ExecutionEvidence.unavailable(
+              ExecutionStatus.TIMED_OUT,
+              "test command exceeded " + cmd.timeoutSeconds() + "s",
+              cmd.command(),
+              true);
         }
         output = outcome.output();
         exit = outcome.exitCode();
@@ -252,7 +354,11 @@ public class WorkspaceTestRunner {
             runId,
             exit,
             cmd.command());
-        return Optional.empty();
+        return ExecutionEvidence.unavailable(
+            ExecutionStatus.MALFORMED_EVIDENCE,
+            "runner exit status contradicts parsed counts",
+            cmd.command(),
+            true);
       }
 
       final boolean executionProven = fromXmlRecovery ? xmlProvenanceProven : true;
@@ -285,13 +391,35 @@ public class WorkspaceTestRunner {
           output.length() <= DETAIL_TAIL_CHARS
               ? output
               : "... [head omitted] ...\n" + output.substring(output.length() - DETAIL_TAIL_CHARS);
-      return parsed.map(s -> new DetailedResult(s, tail, cmd.command(), exit));
+      if (parsed.isEmpty()) {
+        return ExecutionEvidence.unavailable(
+            ExecutionStatus.MALFORMED_EVIDENCE,
+            "test output did not contain trustworthy counts",
+            cmd.command(),
+            true);
+      }
+      if (!executionProven) {
+        return ExecutionEvidence.unavailable(
+            ExecutionStatus.MALFORMED_EVIDENCE,
+            "test report freshness could not be proven for this attempt",
+            cmd.command(),
+            true);
+      }
+      DetailedResult detail = new DetailedResult(parsed.get(), tail, cmd.command(), exit);
+      boolean failed = exit != 0 || parsed.get().getFailed() > 0 || parsed.get().getErrors() > 0;
+      return new ExecutionEvidence(
+          failed ? ExecutionStatus.PRODUCT_FAILED : ExecutionStatus.PASSED,
+          detail,
+          null,
+          cmd.command(),
+          true);
     } catch (Exception e) {
       log.warn(
           "WorkspaceTestRunner run={} process error — fallback to coverage: {}",
           runId,
           e.getMessage());
-      return Optional.empty();
+      return ExecutionEvidence.unavailable(
+          ExecutionStatus.LAUNCH_FAILED, e.getMessage(), cmd.command(), false);
     }
   }
 

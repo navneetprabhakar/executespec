@@ -2,6 +2,7 @@ package com.navneet.executespec.tool;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.function.Supplier;
@@ -807,11 +808,11 @@ public class GitTool {
       String out2 = new String(p2.getInputStream().readAllBytes());
       int exit2 = p2.waitFor();
 
-      // Switch back to main regardless of push result
-      new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
-          .redirectErrorStream(true)
-          .start()
-          .waitFor();
+      // Switch back to main regardless of push result. If this FAILS the workspace is left on the
+      // feature branch — a later reviewer diff / getDiffSinceInit / another repo's push in a
+      // multi-repo loop would then measure or publish from the wrong branch. It is a cleanup step,
+      // not the push outcome, so log loudly rather than failing the (successful) push.
+      checkoutMainOrWarn(wsPath, branchName);
 
       if (exit2 == 0) {
         log.info("[GitTool] Pushed branch {} to remote: {}", branchName, repoUrl);
@@ -859,17 +860,40 @@ public class GitTool {
       if (statusExit != 0) return GitToolResult.err("status failed: " + statusOut);
       if (statusOut.isBlank()) return GitToolResult.ok("CLEAN");
 
-      runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
+      // Stage everything, and CHECK the result. A swallowed `git add -A` failure (index lock,
+      // permission, dubious-ownership fatal) combined with `commit --allow-empty` below published
+      // an
+      // EMPTY commit — a PR/branch with zero file content — and returned ok(branchName). The status
+      // check above already proved the worktree is dirty, so `--allow-empty` never served the
+      // legitimate path; it only masked a staging failure. Check the add exit and drop
+      // --allow-empty
+      // so a staging failure surfaces as an error instead of a silent empty publish.
+      ProcessBuilder add = new ProcessBuilder("git", "-C", repoDir, "add", "-A");
+      add.redirectErrorStream(true);
+      Process pa = add.start();
+      String addOut = new String(pa.getInputStream().readAllBytes());
+      int addExit = pa.waitFor();
+      if (addExit != 0) return GitToolResult.err("git add failed: " + addOut);
       runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
       runQuietly(repoDir, "git", "-C", repoDir, "config", "user.name", "ExecuteSpec Agent");
 
       ProcessBuilder commit =
-          new ProcessBuilder("git", "-C", repoDir, "commit", "--allow-empty", "-m", commitMessage);
+          new ProcessBuilder("git", "-C", repoDir, "commit", "-m", commitMessage);
       commit.redirectErrorStream(true);
       Process pc = commit.start();
       String commitOut = new String(pc.getInputStream().readAllBytes());
       int commitExit = pc.waitFor();
-      if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
+      if (commitExit != 0) {
+        // A dirty `status --porcelain` can still stage no blob change — git content normalization
+        // (autocrlf / `* text=auto`), an unchanged submodule pointer, or a mode-only change with
+        // core.fileMode=false. That is genuinely "nothing to publish", NOT a failure: with
+        // --allow-empty removed, treat it like the up-front CLEAN case instead of failing the push
+        // (which would block the PR) or publishing an empty commit.
+        if (commitOut != null && commitOut.contains("nothing to commit")) {
+          return GitToolResult.ok("CLEAN");
+        }
+        return GitToolResult.err("commit failed: " + commitOut);
+      }
 
       runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
       ProcessBuilder push =
@@ -972,6 +996,130 @@ public class GitTool {
     }
   }
 
+  /**
+   * Pushes one already-prepared immutable commit object without staging, committing, checking out,
+   * or moving a local ref. This is the only protocol-v2 publication primitive: callers must bind
+   * {@code preparedCommitId} to a durable repository receipt before entering this method.
+   */
+  public GitToolResult pushPreparedCommit(
+      String runId,
+      String subPath,
+      String remoteUrl,
+      String pat,
+      String branchName,
+      String preparedCommitId,
+      String expectedRemoteSha) {
+    Path output = null;
+    try {
+      String repoDir =
+          Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
+      if (preparedCommitId == null || !preparedCommitId.matches("[0-9a-fA-F]{40,64}")) {
+        return GitToolResult.err("prepared commit identity is invalid");
+      }
+      if (branchName == null || branchName.isBlank() || branchName.contains("..")) {
+        return GitToolResult.err("publication branch identity is invalid");
+      }
+      String destination = "refs/heads/" + branchName;
+      java.util.ArrayList<String> args =
+          new java.util.ArrayList<>(
+              java.util.List.of(
+                  "-C", repoDir, "push", remoteUrl, preparedCommitId + ":" + destination));
+      if (expectedRemoteSha != null && !expectedRemoteSha.isBlank()) {
+        if (!expectedRemoteSha.matches("[0-9a-fA-F]{40,64}")) {
+          return GitToolResult.err("expected remote revision is invalid");
+        }
+        args.add("--force-with-lease=" + destination + ":" + expectedRemoteSha.trim());
+      }
+      output = Files.createTempFile("executespec-prepared-push-", ".log");
+      ProcessBuilder push = com.navneet.executespec.repo.GitProcessAuth.git(pat, args);
+      push.redirectErrorStream(true);
+      push.redirectOutput(output.toFile());
+      Process process = push.start();
+      boolean completed = process.waitFor(120, java.util.concurrent.TimeUnit.SECONDS);
+      if (!completed) {
+        process.destroyForcibly();
+        process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        return GitToolResult.err("prepared commit push timed out; remote outcome is unknown");
+      }
+      String detail = Files.readString(output);
+      if (process.exitValue() != 0) {
+        return GitToolResult.err(describePushFailure(branchName, expectedRemoteSha, detail));
+      }
+      return GitToolResult.ok("PUSHED_PREPARED:" + preparedCommitId.toLowerCase());
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return GitToolResult.err("prepared commit push interrupted; remote outcome is unknown");
+    } catch (Exception failure) {
+      log.warn("[GitTool] prepared commit push failed: {}", describeFailure(failure));
+      return GitToolResult.err("prepared commit push failed: " + describeFailure(failure));
+    } finally {
+      if (output != null) {
+        try {
+          Files.deleteIfExists(output);
+        } catch (Exception ignored) {
+          // Ephemeral bounded transport log; no publication state depends on cleanup.
+        }
+      }
+    }
+  }
+
+  /** Bitbucket-authenticated variant of {@link #pushPreparedCommit}. */
+  public GitToolResult pushPreparedCommitBitbucket(
+      String runId,
+      String subPath,
+      String remoteUrl,
+      String appPassword,
+      String branchName,
+      String preparedCommitId,
+      String expectedRemoteSha) {
+    Path output = null;
+    try {
+      String repoDir =
+          Path.of(workspaceRoot, runId, subPath).toAbsolutePath().normalize().toString();
+      if (preparedCommitId == null || !preparedCommitId.matches("[0-9a-fA-F]{40,64}")) {
+        return GitToolResult.err("prepared commit identity is invalid");
+      }
+      String destination = "refs/heads/" + branchName;
+      java.util.ArrayList<String> args =
+          new java.util.ArrayList<>(
+              java.util.List.of(
+                  "-C", repoDir, "push", remoteUrl, preparedCommitId + ":" + destination));
+      if (expectedRemoteSha != null && !expectedRemoteSha.isBlank()) {
+        args.add("--force-with-lease=" + destination + ":" + expectedRemoteSha.trim());
+      }
+      output = Files.createTempFile("executespec-prepared-bitbucket-push-", ".log");
+      ProcessBuilder push =
+          com.navneet.executespec.repo.GitProcessAuth.git(
+              appPassword, "x-bitbucket-api-token-auth", args);
+      push.redirectErrorStream(true);
+      push.redirectOutput(output.toFile());
+      Process process = push.start();
+      boolean completed = process.waitFor(120, java.util.concurrent.TimeUnit.SECONDS);
+      if (!completed) {
+        process.destroyForcibly();
+        process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        return GitToolResult.err("prepared commit push timed out; remote outcome is unknown");
+      }
+      String detail = Files.readString(output);
+      return process.exitValue() == 0
+          ? GitToolResult.ok("PUSHED_PREPARED:" + preparedCommitId.toLowerCase())
+          : GitToolResult.err(describePushFailure(branchName, expectedRemoteSha, detail));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return GitToolResult.err("prepared commit push interrupted; remote outcome is unknown");
+    } catch (Exception failure) {
+      return GitToolResult.err("prepared commit push failed: " + describeFailure(failure));
+    } finally {
+      if (output != null) {
+        try {
+          Files.deleteIfExists(output);
+        } catch (Exception ignored) {
+          // Ephemeral transport log only.
+        }
+      }
+    }
+  }
+
   private static String gitRevision(String repoDir, String revision) throws Exception {
     ProcessBuilder pb = new ProcessBuilder("git", "-C", repoDir, "rev-parse", revision);
     pb.redirectErrorStream(true);
@@ -1000,6 +1148,36 @@ public class GitTool {
     Process p = pb.start();
     p.getInputStream().readAllBytes();
     p.waitFor();
+  }
+
+  /**
+   * Post-push cleanup: return the workspace to {@code main}. A non-zero exit here leaves the tree
+   * on the just-pushed feature branch, which silently corrupts a later diff / another repo's push
+   * in a multi-repo loop, so the failure is logged loudly rather than swallowed. It is not the push
+   * outcome, so it does not change the caller's success/err result.
+   */
+  private static void checkoutMainOrWarn(String wsPath, String branchName) {
+    try {
+      Process p =
+          new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
+              .redirectErrorStream(true)
+              .start();
+      String out = new String(p.getInputStream().readAllBytes());
+      int exit = p.waitFor();
+      if (exit != 0) {
+        log.warn(
+            "[GitTool] could not checkout main after pushing {} (exit={}) — workspace left on the"
+                + " feature branch: {}",
+            branchName,
+            exit,
+            out.strip());
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.warn("[GitTool] checkout main after push interrupted for {}", branchName, e);
+    } catch (Exception e) {
+      log.warn("[GitTool] checkout main after push failed for {}", branchName, e);
+    }
   }
 
   /**
@@ -1052,11 +1230,10 @@ public class GitTool {
       String out2 = new String(p2.getInputStream().readAllBytes());
       int exit2 = p2.waitFor();
 
-      // Switch back to main regardless of push result
-      new ProcessBuilder("git", "-C", wsPath, "checkout", "main")
-          .redirectErrorStream(true)
-          .start()
-          .waitFor();
+      // Switch back to main regardless of push result. A silent failure leaves the workspace on the
+      // feature branch, corrupting a later diff / another repo's push. Cleanup step — log, don't
+      // fail the successful push.
+      checkoutMainOrWarn(wsPath, branchName);
 
       if (exit2 == 0) {
         log.info("[GitTool] Pushed branch {} to Bitbucket: {}", branchName, cloneUrl);

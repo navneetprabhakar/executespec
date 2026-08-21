@@ -3,6 +3,7 @@ package com.navneet.executespec.integration;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -52,14 +53,14 @@ public class DurableCorrectionLifecycle {
             .orElseThrow(
                 () -> new IllegalStateException("Correction task does not exist: " + taskId));
     return prepare(
-        runId, taskId, workspaceRoot, AutomaticCorrectionLifecycle.snapshotTask(task), null, null);
+        runId, taskId, workspaceRoot, CorrectionStateSnapshots.snapshotTask(task), null, null);
   }
 
   public Prepared prepare(
       String runId,
       String taskId,
       Path workspaceRoot,
-      AutomaticCorrectionLifecycle.TaskState taskSnapshot) {
+      CorrectionStateSnapshots.TaskState taskSnapshot) {
     return prepare(runId, taskId, workspaceRoot, taskSnapshot, null, null);
   }
 
@@ -67,7 +68,7 @@ public class DurableCorrectionLifecycle {
       String runId,
       String taskId,
       Path workspaceRoot,
-      AutomaticCorrectionLifecycle.TaskState taskSnapshot,
+      CorrectionStateSnapshots.TaskState taskSnapshot,
       String approvalId,
       String proposalDigest) {
     if ((approvalId == null) != (proposalDigest == null)
@@ -188,6 +189,20 @@ public class DurableCorrectionLifecycle {
                 throw new IllegalStateException(
                     "CORRECTION_RECOVERY_UNPROVEN: prior correction could not be restored");
               }
+            });
+  }
+
+  /** Latest immutable correction frontier, when a correction supersedes the initial BUILD tree. */
+  public Optional<String> latestAcceptedGeneration(String runId) {
+    return attempts
+        .findFirstByRunIdAndPhaseOrderByCreatedAtDesc(runId, "ACCEPTED")
+        .map(
+            row -> {
+              String generation = row.getAfterGeneration();
+              if (generation == null || !generation.matches("[0-9a-f]{64}")) {
+                throw new IllegalStateException("CORRECTION_ACCEPTED_GENERATION_INVALID");
+              }
+              return generation;
             });
   }
 
@@ -340,9 +355,9 @@ public class DurableCorrectionLifecycle {
 
   private void restoreTask(CorrectionAttempt attempt, boolean terminateApprovalReceipt) {
     try {
-      AutomaticCorrectionLifecycle.TaskState snapshot =
+      CorrectionStateSnapshots.TaskState snapshot =
           objectMapper.readValue(
-              attempt.getTaskSnapshotJson(), AutomaticCorrectionLifecycle.TaskState.class);
+              attempt.getTaskSnapshotJson(), CorrectionStateSnapshots.TaskState.class);
       AgentTask current =
           tasks
               .findById(attempt.getTaskId())

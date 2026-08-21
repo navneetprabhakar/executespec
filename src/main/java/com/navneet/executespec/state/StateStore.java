@@ -36,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 public class StateStore {
 
   private final PipelineRunRepository runRepo;
+  private final PipelineRunMutationRepository runMutations;
   private final AgentTaskRepository taskRepo;
   private final AgentMessageRepository messageRepo;
   private final GateEventRepository gateEventRepo;
@@ -2029,6 +2030,13 @@ public class StateStore {
               run.setGcsArchivedAt(Instant.now());
               runRepo.save(run);
             });
+  }
+
+  /** Records a non-terminal task checkpoint key without a full-entity lost-update race. */
+  public void recordGcsCheckpointKey(String runId, String gcsKey) {
+    if (runMutations.updateGcsWorkspaceKey(runId, gcsKey) != 1) {
+      throw new IllegalStateException("WORKSPACE_CHECKPOINT_RUN_NOT_FOUND");
+    }
   }
 
   /**

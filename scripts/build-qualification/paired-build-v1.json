@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 2,
+  "suiteId": "build-workspace-generation-v2",
+  "runMode": "BUILD",
+  "executionMode": "PROTOTYPE",
+  "executionTopology": "SEQUENTIAL_SAME_HOST",
+  "freshRunCount": 2,
+  "safeMaxTotalUsd": 10.0,
+  "status": "PREPARED_NOT_EXECUTED",
+  "arms": [
+    {
+      "id": "control",
+      "source": "HISTORICAL_IMMUTABLE_EVIDENCE",
+      "expectedOutcome": "ROLLED_BACK",
+      "releaseSha": "86fa732bbb89cb9629f84c64036e1b62c88d3c7c",
+      "runIdsByRoute": {
+        "anthropic/claude-sonnet-5": "df74e82f-f593-44e3-8e81-eed3b42b6c5e",
+        "openrouter/glm-5.2": "1572b2eb-bb24-4b3b-84eb-a5c34375827e"
+      }
+    },
+    {
+      "id": "candidate",
+      "source": "LIVE_CANDIDATE",
+      "expectedOutcome": "ACCEPTED",
+      "baseUrlEnv": "BUILD_QUAL_CANDIDATE_URL",
+      "releaseShaEnv": "BUILD_QUAL_CANDIDATE_SHA"
+    }
+  ],
+  "routes": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "safeMaxUsdPerRun": 5.0
+    },
+    {
+      "provider": "openrouter",
+      "model": "glm-5.2",
+      "safeMaxUsdPerRun": 5.0
+    }
+  ],
+  "cases": [
+    {
+      "id": "rest-api-low",
+      "kind": "GREENFIELD",
+      "band": "LOW",
+      "specPath": "scripts/build-eval-cases/rest-api-low/spec.md",
+      "specSha256": "c7a178f7012f9aa7e69794d821304a16410dcdc705a9e57d7e6e67c2e7eea164",
+      "acceptancePath": "scripts/build-eval-cases/rest-api-low/acceptance/run.sh",
+      "acceptanceSha256": "0e35fbfc69c71e8a9a0d630373daed10bf0bb65306417d41f96459c0a61c8dd9"
+    }
+  ],
+  "harness": {
+    "path": "scripts/build-eval.sh",
+    "sha256": "e4c2b7430b70bd00d5494064dd956ebd7287164e63bf9b9a0c9ce34e00ceac94"
+  },
+  "pairedEqualFields": [
+    "runMode",
+    "executionMode",
+    "route.provider",
+    "route.model",
+    "case.specSha256",
+    "case.acceptanceSha256",
+    "runOptions"
+  ],
+  "requiredRunOptions": {
+    "skipApproval": true,
+    "requireConfirmationBeforeExpensiveContinuation": true,
+    "requireBenchmarkPriorForAutomaticContinuation": false
+  },
+  "requiredCommonEvidence": [
+    "releaseSha",
+    "runId",
+    "provider",
+    "model",
+    "costUsd",
+    "specSha256",
+    "unresolvedWorkspaceGenerationAttemptCount"
+  ],
+  "requiredAcceptedEvidence": [
+    "terminalStatus",
+    "priorAcceptedWorkspaceGeneration",
+    "acceptedWorkspaceGeneration",
+    "latestWorkspaceGenerationAttemptState",
+    "workspaceArchiveSha256",
+    "workspaceArchiveGeneration",
+    "heldOutPassed",
+    "heldOutTotal",
+    "initialFailureOutcome",
+    "initialFailureCode",
+    "acceptanceCheckCount",
+    "sharedKernelFlagEnabledAtSubmission",
+    "releaseIdentityAuthority",
+    "attestedRunningSha",
+    "attestedArtifactSha256",
+    "attestedDeploymentAttemptId",
+    "releaseIdentityReadAt",
+    "generatedCodeReview"
+  ],
+  "requiredRolledBackEvidence": [
+    "priorAcceptedWorkspaceGeneration",
+    "candidateEvidenceKind",
+    "rejectedDiffSha256",
+    "rollbackRestoredGeneration",
+    "latestWorkspaceGenerationAttemptState",
+    "deterministicFailureSource",
+    "deterministicTestsExecuted",
+    "deterministicTestsFailed",
+    "deterministicFailureEvidenceSha256",
+    "generatedCodeReview"
+  ],
+  "qualificationRules": {
+    "freshRunsAreCandidateOnly": true,
+    "freshRunCount": 2,
+    "safeMaxUsdPerRun": 5.0,
+    "unresolvedWorkspaceGenerationAttemptCount": 0,
+    "workspaceArchiveMustMatchAcceptedGeneration": true,
+    "rollbackMustRestorePriorFrontier": true,
+    "legacyRejectedDiffMaySubstituteForUnfrozenCandidateGeneration": true,
+    "systemVerifiedScoreIsNonAuthoritative": true,
+    "manualGeneratedCodeReviewRequired": true,
+    "allHeldOutTestsMustPassOnAcceptedArm": true,
+    "sharedKernelFlagMustBeEnabledAtSubmission": true
+  }
+}

@@ -60,6 +60,7 @@ class PromptComposerAdmittedSurfaceTest {
             List.of(),
             List.of(),
             List.of(),
+            List.of(),
             null);
     String evidence =
         PromptComposer.composeWorkerEvidence(

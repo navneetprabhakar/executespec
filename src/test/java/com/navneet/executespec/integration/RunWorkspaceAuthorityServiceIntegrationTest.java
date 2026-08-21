@@ -2,6 +2,7 @@ package com.navneet.executespec.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import java.nio.file.Path;
 import java.util.UUID;
@@ -66,6 +67,14 @@ class RunWorkspaceAuthorityServiceIntegrationTest {
           "UPDATE run_workspace_authority SET lease_expires_at = NOW() - INTERVAL '1 second'"
               + " WHERE run_id = ?",
           "run-1");
+      hostA.heartbeatLocalLeases();
+      assertThat(
+              jdbc.queryForObject(
+                  "SELECT lease_expires_at < NOW() FROM run_workspace_authority WHERE run_id=?",
+                  Boolean.class,
+                  "run-1"))
+          .as("a heartbeat must never resurrect an already expired authority")
+          .isTrue();
       assertThatThrownBy(lease::assertOwned)
           .isInstanceOf(IllegalStateException.class)
           .hasMessage("RUN_WORKSPACE_AUTHORITY_LOST");
@@ -118,7 +127,10 @@ class RunWorkspaceAuthorityServiceIntegrationTest {
   private RunWorkspaceAuthorityService service(JdbcTemplate jdbc, Path workspace) {
     AgentProperties properties = new AgentProperties();
     properties.setWorkspace(workspace.toString());
-    return new RunWorkspaceAuthorityService(jdbc, properties);
+    return new RunWorkspaceAuthorityService(
+        jdbc,
+        properties,
+        mock(com.navneet.executespec.workspacegeneration.WorkspaceGenerationTelemetry.class));
   }
 
   private JdbcTemplate jdbc(String schema) {

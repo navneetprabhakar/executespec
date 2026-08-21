@@ -22,6 +22,7 @@ import com.navneet.executespec.state.repository.AgentMessageRepository;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.CompactionEventRepository;
 import com.navneet.executespec.state.repository.GateEventRepository;
+import com.navneet.executespec.state.repository.PipelineRunMutationRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.state.repository.PlanVersionRepository;
 import com.navneet.executespec.state.repository.PromptAuditRepository;
@@ -42,6 +43,7 @@ class StateStorePlanIntegrityTest {
   private StateStore store() {
     return new StateStore(
         runRepo,
+        mock(PipelineRunMutationRepository.class),
         taskRepo,
         mock(AgentMessageRepository.class),
         mock(GateEventRepository.class),

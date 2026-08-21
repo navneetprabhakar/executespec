@@ -54,7 +54,8 @@ class RunPlanningCoordinatorExecutableStabilizationTest {
   @Test
   void rejectedPlanGetsOneStrictExactRouteRepairBeforeGate() {
     Fixture fixture = fixture();
-    Plan invalid = plan("Choose either PostgreSQL or SQLite before implementing persistence.");
+    Plan invalid =
+        unownedPlan("Choose either PostgreSQL or SQLite before implementing persistence.");
     Plan repaired = plan("Implement the selected SQLite persistence stack.");
     ResolvedModel route = route();
     when(fixture.outline().resolveConfiguredRoute(any())).thenReturn(route);
@@ -75,7 +76,8 @@ class RunPlanningCoordinatorExecutableStabilizationTest {
   @Test
   void exhaustedSameRouteRepairStopsWithTypedPolicyReason() {
     Fixture fixture = fixture();
-    Plan invalid = plan("Choose either PostgreSQL or SQLite before implementing persistence.");
+    Plan invalid =
+        unownedPlan("Choose either PostgreSQL or SQLite before implementing persistence.");
     ResolvedModel route = route();
     when(fixture.outline().resolveConfiguredRoute(any())).thenReturn(route);
     when(fixture.coherence().repairContractViolationsExact(any(), any(), any(), any(), eq(route)))
@@ -103,7 +105,8 @@ class RunPlanningCoordinatorExecutableStabilizationTest {
   @Test
   void physicalRouteMismatchFailsClosedWithoutSelectingEscalation() {
     Fixture fixture = fixture();
-    Plan invalid = plan("Choose either PostgreSQL or SQLite before implementing persistence.");
+    Plan invalid =
+        unownedPlan("Choose either PostgreSQL or SQLite before implementing persistence.");
     ResolvedModel route = route();
     when(fixture.outline().resolveConfiguredRoute(any())).thenReturn(route);
     when(fixture.coherence().repairContractViolationsExact(any(), any(), any(), any(), eq(route)))
@@ -128,7 +131,8 @@ class RunPlanningCoordinatorExecutableStabilizationTest {
   @Test
   void exhaustedSameRouteRepairUsesOneRunAuthorizedMatrixEscalation() {
     Fixture fixture = fixture();
-    Plan invalid = plan("Choose either PostgreSQL or SQLite before implementing persistence.");
+    Plan invalid =
+        unownedPlan("Choose either PostgreSQL or SQLite before implementing persistence.");
     Plan repaired = plan("Implement the selected SQLite persistence stack.");
     ResolvedModel current = route();
     ResolvedModel stepUp =
@@ -256,6 +260,33 @@ class RunPlanningCoordinatorExecutableStabilizationTest {
                     .description(description)
                     .touchesFiles(List.of("src/persistence.rs"))
                     .meetsRequirements(List.of("R1"))
+                    .build()))
+        .build();
+  }
+
+  /**
+   * A plan that fails the compiler on a FATAL check (requirement ownership) so it enters the
+   * repair/escalation lifecycle. Heuristic contradictions (e.g. an unresolved implementation-stack
+   * choice) are advisory since the 2026-08-08 gate tiering and no longer trigger this path, so the
+   * lifecycle must be exercised with a genuinely fatal violation.
+   */
+  private static Plan unownedPlan(String description) {
+    return Plan.builder()
+        .planTitle("Persistence")
+        .requirements(
+            List.of(
+                new RequirementSpec(
+                    "R1",
+                    "Implement the selected persistence stack",
+                    RequirementSpec.RequirementKind.FUNCTIONAL)))
+        .tasks(
+            List.of(
+                PlannedTask.builder()
+                    .id("T1")
+                    .title("Implement persistence")
+                    .description(description)
+                    .touchesFiles(List.of("src/persistence.rs"))
+                    .meetsRequirements(List.of())
                     .build()))
         .build();
   }

@@ -1,6 +1,47 @@
 import {describe, expect, it} from 'vitest';
 
 import {buildIdeComposeRunRequest} from './ideComposeRunRequest';
+import {runPhaseLabel} from './runPhaseLabel';
+import type {WorkspaceGenerationAttemptEvidence} from '../lib/api/workspaceGenerationEvidence';
+
+function generationAttempt(
+  overrides: Partial<WorkspaceGenerationAttemptEvidence>,
+): WorkspaceGenerationAttemptEvidence {
+  return {
+    attemptId: 'attempt-1',
+    taskId: 'task-1',
+    taskIndex: 0,
+    attemptNumber: 1,
+    attemptKind: 'INITIAL',
+    state: 'RECOVERY_FAILED',
+    beforeGeneration: 'before',
+    createdAt: '2026-08-13T09:00:00Z',
+    ...overrides,
+  };
+}
+
+describe('runPhaseLabel', () => {
+  it('renders retrying and exhausted workspace recovery instead of generic running copy', () => {
+    expect(
+      runPhaseLabel({
+        status: 'WORKING',
+        workspaceGenerationAttempts: [generationAttempt({recoveryAttemptCount: 2})],
+      }),
+    ).toBe('Recovery retry scheduled');
+    expect(
+      runPhaseLabel({
+        status: 'FAILED',
+        workspaceGenerationAttempts: [
+          generationAttempt({recoveryExhaustedAt: '2026-08-13T10:00:00Z'}),
+        ],
+      }),
+    ).toBe('Workspace recovery failed');
+  });
+
+  it('keeps cancelled state truthful after recovery convergence', () => {
+    expect(runPhaseLabel({status: 'CANCELLED', workspaceGenerationAttempts: []})).toBe('Cancelled');
+  });
+});
 
 describe('buildIdeComposeRunRequest', () => {
   it('sends explicit run-level recovery authority when guards are unchecked', () => {

@@ -26,8 +26,37 @@ V370 retypes V369's five digest columns from `CHAR(64)` (bpchar) to `VARCHAR(64)
 schema-validation rejects bpchar against the entity's `@Column(length = 64)` mapping, which
 crash-looped the dev deployment on boot. Values are exact 64-char hex digests, so the in-place
 type conversion is content-preserving and the V369 CHECK constraints remain valid.
+V374 adds `pipeline_run.accepted_workspace_generation`, `accepted_task_index`, and
+`accepted_generation_attempt_id`. They are advanced atomically with an ACCEPTED
+`workspace_generation_attempt` together with the exact accepted GCS archive key; the database
+trigger prevents a later asynchronous/provisional archive from replacing that recovery frontier.
+Task COMPLETE is reconciled from immutable acceptance after a crash, never used as the frontier
+authority itself. `workspacegeneration/CLAUDE.md` owns the full attempt/receipt/recovery contract.
+V375 adds a separate first-write `recovery_failure_*` tuple and database immutability for original
+failure/rejected-diff evidence, preventing recovery from overwriting the attempt's causal record.
+V385 adds nullable-for-history `pipeline_run.build_protocol_version`. Every candidate BUILD writes
+an explicit immutable `LEGACY_V1` or `SHARED_KERNEL_V2` in its initial INSERT; PATCH remains null.
+Candidate execution refuses null/unknown identity and every generation attempt must copy the exact
+parent value. Historical disposition remains a separate Phase 0A operation, never a current-flag
+inference.
+V386 converts that nullable pre-pin BUILD history to `LEGACY_UNKNOWN` and persists immutable
+`build_protocol_disposition` / attempt `historical_disposition` values. It never changes product,
+generation, task, or physical-operation terminal evidence. Unknown history is non-executable and
+blocked from publication. V387 adds append-only, monotonic dry-run/apply
+receipts over a minimized causal snapshot. Closing a record as non-executable retains its evidence;
+deletion requires a separate applied release receipt and never grants execution or publication.
+V388 gives RUN and VERIFICATION sandboxes distinct durable identities and owned-workspace cleanup.
+V389 adds immutable per-attempt command-protocol identity plus durable verification-command
+admission, dispatch, terminal receipts and stale-dispatch reconciliation. Protocol-v2 passing
+generation receipts cite only successful physical-command receipts; stale dispatched work becomes
+`INDETERMINATE`, never inferred success. Previous-writer attempts retain protocol v1.
+V390 adds the publication state below SCM: one accepted-generation/validation-bound preparation,
+immutable per-repository parent/tree/commit receipts, exact repository-provision intents, and exact
+prepared-commit push attempts. New-repository mode is frozen in the receipt, so replay cannot
+reinterpret a provisioned greenfield repository as brownfield. Stale external dispatches become
+`INDETERMINATE`; no recovery path writes `PROVISIONED` or `PUBLISHED`.
 
-> Last reviewed: 2026-08-02 against the V371 worktree contract.
+> Last reviewed: 2026-08-12 against the V395 worktree contract.
 
 Persistence layer for pipeline runs, tasks, and all mutable state.
 
@@ -48,11 +77,11 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   A boot-time `NOT_APPLICABLE` caused by the dead predecessor's still-fresh run/task heartbeat is
   deferred and retried after the existing two-minute CAS stale fence; it is no longer a permanent
   stuck-`WORKING` outcome. An in-process guard prevents overlapping scans.
-- Cross-host crash recovery now fails closed unless `durability.workspace.shared-persistent=true`.
-  Same-host process restart remains eligible. The asynchronous GCS task archive is not treated as
-  an acknowledged task frontier: it can lag a terminal task-row commit, so using it blindly could
-  skip a task whose files are absent. Until a versioned frontier is persisted and validated,
-  different-host takeover terminates/refunds with `UNTRUSTED_WORKSPACE_FRONTIER`.
+- Legacy/pre-V374 cross-host recovery still fails closed unless its older shared-workspace contract
+  is satisfied. V374 BUILD tasks instead use a versioned accepted frontier plus exact per-generation
+  multi-repository archives; replacement-node recovery restores and re-attests the accepted or
+  before-generation archive before generic replay. The legacy asynchronous latest-workspace ZIP is
+  never acceptance authority.
 - Execution/recovery leases use `integration.ExecutionHostIdentity`: explicit
   `EXECUTESPEC_EXECUTION_HOST_ID`, then container `HOSTNAME`, then Linux machine-id, network host,
   and finally the host portion of the JVM runtime name. The fallback never includes the JVM PID, so
@@ -68,7 +97,10 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - `entity/AgentTask.java` — JPA entity for individual tasks within a run. Includes subtask decomposition fields: `parentTaskId` (null for top-level), `subtaskIndex` (1-based), `subtaskTotal`. **v2.5.11 (V109): `meetsRequirementsJson` — JSON array of requirement IDs from `PipelineRun.planRequirementsJson` this task is expected to implement.** **v2.6.2-track (V130): `taskType` (LEAF \| EPIC), `expansionStatus` (PENDING \| EXPANDED \| FAILED \| null), `expandedAt` — populated by Phase 2 (TaskExpanderAgent) of the hierarchical planner.** **V250:** `goalDonenessJson` + `continuationDecisionJson` persist executor task-boundary goal state and next-action advice for run detail clients. **V252:** `continuationActionsJson` persists executed/skipped continuation actions so automatic model/provider upgrades survive final decision overwrites and reloads. **V364:** `continuationApproval*` fields persist the exact proposal digest, receipt id, provider/model route, action, post-review source marker, and lifecycle status used to fence approval replay.
 - `entity/PlanVersion.java` — JPA entity for plan version history. Columns widened in V45 (id/run_id/created_by → VARCHAR(255), source → VARCHAR(64)).
 - `repository/PipelineRunRepository.java` — JPA repository for PipelineRun. Includes atomic token floors, plan-gate pessimistic reads, stale-heartbeat-aware crash claims, and narrow terminal-transition updates. `existsByRunIdAndStatus()` is the worker/executor hard-cancellation fence. V348 makes `PlanGateDecisionService`, not the retained `claimApprovalResume()` compatibility query, the production approval/cancellation boundary: it locks the run first and commits run, gate, receipt, and outbox state together. `claimCrashResume()` remains the WORKING recovery boundary; APPROVAL_RESUMING is recovered only through the plan-gate outbox. `claimTerminalTransition()` prevents reviewer/validation completion from overwriting concurrent cancellation or pause. The N2 analytics queries (`findRunIdsByOrgId`, `findByOrgId*`, `findByStartedAtAfter`) filter model-comparison and user-summary reads in PostgreSQL; the unbounded global all-time summary still uses `findAll()`.
-- `repository/AgentTaskRepository.java` — JPA repository for AgentTask. **2026-05-04**: gained `findByRunIdAndTaskId(runId, taskId)` returning `Optional<AgentTask>` — used by the V2 crash-recovery resume path (`SequentialExecutor.resolveResumeAction`) to inspect each task's persisted status before deciding SKIP_TERMINAL / RESUME_FROM_SNAPSHOT / RUN_FRESH on boot-time replay. **N2 (audit 2026-05-29):** gained `findWithTokens[Since]` + `findWithTokensByRunIds[Since]` (split-by-since `@Query`, no `:param IS NULL`) backing the DB-filtered model-comparison feed. **V364:** `claimContinuationApproval` is the one-statement exact-proposal CAS; status and release updates remain receipt-id/digest fenced.
+- `repository/PipelineRunMutationRepository.java` — narrow compare-and-set writes for the V374 accepted-generation frontier plus its exact dedicated internal checkpoint receipt, and legacy/terminal customer ZIP `gcsWorkspaceKey` writes outside that protocol. The archive identities stay separate because download/restore expects a ZIP while generation recovery expects the internal Git-bundle tarball. It avoids both repository god-class growth and stale full-aggregate saves at these concurrency boundaries.
+  Frontier advancement additionally requires the run to remain `WORKING`; pause/cancel racing the
+  final verifier or checkpoint can only force rollback, never publish a newly accepted prefix.
+- `repository/AgentTaskRepository.java` — JPA repository for AgentTask. **2026-05-04**: gained `findByRunIdAndTaskId(runId, taskId)` returning `Optional<AgentTask>` — used by the V2 crash-recovery resume path (`SequentialExecutor.resolveResumeAction`) to inspect each task's persisted status before deciding SKIP_TERMINAL / RESUME_FROM_SNAPSHOT / RUN_FRESH on boot-time replay. **N2 (audit 2026-05-29):** gained `findWithTokens[Since]` + `findWithTokensByRunIds[Since]` (split-by-since `@Query`, no `:param IS NULL`) backing the DB-filtered model-comparison feed. **V364:** `claimContinuationApproval` is the one-statement exact-proposal CAS; status and release updates remain receipt-id/digest fenced. **2026-08-13:** `cancelNonterminalForRun` is the bulk task half of `RunCancellationStore`'s narrow transaction; it changes only PENDING/LOCKED/WORKING rows and cannot rewrite terminal evidence.
 - `InboxService.java` — User inbox/notification service.
 
 ## DB Migrations
@@ -91,7 +123,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - **V347 atomic plan-gate open:** `PipelineRunRepository.findByIdForPlanGateOpen()` takes the pessimistic run-row lock that serializes the gate row, WAITING continuation outbox, and `PLANNING -> AWAITING_APPROVAL` transition in one transaction.
 - **V348 atomic plan-gate decision + leased handoff:** `PlanGateDecisionService` supersedes the older `claimApprovalResume()` compatibility query as the production approval/cancellation boundary. It locks run → gate → outbox → optional contract report → RequirementIR/policy rows and persists a byte-stable APPROVE/REJECT/CANCEL receipt plus canonical request fingerprint with the state transition. The receipt cross-binds provider/mode/fixed-six-decimal `estimateHighUsd`/separate nullable `hardCapUsd`/credits/payer/continuation/report and exact typed-ack fields. New acknowledgements persist uppercase `BREAKING`; complete pre-V348 tuples remain byte-exact and are semantically checked case-insensitively after trimming, with REJECT/CANCEL recorded as `NOT_EVALUATED`. Missing legacy client plan fingerprints remain absent with a null match result; supplied values must match and ENFORCED approval requires one. APPROVE creates `APPROVAL_RESUMING` + READY; REJECT/CANCEL create coherent `CANCELLED` states. `PlanGateResumeStore` owns fenced READY/PROCESSING leases, preflights identity before workspace restore, and repeats the fence while committing `APPROVAL_RESUMING → WORKING` with outbox `PROCESSING → COMPLETED`; COMPLETED means durable WORKING handoff. Startup and scheduled recovery read only this outbox for APPROVAL_RESUMING. Direct child evidence deletion is rejected while parent-run cascade is retained; the report→run FK is `NOT VALID` for historical orphans but enforced on new rows.
 - **V349 payer/tenant gate correction:** the immutable plan-gate payer organization may differ from the host-project run tenant for an external collaborator; all other V348 coherence checks remain.
-- **V350 execution identity split (committed at `13ead3f40`; deterministic verification green at that checkpoint):** adds and backfills `pipeline_run.billing_org_id`, adds and backfills CUSTOMER `llm_execution_context.credential_org_id`, and requires CUSTOMER contexts to retain the credential organization. Separate PostgreSQL triggers reject later payer/credential-org updates, while application admission and dispatch guards independently enforce the same immutable binding. The current worktree head is V373, next V374, with 359 source files; V372 adds exact physical-route and task-complexity fingerprints to historical cost cohorts; V373 separates checkout intent from immutable exact-PR publication authority; `requirement.ir.gate.mode` remains LEGACY.
+- **V350 execution identity split (committed at `13ead3f40`; deterministic verification green at that checkpoint):** adds and backfills `pipeline_run.billing_org_id`, adds and backfills CUSTOMER `llm_execution_context.credential_org_id`, and requires CUSTOMER contexts to retain the credential organization. Separate PostgreSQL triggers reject later payer/credential-org updates, while application admission and dispatch guards independently enforce the same immutable binding. The current worktree head is V395, next V396, with 381 migration files; V372 adds exact physical-route and task-complexity fingerprints to historical cost cohorts; V373 separates checkout intent from immutable exact-PR publication authority; V374 adds the accepted BUILD workspace-generation frontier and immutable verification receipts; V385 pins BUILD protocol identity; V386 quarantines unpinned history; V387 adds append-only adjudication and retention release; V388 separates verification sandbox identity; V389 journals physical verification commands and receipts; V390 binds exact publication preparation and remote dispatch attempts; V391 recovers unsettled verification commands and fences late settlement; V392 distinguishes safe pre-dispatch external-effect retry from terminal post-dispatch uncertainty and fences terminal publication settlement; V393 makes recovery-artifact cleanup durable and non-authoritative; V394 binds exact checkpoint storage identity; V395 classifies deterministic verification failure and records its physical boundary; `requirement.ir.gate.mode` remains LEGACY.
 
 - V1–V44: Core schema through report improvements
 - V45: Widened `plan_version` columns (VARCHAR(255) for IDs, VARCHAR(64) for source)

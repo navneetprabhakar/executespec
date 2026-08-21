@@ -35,7 +35,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CASES_DIR="${SCRIPT_DIR}/build-eval-cases"
-OUT_DIR="${SCRIPT_DIR}/build-eval-results"
+OUT_DIR="${OUT_DIR:-${SCRIPT_DIR}/build-eval-results}"
 WORKSPACE_ROOT="${ROOT_DIR}/workspace"
 mkdir -p "$OUT_DIR"
 # Keep a self-contained archive for every completed BUILD run.  The held-out evaluator must not
@@ -49,12 +49,23 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 EMAIL="${EMAIL:-revalidate-ent@test.local}"
 PASSWORD="${PASSWORD:?PASSWORD environment variable is required}"
 PROVIDER="${PROVIDER:-anthropic}"
+MODEL="${MODEL:-}"
 TIMEOUT="${TIMEOUT:-1200}"
+RELEASE_SHA="${RELEASE_SHA:-}"
+QUALIFICATION_ARM="${QUALIFICATION_ARM:-}"
+USER_COST_CAP="${USER_COST_CAP:-}"
+BUILD_SHARED_KERNEL_ENABLED="${BUILD_SHARED_KERNEL_ENABLED:-false}"
+RELEASE_IDENTITY_AUTHORITY="${RELEASE_IDENTITY_AUTHORITY:-}"
+ATTESTED_RUNNING_SHA="${ATTESTED_RUNNING_SHA:-}"
+ATTESTED_ARTIFACT_SHA256="${ATTESTED_ARTIFACT_SHA256:-}"
+ATTESTED_DEPLOYMENT_ATTEMPT_ID="${ATTESTED_DEPLOYMENT_ATTEMPT_ID:-}"
+RELEASE_IDENTITY_READ_AT="${RELEASE_IDENTITY_READ_AT:-}"
 ONLY_CASE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --provider) PROVIDER="$2"; shift 2 ;;
+    --model)    MODEL="$2"; shift 2 ;;
     --case)     ONLY_CASE="$2"; shift 2 ;;
     --timeout)  TIMEOUT="$2"; shift 2 ;;
     -h|--help)  sed -n '3,33p' "$0"; exit 0 ;;
@@ -63,6 +74,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+
+assert_candidate_attestation_env() {
+  [[ "$QUALIFICATION_ARM" != "candidate" ]] && return 0
+  [[ "$BUILD_SHARED_KERNEL_ENABLED" == "true" ]] \
+    || { log "refuse candidate: shared-kernel preflight is not positive"; return 1; }
+  [[ "$RELEASE_IDENTITY_AUTHORITY" == "PROCESS_STARTUP_ENVIRONMENT" ]] \
+    || { log "refuse candidate: process-startup release authority is missing"; return 1; }
+  [[ "$ATTESTED_RUNNING_SHA" == "$RELEASE_SHA" && "$ATTESTED_RUNNING_SHA" =~ ^[a-f0-9]{40}$ ]] \
+    || { log "refuse candidate: attested running SHA does not match the candidate release"; return 1; }
+  [[ "$ATTESTED_ARTIFACT_SHA256" =~ ^[a-f0-9]{64}$ ]] \
+    || { log "refuse candidate: attested artifact SHA-256 is missing"; return 1; }
+  [[ "$ATTESTED_DEPLOYMENT_ATTEMPT_ID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] \
+    || { log "refuse candidate: attested deployment attempt is missing"; return 1; }
+  [[ "$RELEASE_IDENTITY_READ_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*Z$ ]] \
+    || { log "refuse candidate: release identity read timestamp is missing or invalid"; return 1; }
+}
 
 safe_extract_zip() {
   local archive="$1" destination="$2"
@@ -73,25 +100,39 @@ safe_extract_zip() {
 # or the short-lived GCS signed redirect, and validates the archive before it is retained.
 download_workspace_archive() {
   local run_id="$1" archive="${ARTIFACT_DIR}/workspace-${run_id}.zip"
-  [[ -s "$archive" ]] && { unzip -tqq "$archive" >/dev/null 2>&1; return $?; }
-  local partial="${archive}.part"
+  local generation_file="${archive}.generation"
+  [[ -s "$archive" && -s "$generation_file" ]] \
+    && { unzip -tqq "$archive" >/dev/null 2>&1; return $?; }
+  local partial="${archive}.part" headers="${archive}.headers"
   rm -f "$partial"
   if ! curl --fail --silent --show-error --location --max-time 300 \
+      --dump-header "$headers" \
       -H "Authorization: Bearer ${TOKEN}" \
       "$BASE_URL/api/runs/${run_id}/download?format=zip" -o "$partial"; then
-    rm -f "$partial"
+    rm -f "$partial" "$headers"
     return 1
   fi
   if ! unzip -tqq "$partial" >/dev/null 2>&1; then
     log "  $run_id archive failed ZIP validation"
-    rm -f "$partial"
+    rm -f "$partial" "$headers"
     return 1
   fi
+  local archive_generation
+  archive_generation="$(awk 'BEGIN{IGNORECASE=1} /^X-ExecuteSpec-Workspace-Generation:/ {gsub("\\r", "", $2); print $2}' "$headers" | tail -1)"
+  rm -f "$headers"
+  [[ "$archive_generation" =~ ^[a-f0-9]{64}$ ]] || {
+    log "  $run_id archive response lacked an accepted-generation binding"
+    rm -f "$partial"
+    return 1
+  }
   mv "$partial" "$archive"
+  printf '%s\n' "$archive_generation" > "$generation_file"
   return 0
 }
 
 api_provider() { case "$1" in gemini) echo GOOGLE ;; *) echo "$1" | tr '[:lower:]' '[:upper:]' ;; esac; }
+
+assert_candidate_attestation_env
 
 TOKEN=$(curl -s -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
   -d "$(jq -n --arg e "$EMAIL" --arg p "$PASSWORD" '{email:$e,password:$p}')" \
@@ -104,20 +145,25 @@ run_case() {
   local spec_file="${case_dir}/spec.md"
   [[ -f "$spec_file" ]] || { log "skip $id: no spec.md"; return 0; }
   local band; band="$(cat "${case_dir}/band" 2>/dev/null || echo unknown)"
-  log "submit  $id (band=$band, provider=$PROVIDER)"
-
+  log "submit  $id (band=$band, provider=$PROVIDER, model=${MODEL:-tier-default})"
   local body run_id
   body=$(jq -n --arg req "$(cat "$spec_file")" --arg prov "$(api_provider "$PROVIDER")" \
-    '{userRequest:$req, skipApproval:true, executionMode:"PROTOTYPE", aiProvider:$prov}')
+    --arg model "$MODEL" --arg costCap "$USER_COST_CAP" \
+    '{userRequest:$req, skipApproval:true, executionMode:"PROTOTYPE", runMode:"BUILD", aiProvider:$prov,
+      requireConfirmationBeforeExpensiveContinuation:true,
+      requireBenchmarkPriorForAutomaticContinuation:false}
+      + (if $model == "" then {} else {modelName:$model} end)
+      + (if $costCap == "" then {} else {userCostCap:($costCap | tonumber)} end)')
   run_id=$(curl -s -X POST "$BASE_URL/api/runs" -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' -d "$body" | jq -r '.runId // empty')
   [[ -z "$run_id" ]] && { log "submit $id FAILED"; echo "$id,$band,SUBMIT_FAILED,0,0"; return 0; }
   log "  $id runId=$run_id"
 
   # Poll to terminal.
-  local elapsed=0 status=""
+  local elapsed=0 status="" run_json="{}"
   while [[ $elapsed -lt $TIMEOUT ]]; do
-    status=$(curl -s "$BASE_URL/api/runs/$run_id" -H "Authorization: Bearer $TOKEN" | jq -r '.status // ""')
+    run_json=$(curl -s "$BASE_URL/api/runs/$run_id" -H "Authorization: Bearer $TOKEN")
+    status=$(jq -r '.status // ""' <<<"$run_json")
     case "$status" in COMPLETE|PARTIAL|FAILED|CANCELLED) break ;; esac
     sleep 5; elapsed=$((elapsed + 5))
   done
@@ -176,10 +222,61 @@ run_case() {
   log "  $id acceptance: ${passed}/${total} held-out tests passed"
   # A small sidecar is intentionally plain JSONL: external adjudicators can consume one completed
   # run without parsing the CSV or depending on the source VM.  Never include credentials/tokens.
-  local sha=""
+  local sha="" archive_generation=""
   [[ -n "$archive" ]] && sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
-  printf '{"case":"%s","runId":"%s","status":"%s","artifactSource":"%s","archive":"%s","archiveSha256":"%s","heldOutPassed":%s,"heldOutTotal":%s}\n' \
-    "$id" "$run_id" "$status" "$artifact_source" "$archive" "$sha" "$passed" "$total" \
+  [[ -n "$archive" ]] && archive_generation="$(cat "${archive}.generation" 2>/dev/null || true)"
+  local effective_provider effective_model cost accepted_generation prior_generation latest_attempt_state unresolved spec_sha
+  local accepted_attempt initial_failure_outcome initial_failure_code acceptance_check_count
+  effective_provider=$(jq -r '.effectiveProvider // .aiProvider // ""' <<<"$run_json")
+  effective_model=$(jq -r '.effectiveModel // ""' <<<"$run_json")
+  cost=$(jq -r '.actualCostUsd // 0' <<<"$run_json")
+  accepted_generation=$(jq -r '.acceptedWorkspaceGeneration // ""' <<<"$run_json")
+  accepted_attempt=$(jq -c '[.workspaceGenerationAttempts[]? | select(.state == "ACCEPTED")][0] // {}' <<<"$run_json")
+  prior_generation=$(jq -r '.priorAcceptedGeneration // ""' <<<"$accepted_attempt")
+  latest_attempt_state=$(jq -r '.state // ""' <<<"$accepted_attempt")
+  initial_failure_outcome=$(jq -r '.initialFailureEvidence.outcome // ""' <<<"$accepted_attempt")
+  initial_failure_code=$(jq -r '.initialFailureEvidence.code // ""' <<<"$accepted_attempt")
+  acceptance_check_count=$(jq '[.acceptanceChecks[]?] | length' <<<"$accepted_attempt")
+  unresolved=$(jq '[.workspaceGenerationAttempts[]? | select(.state != "ACCEPTED" and .state != "ROLLED_BACK")] | length' <<<"$run_json")
+  spec_sha="$(shasum -a 256 "$spec_file" | awk '{print $1}')"
+  jq -cn \
+    --arg arm "$QUALIFICATION_ARM" --arg releaseSha "$RELEASE_SHA" \
+    --arg caseId "$id" --arg specSha256 "$spec_sha" --arg runId "$run_id" --arg status "$status" \
+    --arg requestedProvider "$PROVIDER" --arg requestedModel "$MODEL" \
+    --arg provider "$effective_provider" --arg model "$effective_model" \
+    --arg artifactSource "$artifact_source" --arg archive "$archive" \
+    --arg archiveSha256 "$sha" --arg workspaceArchiveGeneration "$archive_generation" \
+    --arg priorAcceptedWorkspaceGeneration "$prior_generation" \
+    --arg acceptedWorkspaceGeneration "$accepted_generation" \
+    --arg latestWorkspaceGenerationAttemptState "$latest_attempt_state" \
+    --arg initialFailureOutcome "$initial_failure_outcome" \
+    --arg initialFailureCode "$initial_failure_code" \
+    --argjson acceptanceCheckCount "$acceptance_check_count" \
+    --argjson sharedKernelFlagEnabledAtSubmission "$BUILD_SHARED_KERNEL_ENABLED" \
+    --arg releaseIdentityAuthority "$RELEASE_IDENTITY_AUTHORITY" \
+    --arg attestedRunningSha "$ATTESTED_RUNNING_SHA" \
+    --arg attestedArtifactSha256 "$ATTESTED_ARTIFACT_SHA256" \
+    --arg attestedDeploymentAttemptId "$ATTESTED_DEPLOYMENT_ATTEMPT_ID" \
+    --arg releaseIdentityReadAt "$RELEASE_IDENTITY_READ_AT" \
+    --argjson unresolvedWorkspaceGenerationAttemptCount "$unresolved" \
+    --argjson costUsd "$cost" --argjson heldOutPassed "$passed" --argjson heldOutTotal "$total" \
+    '{qualificationArm:$arm,releaseSha:$releaseSha,case:$caseId,specSha256:$specSha256,runId:$runId,terminalStatus:$status,
+      requestedProvider:$requestedProvider,requestedModel:$requestedModel,provider:$provider,model:$model,
+      costUsd:$costUsd,artifactSource:$artifactSource,archive:$archive,
+      workspaceArchiveSha256:$archiveSha256,workspaceArchiveGeneration:$workspaceArchiveGeneration,
+      priorAcceptedWorkspaceGeneration:$priorAcceptedWorkspaceGeneration,
+      acceptedWorkspaceGeneration:$acceptedWorkspaceGeneration,
+      latestWorkspaceGenerationAttemptState:$latestWorkspaceGenerationAttemptState,
+      initialFailureOutcome:$initialFailureOutcome,initialFailureCode:$initialFailureCode,
+      acceptanceCheckCount:$acceptanceCheckCount,
+      sharedKernelFlagEnabledAtSubmission:$sharedKernelFlagEnabledAtSubmission,
+      releaseIdentityAuthority:$releaseIdentityAuthority,
+      attestedRunningSha:$attestedRunningSha,
+      attestedArtifactSha256:$attestedArtifactSha256,
+      attestedDeploymentAttemptId:$attestedDeploymentAttemptId,
+      releaseIdentityReadAt:$releaseIdentityReadAt,
+      unresolvedWorkspaceGenerationAttemptCount:$unresolvedWorkspaceGenerationAttemptCount,
+      heldOutPassed:$heldOutPassed,heldOutTotal:$heldOutTotal,generatedCodeReview:null}' \
     >> "${ARTIFACT_DIR}/completed-runs.jsonl"
   echo "$id,$band,$status,$passed,$total"
 }

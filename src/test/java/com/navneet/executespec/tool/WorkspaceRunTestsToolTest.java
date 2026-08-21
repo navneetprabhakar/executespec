@@ -134,6 +134,47 @@ class WorkspaceRunTestsToolTest {
   }
 
   @Test
+  @DisplayName("flag ON + all-skipped suite → verified=false (nothing was actually asserted)")
+  void allSkippedIsNotVerified() throws Exception {
+    when(featureFlagService.isEnabled(WorkspaceRunTestsTool.FLAG_BUILD_TDD)).thenReturn(true);
+    TestExecutionSummary summary =
+        TestExecutionSummary.builder()
+            .totalTests(6)
+            .passed(0)
+            .failed(0)
+            .errors(0)
+            .skipped(6)
+            .build();
+    when(runner.runTests(anyString(), any())).thenReturn(Optional.of(summary));
+
+    ToolResult result = tool.execute(json.createObjectNode(), ctx);
+    JsonNode env = asOkJson(result);
+
+    // A suite where every test is skipped exercised nothing — it must not certify green.
+    assertThat(env.get("verified").asBoolean()).isFalse();
+    assertThat(env.get("skipped").asInt()).isEqualTo(6);
+  }
+
+  @Test
+  @DisplayName("flag ON + empty result but framework detected → distinct 'ran, no count' message")
+  void detectedFrameworkEmptyIsNotReportedAsNoRunner() throws Exception {
+    when(featureFlagService.isEnabled(WorkspaceRunTestsTool.FLAG_BUILD_TDD)).thenReturn(true);
+    when(runner.runTests(anyString(), any())).thenReturn(Optional.empty());
+    when(runner.frameworkDetected(any())).thenReturn(true);
+
+    ToolResult result = tool.execute(json.createObjectNode(), ctx);
+    JsonNode env = asOkJson(result);
+
+    // A runner WAS present but produced no count (compile error / crash / coverage gate / sandbox
+    // unavailable). It must NOT be reported as "no test runner" — that reads as "tests are absent".
+    assertThat(env.get("verified").asBoolean()).isFalse();
+    assertThat(env.get("frameworkDetected").asBoolean()).isTrue();
+    assertThat(env.get("summary").asText())
+        .contains("test framework WAS detected")
+        .doesNotContain("no recognized test runner");
+  }
+
+  @Test
   @DisplayName("null FeatureFlagService → treated as flag-on (test-friendly fallback)")
   void nullFlagServiceTreatedAsOn() throws Exception {
     WorkspaceRunTestsTool noFlagTool = new WorkspaceRunTestsTool(runner, null, json);

@@ -78,7 +78,10 @@ spring:
       leak-detection-threshold: 90000
   mvc:
     async:
-      request-timeout: 900000
+      # Servlet async ceiling for streaming agent/chat turns that run on the request thread (the
+      # BUILD pipeline is off-thread and unaffected). Interactive turns use the tight INTERACTIVE
+      # transport window and fail fast, so the original 15-min ceiling is a comfortable backstop.
+      request-timeout: ${SPRING_MVC_ASYNC_REQUEST_TIMEOUT_MS:900000}
   jpa:
     open-in-view: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect
@@ -123,23 +126,23 @@ spring:
     openrouter:
       base-url: https://openrouter.ai/api
       api-key: ${OPENROUTER_API_KEY:}
+    # NOTE: anthropic/openai/openrouter have NO per-provider read-timeout key here on purpose — their
+    # spring.ai.<provider> namespaces are Spring-AI-bound, so the LlmRouter @Value default (-1)
+    # instead makes them inherit executespec.llm.model-response-timeout-seconds. deepseek/fireworks/
+    # gemini below are custom namespaces and keep an env-mappable per-provider override.
     deepseek:
       base-url: https://api.deepseek.com
       api-key: ${DEEPSEEK_API_KEY:}
-      # Native thinking/tool responses can be slow; this applies only to callDeepSeek.
-      # OpenAI and OpenRouter retain the shared 120s OpenAI-wire default.
-      read-timeout-seconds: ${DEEPSEEK_READ_TIMEOUT_SECONDS:300}
+      # Per-provider transport-window override; -1 inherits the shared slow-model window below.
+      read-timeout-seconds: ${DEEPSEEK_READ_TIMEOUT_SECONDS:-1}
     fireworks:
       base-url: https://api.fireworks.ai/inference/v1
       api-key: ${FIREWORKS_API_KEY:}
-      # Long agentic GLM tool turns exceed the generic 120s window; the provider bills the
-      # completion the client would otherwise cancel at exactly 120s. Applies only to callFireworks.
-      read-timeout-seconds: ${FIREWORKS_READ_TIMEOUT_SECONDS:300}
+      # Per-provider transport-window override; -1 inherits the shared slow-model window below.
+      read-timeout-seconds: ${FIREWORKS_READ_TIMEOUT_SECONDS:-1}
     gemini:
-      # Per-provider transport window for every Gemini call (2026-08-03). Replaces the worker-side
-      # global read-timeout pin; without it a null per-call override fell through to the Gemini
-      # client's static 60s default, too tight for thinking-model worker turns.
-      read-timeout-seconds: ${GEMINI_READ_TIMEOUT_SECONDS:300}
+      # Per-provider transport-window override; -1 inherits the shared slow-model window below.
+      read-timeout-seconds: ${GEMINI_READ_TIMEOUT_SECONDS:-1}
 
 execution:
   continuation:
@@ -1380,6 +1383,12 @@ executespec:
     # turns an older identified client into an actionable, non-retryable 426 upgrade error.
     minimum-cli-version: ${EXECUTESPEC_MIN_CLI_VERSION:1.0.0}
   llm:
+    # Shared per-turn transport read window (seconds) for EVERY provider — the single most
+    # important slow-model knob. A non-streaming completion that takes longer than this is cut off
+    # mid-generation. Default 660 (~11 min) fits a ~10-minute reasoning turn with a small margin.
+    # A per-provider spring.ai.<provider>.read-timeout-seconds override (>0) wins; otherwise every
+    # provider inherits this. Raise for a slower model; lower for faster dead-connection detection.
+    model-response-timeout-seconds: ${EXECUTESPEC_MODEL_RESPONSE_TIMEOUT_SECONDS:660}
     operation-admission:
       # V354 stays inert until every durable logical root and physical attempt is fenced.
       mode: ${EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE:LEGACY}
@@ -1390,6 +1399,10 @@ executespec:
     test-mode: false
     reservation-id: ""
   sandbox:
+    # Release qualification requires the deployed value to be digest-pinned. The mutable default
+    # remains deliberately unqualified so a missing deployment override fails attestation closed.
+    image: ${SANDBOX_IMAGE:docker.io/library/debian:stable-slim}
+    workspace-root: ${SANDBOX_WORKSPACE_ROOT:/var/lib/executespec/sandboxes}
     # Must match the deployed non-root service/workspace owner before strict routing is enabled.
     # Provisioning verifies ownership and never chmods/chowns customer data.
     runtime-uid: ${SANDBOX_RUNTIME_UID:65532}

@@ -3,6 +3,7 @@ package com.navneet.executespec.harness;
 import com.navneet.executespec.agent.Plan;
 import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.tool.ExecutionContext;
+import com.navneet.executespec.workspacegeneration.WorkspaceOrigin;
 
 import lombok.Builder;
 
@@ -72,6 +73,8 @@ public record ExecutionRequest(
      */
     String originalGoal,
     String designBlock,
+    /** Immutable admission fact; never inferred from incidental workspace files. */
+    WorkspaceOrigin workspaceOrigin,
     /**
      * Project ID for RAG-backed reference-doc injection (v2.5.2+). Null for runs that aren't
      * project-scoped (e.g. legacy/test harnesses). When set, each worker's system prompt gets a
@@ -109,6 +112,9 @@ public record ExecutionRequest(
     if (initialProviderSwitchesUsed == null) initialProviderSwitchesUsed = 0;
     if (initialModelStepUpsUsed == null) initialModelStepUpsUsed = 0;
     if (initialModelStepDownsUsed == null) initialModelStepDownsUsed = 0;
+    if (workspaceOrigin == null) {
+      throw new IllegalArgumentException("workspaceOrigin required");
+    }
     initialProviderSwitchesUsed = Math.max(0, initialProviderSwitchesUsed);
     initialModelStepUpsUsed = Math.max(0, initialModelStepUpsUsed);
     initialModelStepDownsUsed = Math.max(0, initialModelStepDownsUsed);

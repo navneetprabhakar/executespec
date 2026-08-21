@@ -155,6 +155,8 @@ public class ExecutorTestController {
                   .runContext(runCtx)
                   .maxIterationsPerTask(20)
                   .enableSmokeTests(true)
+                  .workspaceOrigin(
+                      com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
                   .build());
 
       out.put("overall", result.overall().name());

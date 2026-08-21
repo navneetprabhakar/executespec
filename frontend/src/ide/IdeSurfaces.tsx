@@ -51,6 +51,7 @@ import {fmtCost} from '@/lib/utils';
 import {executeRunMutation} from '@/lib/runMutationAttempt';
 import {isTerminalRunStatus} from '@/lib/runStatus';
 import {liveRunNavigationPath} from '@/ide/liveRunRouting';
+import {runPhaseLabel} from '@/ide/runPhaseLabel';
 
 // Relative timestamps everywhere (review/11 #8) — `toLocaleString()` was
 // locale-ambiguous (DD/MM vs MM/DD), carried seconds noise, and clashed with
@@ -108,22 +109,6 @@ function managedKind(state?: string | null): 'ok' | 'warn' | 'bad' {
 function isLiveStatus(s?: string | null): boolean {
   return NON_TERMINAL.has((s || '').toUpperCase());
 }
-// Map a backend run status to the human phase the user actually sees on screen.
-function phaseLabel(status?: string | null): string {
-  const s = (status || '').toUpperCase();
-  if (s === 'CLASSIFYING') return 'Classifying';
-  if (s === 'PLANNING') return 'Planning';
-  if (s === 'AWAITING_APPROVAL') return 'Awaiting approval';
-  if (s === 'REVIEWING') return 'Reviewing changes';
-  if (s === 'PROVIDER_SWITCHING') return 'Switching provider';
-  if (s === 'PAUSED') return 'Paused';
-  if (s === 'COMPLETED' || s === 'COMPLETE') return 'Completed';
-  if (s === 'PARTIAL') return 'Completed with warnings';
-  if (s === 'FAILED' || s === 'ERROR') return 'Failed';
-  if (s === 'CANCELLED') return 'Cancelled';
-  return 'Running now';
-}
-
 export function IdeWelcome() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -247,7 +232,7 @@ export function IdeWelcome() {
             >
               {shortRunId(liveRun.runId)}
             </span>
-            <IdeBadge kind={statusKind(liveRun.status)}>{phaseLabel(liveRun.status)}</IdeBadge>
+            <IdeBadge kind={statusKind(liveRun.status)}>{runPhaseLabel(liveRun)}</IdeBadge>
           </div>
           <div className='ide-run-title' style={{marginBottom: 8}}>
             {(liveRun.userRequest || liveRun.runTitle || 'Run in progress').slice(0, 120)}
@@ -1683,7 +1668,7 @@ export function IdeLive() {
         <>
           <div className='ide-card'>
             <div className='rl-row' style={{gap: 8, marginBottom: 12}}>
-              <IdeBadge kind={statusKind(run.status)}>{phaseLabel(run.status)}</IdeBadge>
+              <IdeBadge kind={statusKind(run.status)}>{runPhaseLabel(run)}</IdeBadge>
               {(run.terminalOutcome?.customerTitle || run.statusReason) && (
                 <span
                   className='rl-break'

@@ -1438,7 +1438,9 @@ public class RunController {
       // through the same service and every ZIP member is scanned before bytes are returned. A
       // direct GCS redirect would bypass that final publication gate for historical archives.
       try {
-        Path zipPath = workspaceExportService.exportWorkspace(id);
+        WorkspaceExportService.ExportedWorkspace export =
+            workspaceExportService.exportWorkspaceWithEvidence(id);
+        Path zipPath = export.path();
         String runId8 = id.substring(0, Math.min(8, id.length()));
         String filename = "workspace-" + runId8 + ".zip";
 
@@ -1447,11 +1449,15 @@ public class RunController {
 
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .header(
+                "X-ExecuteSpec-Workspace-Generation",
+                export.acceptedGeneration() == null ? "" : export.acceptedGeneration())
             .contentType(MediaType.APPLICATION_OCTET_STREAM)
             .contentLength(Files.size(zipPath))
             .body(resource);
 
       } catch (IllegalStateException e) {
+        if (e instanceof WorkspaceExportService.UnacceptedWorkspaceException) throw e;
         log.warn("Workspace not available for run {}: {}", id, e.getMessage());
         // Path 3: GitHub fallback
         if (run.getRepoUrl() != null && !run.getRepoUrl().isBlank()) {
@@ -1479,6 +1485,11 @@ public class RunController {
 
     } catch (ResponseStatusException e) {
       throw e;
+    } catch (WorkspaceExportService.UnacceptedWorkspaceException e) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Workspace download is blocked until the accepted BUILD generation is recovered: "
+              + e.getMessage());
     } catch (WorkspaceExportService.ExportTooLargeException e) {
       // RR-165: an over-quota export is refused explicitly rather than degrading to an OOM.
       throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, e.getMessage());

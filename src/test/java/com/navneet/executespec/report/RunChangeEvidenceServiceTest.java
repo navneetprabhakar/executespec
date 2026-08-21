@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 
 import com.navneet.executespec.agent.model.WorkerReport;
@@ -165,6 +166,39 @@ class RunChangeEvidenceServiceTest {
     assertThat(evidence.productFiles())
         .extracting(RunChangeEvidenceService.ChangedFile::path)
         .containsExactly("app/main.py");
+  }
+
+  @Test
+  void changeEvidenceNeverExecutesRepositoryDiffDriver() throws Exception {
+    String runId = "run-hostile-diff";
+    Path workspace = temp.resolve(runId);
+    Files.createDirectories(workspace);
+    git(workspace, "init", "-b", "main");
+    git(workspace, "config", "user.email", "test@example.com");
+    git(workspace, "config", "user.name", "Test");
+    Files.writeString(workspace.resolve("tracked.txt"), "baseline\n");
+    Files.writeString(workspace.resolve(".gitattributes"), "*.txt diff=hostile\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-m", "baseline");
+    Path marker = temp.resolve("diff-driver-executed");
+    Path driver = temp.resolve("hostile-diff.sh");
+    Files.writeString(driver, "#!/bin/sh\ntouch '" + marker + "'\nexit 0\n");
+    Files.setPosixFilePermissions(driver, PosixFilePermissions.fromString("rwx------"));
+    git(workspace, "config", "diff.hostile.command", driver.toString());
+    Files.writeString(workspace.resolve("tracked.txt"), "changed\n");
+
+    RunRepoSnapshotRepository snapshots = mock(RunRepoSnapshotRepository.class);
+    when(snapshots.findByRunId(runId)).thenReturn(List.of());
+    AgentProperties properties = new AgentProperties();
+    properties.setWorkspace(temp.toString());
+
+    var evidence = new RunChangeEvidenceService(properties, snapshots).inspect(runId, List.of());
+
+    assertThat(evidence.valid()).isTrue();
+    assertThat(evidence.productFiles())
+        .extracting(RunChangeEvidenceService.ChangedFile::path)
+        .containsExactly("tracked.txt");
+    assertThat(marker).doesNotExist();
   }
 
   @Test

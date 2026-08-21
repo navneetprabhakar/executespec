@@ -38,7 +38,15 @@ public record ReviewerRequest(
     /** True for a final correction attestation that must not mutate the reviewed workspace. */
     Boolean readOnly,
     String originalGoal,
-    List<RequirementSpec> requirements) {
+    List<RequirementSpec> requirements,
+    /**
+     * Non-blocking cross-task contract findings the plan-time heuristic gates flagged (the Class-C
+     * advisory battery — producer/consumer schema drift, unresolved implementation choices, etc.).
+     * These are surfaced here so the reviewer verifies them against the ACTUAL generated code
+     * instead of the plan being killed at compile time over a heuristic that may be a false
+     * positive. Empty when the plan compiled with no advisory findings.
+     */
+    List<String> planAdvisories) {
 
   public ReviewerRequest {
     if (provider == null || provider.isBlank())
@@ -53,5 +61,6 @@ public record ReviewerRequest(
     if (allowBuildManifestCreation == null) allowBuildManifestCreation = false;
     if (readOnly == null) readOnly = false;
     if (requirements == null) requirements = List.of();
+    if (planAdvisories == null) planAdvisories = List.of();
   }
 }

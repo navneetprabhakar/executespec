@@ -16,20 +16,13 @@ import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.report.model.WorkflowConfigEvidence;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
-
-/**
- * Final deterministic correctness admission shared by SCM publication and permanent deployment.
- *
- * <p>Model-authored scores are intentionally irrelevant here. Publication requires current build
- * and test evidence, an exact workspace-generation binding, and exact physical route evidence for
- * every user-approved continuation.
- */
+/** Deterministic correctness admission shared by SCM publication and permanent deployment. */
 @Service
-@RequiredArgsConstructor
 public class PublicationAdmissionService {
 
   private final ValidationReportRepository validationReportRepository;
@@ -41,11 +34,81 @@ public class PublicationAdmissionService {
   private final RunEffectiveRouteService effectiveRoutes;
   private final DurableCorrectionLifecycle durableCorrections;
   private final RunWorkspaceAuthorityService workspaceAuthorities;
+  private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery;
+  private final PublicationPreparationService publicationPreparations;
+
+  @Autowired
+  public PublicationAdmissionService(
+      ValidationReportRepository validationReportRepository,
+      AgentTaskRepository taskRepository,
+      CorrectionWorkspaceTransaction workspaceGenerations,
+      AgentProperties agentProperties,
+      ObjectMapper objectMapper,
+      BrownfieldHttpContractGuard brownfieldHttpContractGuard,
+      RunEffectiveRouteService effectiveRoutes,
+      DurableCorrectionLifecycle durableCorrections,
+      RunWorkspaceAuthorityService workspaceAuthorities,
+      WorkspaceGenerationRecoveryService workspaceGenerationRecovery,
+      PublicationPreparationService publicationPreparations) {
+    this.validationReportRepository = validationReportRepository;
+    this.taskRepository = taskRepository;
+    this.workspaceGenerations = workspaceGenerations;
+    this.agentProperties = agentProperties;
+    this.objectMapper = objectMapper;
+    this.brownfieldHttpContractGuard = brownfieldHttpContractGuard;
+    this.effectiveRoutes = effectiveRoutes;
+    this.durableCorrections = durableCorrections;
+    this.workspaceAuthorities = workspaceAuthorities;
+    this.workspaceGenerationRecovery = workspaceGenerationRecovery;
+    this.publicationPreparations = publicationPreparations;
+  }
+
+  public PublicationAdmissionService(
+      ValidationReportRepository validationReportRepository,
+      AgentTaskRepository taskRepository,
+      CorrectionWorkspaceTransaction workspaceGenerations,
+      AgentProperties agentProperties,
+      ObjectMapper objectMapper,
+      BrownfieldHttpContractGuard brownfieldHttpContractGuard,
+      RunEffectiveRouteService effectiveRoutes,
+      DurableCorrectionLifecycle durableCorrections,
+      RunWorkspaceAuthorityService workspaceAuthorities) {
+    this(
+        validationReportRepository,
+        taskRepository,
+        workspaceGenerations,
+        agentProperties,
+        objectMapper,
+        brownfieldHttpContractGuard,
+        effectiveRoutes,
+        durableCorrections,
+        workspaceAuthorities,
+        null,
+        null);
+  }
 
   public Admission assertEligible(PipelineRun run) {
     if (run == null || run.getRunId() == null || run.getRunId().isBlank()) {
       Eligibility eligibility = evaluate(run);
       throw new PublicationBlockedException(eligibility);
+    }
+    Eligibility beforePreparation = evaluate(run, false);
+    if (!beforePreparation.eligible()) {
+      throw new PublicationBlockedException(beforePreparation);
+    }
+    if (PublicationAdmissionPolicy.requiresPreparedArtifacts(run)) {
+      if (publicationPreparations == null) {
+        throw new PublicationBlockedException(
+            blockedEligibility(
+                "PUBLICATION_PREPARATION_UNAVAILABLE",
+                "PUBLICATION_ARTIFACT",
+                "Exact publication preparation is unavailable",
+                true,
+                "Retry when the publication preparation service is available.",
+                beforePreparation.evidenceWorkspaceGeneration(),
+                beforePreparation.currentWorkspaceGeneration()));
+      }
+      publicationPreparations.prepare(run, Path.of(agentProperties.getWorkspace(), run.getRunId()));
     }
     RunWorkspaceAuthorityService.Lease lease =
         workspaceAuthorities.acquire(
@@ -55,7 +118,12 @@ public class PublicationAdmissionService {
       if (!eligibility.eligible()) {
         throw new PublicationBlockedException(eligibility);
       }
-      return new Admission(eligibility.currentWorkspaceGeneration(), eligibility.code(), lease);
+      PublicationPreparationService.RequiredPreparation prepared =
+          PublicationAdmissionPolicy.requiresPreparedArtifacts(run)
+              ? publicationPreparations.requirePrepared(run)
+              : null;
+      return new Admission(
+          eligibility.currentWorkspaceGeneration(), eligibility.code(), lease, prepared);
     } catch (RuntimeException failure) {
       lease.close();
       throw failure;
@@ -71,6 +139,10 @@ public class PublicationAdmissionService {
    * #assertEligible(PipelineRun)} immediately before publication.
    */
   public Eligibility evaluate(PipelineRun run) {
+    return evaluate(run, true);
+  }
+
+  private Eligibility evaluate(PipelineRun run, boolean requirePreparedArtifact) {
     if (run == null || run.getRunId() == null || run.getRunId().isBlank()) {
       return blockedEligibility(
           "PUBLICATION_RUN_MISSING",
@@ -78,6 +150,21 @@ public class PublicationAdmissionService {
           "Publication requires a durable run identity",
           false,
           "Reload the run. If it no longer exists, start a new run.",
+          null,
+          null);
+    }
+    if (com.navneet.executespec.state.RunMode.BUILD.equals(run.getRunMode())
+        && (run.getBuildProtocolVersion() == null
+            || com.navneet.executespec.workspacegeneration.BuildProtocolVersion.LEGACY_UNKNOWN
+                .name()
+                .equals(run.getBuildProtocolVersion()))) {
+      return blockedEligibility(
+          "BUILD_PROTOCOL_HISTORICAL_EVIDENCE_INCOMPLETE",
+          "BUILD_PROTOCOL_DISPOSITION",
+          "This BUILD run predates durable protocol identity and cannot be published",
+          false,
+          "Keep the run quarantined and use an operator adjudication receipt; do not infer"
+              + " acceptance from terminal status or the current rollout flag.",
           null,
           null);
     }
@@ -94,6 +181,21 @@ public class PublicationAdmissionService {
           null,
           null);
     }
+    try {
+      if (workspaceGenerationRecovery != null) {
+        workspaceGenerationRecovery.assertNoUnresolvedAttempt(run.getRunId(), "PUBLICATION");
+      }
+    } catch (RuntimeException unresolved) {
+      return blockedEligibility(
+          "WORKSPACE_GENERATION_UNRESOLVED",
+          "BUILD_GENERATION_RECOVERY",
+          "An incomplete BUILD generation still owns this run workspace",
+          false,
+          "Wait for BUILD generation recovery. Publication remains blocked until exact rollback or"
+              + " acceptance is proven.",
+          null,
+          null);
+    }
     String currentGeneration;
     try {
       currentGeneration = currentGeneration(run);
@@ -106,6 +208,49 @@ public class PublicationAdmissionService {
           "Restore or sync the run workspace, then regenerate validation evidence.",
           null,
           null);
+    }
+    java.util.Optional<String> acceptedCorrection;
+    try {
+      acceptedCorrection = durableCorrections.latestAcceptedGeneration(run.getRunId());
+    } catch (RuntimeException invalidCorrection) {
+      return blockedEligibility(
+          "CORRECTION_ACCEPTANCE_INVALID",
+          "CORRECTION_GENERATION_FRONTIER",
+          "The accepted correction generation is missing or malformed",
+          false,
+          "Recover or audit the durable correction receipt before publication.",
+          null,
+          currentGeneration);
+    }
+    if (acceptedCorrection.isPresent()) {
+      if (!acceptedCorrection.get().equals(currentGeneration)) {
+        return blockedEligibility(
+            "CORRECTION_GENERATION_FRONTIER_MISMATCH",
+            "CORRECTION_GENERATION_FRONTIER",
+            "The current workspace is not the exact accepted correction generation",
+            false,
+            "Restore the accepted correction generation and regenerate validation before"
+                + " publication.",
+            acceptedCorrection.get(),
+            currentGeneration);
+      }
+    } else {
+      try {
+        if (workspaceGenerationRecovery != null) {
+          workspaceGenerationRecovery.assertAcceptedFrontier(
+              run.getRunId(), currentGeneration, "PUBLICATION");
+        }
+      } catch (RuntimeException mismatch) {
+        return blockedEligibility(
+            "WORKSPACE_GENERATION_FRONTIER_MISMATCH",
+            "BUILD_GENERATION_FRONTIER",
+            "The current workspace is not the exact accepted BUILD generation",
+            false,
+            "Recover or roll back the unresolved generation and regenerate validation on the"
+                + " accepted frontier.",
+            null,
+            currentGeneration);
+      }
     }
     ValidationReport report = validationReportRepository.findByRunId(run.getRunId()).orElse(null);
     if (report == null) {
@@ -174,7 +319,7 @@ public class PublicationAdmissionService {
         || report.getTestsTotal() <= 0
         || report.getTestsPassed() == null
         || report.getTestsPassed() <= 0
-        || !admissibleTestScope(report.getTestEvidenceScope())) {
+        || !PublicationAdmissionPolicy.admitsExecutedTestScope(report.getTestEvidenceScope())) {
       return blockedEligibility(
           "PUBLICATION_TESTS_UNPROVEN",
           "TESTS",
@@ -266,6 +411,24 @@ public class PublicationAdmissionService {
             currentGeneration);
       }
     }
+    if (requirePreparedArtifact && PublicationAdmissionPolicy.requiresPreparedArtifacts(run)) {
+      try {
+        if (publicationPreparations == null) {
+          throw new IllegalStateException("PUBLICATION_PREPARATION_SERVICE_UNAVAILABLE");
+        }
+        publicationPreparations.requirePrepared(run);
+      } catch (RuntimeException missing) {
+        return blockedEligibility(
+            "PUBLICATION_PREPARATION_UNPROVEN",
+            "PUBLICATION_ARTIFACT",
+            "The exact Git commit artifact has not been durably prepared for this validation",
+            true,
+            "Re-run exact publication preparation on the accepted workspace generation before"
+                + " retrying publication.",
+            report.getWorkspaceGeneration(),
+            currentGeneration);
+      }
+    }
     return new Eligibility(
         true,
         "ELIGIBLE",
@@ -276,10 +439,6 @@ public class PublicationAdmissionService {
         null,
         report.getWorkspaceGeneration(),
         currentGeneration);
-  }
-
-  private static boolean admissibleTestScope(String scope) {
-    return "WORKSPACE_TEST_SUITE".equals(scope) || "LIVE_PREVIEW_FUNCTIONAL".equals(scope);
   }
 
   /** Rechecks that publication preparation did not mutate the admitted workspace. */
@@ -355,17 +514,22 @@ public class PublicationAdmissionService {
     private final String workspaceGeneration;
     private final String code;
     private final RunWorkspaceAuthorityService.Lease lease;
+    private final PublicationPreparationService.RequiredPreparation prepared;
 
-    private Admission(
-        String workspaceGeneration, String code, RunWorkspaceAuthorityService.Lease lease) {
+    Admission(
+        String workspaceGeneration,
+        String code,
+        RunWorkspaceAuthorityService.Lease lease,
+        PublicationPreparationService.RequiredPreparation prepared) {
       this.workspaceGeneration = workspaceGeneration;
       this.code = code;
       this.lease = lease;
+      this.prepared = prepared;
     }
 
     /** Test-fixture constructor; production admission always carries a durable workspace lease. */
     public Admission(String workspaceGeneration, String code) {
-      this(workspaceGeneration, code, null);
+      this(workspaceGeneration, code, null, null);
     }
 
     public String workspaceGeneration() {
@@ -374,6 +538,17 @@ public class PublicationAdmissionService {
 
     public String code() {
       return code;
+    }
+
+    public PublicationPreparationService.RequiredPreparation prepared() {
+      return prepared;
+    }
+
+    RunWorkspaceAuthorityService.Lease leaseForSettlement() {
+      if (lease == null) {
+        throw new IllegalStateException("PUBLICATION_SETTLEMENT_AUTHORITY_MISSING");
+      }
+      return lease;
     }
 
     /** Re-fences the lease immediately before an irreversible publication side effect. */

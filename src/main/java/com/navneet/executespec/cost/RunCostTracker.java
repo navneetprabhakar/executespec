@@ -526,7 +526,13 @@ public class RunCostTracker {
    */
   private double[] tierRatesWithOverride(LlmProvider p, AgentTier tier, String modelOverride) {
     if (modelOverride != null && !modelOverride.isBlank()) {
-      return rates(p.name().toLowerCase(), modelOverride.trim());
+      PricingLookup lookup =
+          lookupPricing(p.name(), modelOverride.trim())
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "MODEL_PRICING_UNAVAILABLE: " + p.name() + "/" + modelOverride.trim()));
+      return rates(lookup.pricing());
     }
     return ratesForTier(p, tier);
   }
@@ -881,10 +887,9 @@ public class RunCostTracker {
    */
   public double[] ratesForModelOrProviderDefault(String provider, String model) {
     if (provider == null || provider.isBlank()) return new double[] {0.0, 0.0};
-    String providerLower = provider.toLowerCase();
     if (model != null && !model.isBlank()) {
-      double[] r = rates(providerLower, model.trim());
-      if (r[0] > 0.0 || r[1] > 0.0) return r;
+      Optional<PricingLookup> lookup = lookupPricing(provider, model.trim());
+      if (lookup.isPresent()) return rates(lookup.orElseThrow().pricing());
     }
     try {
       LlmProvider p = LlmProvider.valueOf(provider.toUpperCase());
@@ -1004,6 +1009,13 @@ public class RunCostTracker {
   }
 
   private record PricingLookup(String pricingProvider, ModelPricing pricing) {}
+
+  private static double[] rates(ModelPricing pricing) {
+    return new double[] {
+      pricing.getInputCostPer1m() != null ? pricing.getInputCostPer1m() : 0.0,
+      pricing.getOutputCostPer1m() != null ? pricing.getOutputCostPer1m() : 0.0
+    };
+  }
 
   /**
    * V2-canonical provider key for pricing-table lookup. v2.5.13 renamed enum GOOGLE → GEMINI + YAML

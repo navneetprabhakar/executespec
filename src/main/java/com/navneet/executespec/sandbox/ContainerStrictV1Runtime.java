@@ -96,12 +96,12 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
         throw new IllegalStateException(
             "refusing to reattach to container %s: fencing labels %s".formatted(name, fence));
       }
-      requireWorkspaceOwnership(sandbox);
+      requireWorkspaceOwnership(sandbox, spec);
       log.info("sandbox {} reattaching to existing container {}", sandbox.id(), name);
       return new Provisioned(name, imageDigest(spec.image()));
     }
 
-    requireWorkspaceOwnership(sandbox);
+    requireWorkspaceOwnership(sandbox, spec);
     ExecResult started =
         exec(
             // RR-821 — mount admission is scoped to THIS sandbox's own directory, derived from
@@ -116,8 +116,8 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
                 Path.of(properties.getWorkspaceRoot()),
                 String.valueOf(sandbox.id()),
                 sandbox.runtimeEpoch(),
-                agentWorkspaceRoot,
-                sandbox.runId(),
+                sandbox.purpose() == SandboxPurpose.RUN ? agentWorkspaceRoot : null,
+                sandbox.purpose() == SandboxPurpose.RUN ? sandbox.runId() : null,
                 runtimeUser()),
             properties.getCommandTimeoutSeconds());
     if (started.exitCode() != 0) {
@@ -309,9 +309,26 @@ public class ContainerStrictV1Runtime implements RunSandboxRuntime {
     return properties.getRuntimeUid() + ":" + properties.getRuntimeGid();
   }
 
-  private void requireWorkspaceOwnership(RunSandbox sandbox) {
-    Path runWorkspace =
-        SandboxContainerCommand.requireRunWorkspace(agentWorkspaceRoot, sandbox.runId());
+  private void requireWorkspaceOwnership(RunSandbox sandbox, SandboxRuntimeSpec spec) {
+    Path runWorkspace;
+    if (sandbox.purpose() == SandboxPurpose.RUN) {
+      runWorkspace =
+          SandboxContainerCommand.requireRunWorkspace(agentWorkspaceRoot, sandbox.runId());
+    } else {
+      Path expected =
+          SandboxContainerCommand.ownedWorkspaceRoot(
+                  Path.of(properties.getWorkspaceRoot()), String.valueOf(sandbox.id()))
+              .resolve("workspace")
+              .toAbsolutePath()
+              .normalize();
+      if (spec.writableMounts().size() != 1
+          || !expected.equals(
+              Path.of(spec.writableMounts().getFirst().hostPath()).toAbsolutePath().normalize())) {
+        throw new IllegalArgumentException(
+            "verification sandbox mount does not match its derived owned workspace");
+      }
+      runWorkspace = expected;
+    }
     SandboxWorkspaceOwnership.requireWritableTree(
         runWorkspace, properties.getRuntimeUid(), properties.getRuntimeGid());
   }

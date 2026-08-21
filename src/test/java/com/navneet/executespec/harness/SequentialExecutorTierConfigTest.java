@@ -36,8 +36,8 @@ import org.springframework.test.util.ReflectionTestUtils;
  * <ul>
  *   <li>RL-2026-06 cap ladder: LOW=60, MEDIUM=120, HIGH=180. Project runs double the cap because
  *       they need more repo inspection before the first durable edit.
- *   <li>Per-tier wall-clock budget, loosened again by RL-2026-05-004 to cut PARTIAL: LOW=30min
- *       MEDIUM=45min, HIGH=75min. Doubled for project runs (mirrors the iter-cap multiplier).
+ *   <li>Per-tier wall-clock budget, raised 2026-08-08 for slow (~10-min/turn) models: LOW=90min
+ *       MEDIUM=150min, HIGH=240min. Doubled for project runs (mirrors the iter-cap multiplier).
  *   <li>Stagnation thresholds are looser than the old static 8/12 guard but still much smaller than
  *       the iteration cap, so read-only loops terminate while productive edit/verify loops keep
  *       working.
@@ -89,7 +89,6 @@ class SequentialExecutorTierConfigTest {
         featureFlags,
         mock(ContextStore.class),
         mock(RunCostTracker.class),
-        mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
         mock(com.navneet.executespec.router.AvailableProviderResolver.class),
         null,
         null);
@@ -188,6 +187,28 @@ class SequentialExecutorTierConfigTest {
   void medium_project_run_iter_cap_is_240() throws Exception {
     Cfg c = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "claude-foo", true);
     assertEquals(240, c.maxIter, "project-run multiplier ×2 → 120 × 2 = 240");
+  }
+
+  @Test
+  void outputBudgetIsClampedToTheSelectedModelsRegisteredCapability() throws Exception {
+    ModelMatrixProperties matrix = new ModelMatrixProperties();
+    ModelMatrixProperties.ModelConfig constrained = new ModelMatrixProperties.ModelConfig();
+    constrained.setMaxOutputTokens(2048);
+    matrix.setModels(Map.of("small-model", constrained));
+    ModelResolver resolver = mock(ModelResolver.class);
+    lenient()
+        .when(resolver.resolve(anyString(), any(LlmProvider.class), any(AgentTier.class)))
+        .thenThrow(new RuntimeException("use exact run route"));
+
+    Cfg c =
+        invoke(
+            newExecutor(resolver, matrix),
+            PlannedTask.Complexity.MEDIUM,
+            "openai",
+            "small-model",
+            false);
+
+    assertEquals(2048, c.maxTokens, "model capability must bound the complexity budget");
   }
 
   @Test
@@ -290,27 +311,29 @@ class SequentialExecutorTierConfigTest {
   }
 
   @Test
-  void low_wall_clock_30min_fresh_60min_project() throws Exception {
+  void low_wall_clock_90min_fresh_180min_project() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.LOW, "anthropic", "x", true);
-    assertEquals(30 * 60, fresh.wallClockSeconds, "LOW wall-clock 15 → 30min (RL-2026-05-004)");
-    assertEquals(60 * 60, proj.wallClockSeconds, "project ×2 = 60min");
+    assertEquals(90 * 60, fresh.wallClockSeconds, "LOW wall-clock → 90min (2026-08-08 slow-model)");
+    assertEquals(180 * 60, proj.wallClockSeconds, "project ×2 = 180min");
   }
 
   @Test
-  void medium_wall_clock_45min_fresh_90min_project() throws Exception {
+  void medium_wall_clock_150min_fresh_300min_project() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.MEDIUM, "anthropic", "x", true);
-    assertEquals(45 * 60, fresh.wallClockSeconds, "MEDIUM wall-clock 25 → 45min (RL-2026-05-004)");
-    assertEquals(90 * 60, proj.wallClockSeconds, "project ×2 = 90min");
+    assertEquals(
+        150 * 60, fresh.wallClockSeconds, "MEDIUM wall-clock → 150min (2026-08-08 slow-model)");
+    assertEquals(300 * 60, proj.wallClockSeconds, "project ×2 = 300min");
   }
 
   @Test
-  void high_wall_clock_75min_fresh_150min_project() throws Exception {
+  void high_wall_clock_240min_fresh_480min_project() throws Exception {
     Cfg fresh = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "x", false);
     Cfg proj = invoke(newExecutor(), PlannedTask.Complexity.HIGH, "anthropic", "x", true);
-    assertEquals(75 * 60, fresh.wallClockSeconds, "HIGH wall-clock 45 → 75min (RL-2026-05-004)");
-    assertEquals(150 * 60, proj.wallClockSeconds, "project ×2 = 150min");
+    assertEquals(
+        240 * 60, fresh.wallClockSeconds, "HIGH wall-clock → 240min (2026-08-08 slow-model)");
+    assertEquals(480 * 60, proj.wallClockSeconds, "project ×2 = 480min");
   }
 
   @Test

@@ -11,6 +11,7 @@ import com.navneet.executespec.contracts.breaking.BreakingChangeService;
 import com.navneet.executespec.contracts.breaking.ContractDiff;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
 
@@ -49,6 +50,11 @@ public class PlanBreakingChangeReport {
    * @param intended one entry per contract the plan touches: id + proposed new content
    */
   public Report compose(String projectId, List<IntendedChange> intended) {
+    return compose(null, projectId, intended);
+  }
+
+  /** Run-end exact-generation form; plan-time callers retain the pure/legacy form above. */
+  public Report compose(ExecutionContext context, String projectId, List<IntendedChange> intended) {
     if (intended == null || intended.isEmpty()) {
       return new Report(List.of(), false);
     }
@@ -60,10 +66,16 @@ public class PlanBreakingChangeReport {
 
       // Classifier decides BREAKING / NON_BREAKING / UNCLASSIFIED
       ContractDiff diff =
-          breakingChangeService.classify(
-              contract.typeEnum(),
-              ic.previousContent() == null ? "" : ic.previousContent(),
-              ic.newContent() == null ? "" : ic.newContent());
+          context == null
+              ? breakingChangeService.classify(
+                  contract.typeEnum(),
+                  ic.previousContent() == null ? "" : ic.previousContent(),
+                  ic.newContent() == null ? "" : ic.newContent())
+              : breakingChangeService.classify(
+                  context,
+                  contract.typeEnum(),
+                  ic.previousContent() == null ? "" : ic.previousContent(),
+                  ic.newContent() == null ? "" : ic.newContent());
       // RR-1630 — an UNCLASSIFIED verdict (no deterministic CLI installed, CLI timeout, or no
       // classifier registered for the type at all, e.g. ASYNCAPI / EVENT_SCHEMA) always carries an
       // EMPTY change list, so hasBreaking() is false and the contract used to be dropped silently.

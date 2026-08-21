@@ -71,7 +71,10 @@ class RunValidationKickoffBrownfieldTest {
             mock(DeterministicHttpRequirementVerifier.class),
             contracts,
             perky,
-            new RunValidationFailureReporter(runRepo, broadcaster, new ContextSanitizer()));
+            new RunValidationFailureReporter(runRepo, broadcaster, new ContextSanitizer()),
+            mock(
+                com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+                    .class));
 
     assertThat(kickoff.generateValidationReport(run.getRunId(), null, null, null)).isEmpty();
     assertThat(run.getFailureReason())
@@ -143,7 +146,10 @@ class RunValidationKickoffBrownfieldTest {
             mock(BrownfieldHttpContractGuard.class),
             mock(PerkyMessenger.class),
             new RunValidationFailureReporter(
-                runRepo, mock(SseBroadcaster.class), new ContextSanitizer()));
+                runRepo, mock(SseBroadcaster.class), new ContextSanitizer()),
+            mock(
+                com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+                    .class));
 
     assertThat(kickoff.generateValidationReport(run.getRunId(), null, null, null)).isEmpty();
     String failureCode = kickoff.persistedDeterministicFailureCode(run.getRunId());
@@ -216,7 +222,10 @@ class RunValidationKickoffBrownfieldTest {
             mock(BrownfieldHttpContractGuard.class),
             mock(PerkyMessenger.class),
             new RunValidationFailureReporter(
-                runRepo, mock(SseBroadcaster.class), new ContextSanitizer()));
+                runRepo, mock(SseBroadcaster.class), new ContextSanitizer()),
+            mock(
+                com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+                    .class));
 
     assertThat(kickoff.generateValidationReport(run.getRunId(), null, null, null)).isPresent();
 

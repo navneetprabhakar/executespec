@@ -48,25 +48,25 @@ class SequentialExecutorTaskOutcomeMetricTest {
     TaskOutcomeMetricService metricService = mock(TaskOutcomeMetricService.class);
 
     SequentialExecutor executor =
-        new SequentialExecutor(
-            worker,
-            mock(BuildProjectTool.class),
-            new ObjectMapper(),
-            mock(com.navneet.executespec.observability.Metrics.class),
-            mock(com.navneet.executespec.sse.SseBroadcaster.class),
-            taskRepository,
-            null,
-            null,
-            null,
-            null,
-            mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
-            null,
-            costTracker,
-            mock(com.navneet.executespec.deployment.GcsTaskCheckpointService.class),
-            mock(com.navneet.executespec.router.AvailableProviderResolver.class),
-            null,
-            null,
-            metricService);
+        SequentialExecutorTestSupervisor.attach(
+            new SequentialExecutor(
+                worker,
+                mock(BuildProjectTool.class),
+                new ObjectMapper(),
+                mock(com.navneet.executespec.observability.Metrics.class),
+                mock(com.navneet.executespec.sse.SseBroadcaster.class),
+                taskRepository,
+                null,
+                null,
+                null,
+                null,
+                mock(com.navneet.executespec.config.featureflag.FeatureFlagService.class),
+                null,
+                costTracker,
+                mock(com.navneet.executespec.router.AvailableProviderResolver.class),
+                null,
+                null,
+                metricService));
     PlannedTask task =
         PlannedTask.builder()
             .id("T1")
@@ -81,6 +81,7 @@ class SequentialExecutorTaskOutcomeMetricTest {
             .model("claude-sonnet-4-6")
             .runContext(new ExecutionContext("run-metric", "__root__", Path.of("/tmp/run-metric")))
             .enableSmokeTests(false)
+            .workspaceOrigin(com.navneet.executespec.workspacegeneration.WorkspaceOrigin.GREENFIELD)
             .build();
 
     executor.execute(request);

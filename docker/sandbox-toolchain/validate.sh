@@ -36,6 +36,17 @@ EOF
 cat >"${TMP_DIR}/format.js" <<'EOF'
 const value={answer:42}
 EOF
+mkdir -p "${TMP_DIR}/.executespec/bootstrap"
+cat >"${TMP_DIR}/.executespec/bootstrap/test_acceptance.py" <<'EOF'
+def test_offline_runtime_kit_imports():
+    import fastapi
+    import pydantic
+    import uvicorn
+
+    assert fastapi.__version__
+    assert pydantic.__version__
+    assert uvicorn.__version__
+EOF
 
 docker run --rm \
   --network none \
@@ -87,6 +98,9 @@ PY
     prettier --write --log-level=warn format.js
     gofmt -w main.go
     mvn --version >/dev/null
+    runtime_output="$(/opt/executespec/runtime/python-http-acceptance.sh)"
+    printf "%s\n" "${runtime_output}" | grep -q "EXECUTESPEC_RUNTIME_KIT=python-http-v1"
+    printf "%s\n" "${runtime_output}" | grep -Eq "1 passed"
   '
 
 IMAGE_ID="$(docker image inspect "${IMAGE_TAG}" --format '{{.Id}}')"
@@ -94,4 +108,4 @@ printf 'validated_image=%s\n' "${IMAGE_TAG}"
 printf 'local_image_id=%s\n' "${IMAGE_ID}"
 printf '%s\n' 'containment_smoke=pass (non-root, no socket/host path, zero caps, cgroup ceilings, noexec tmp, metadata denied)'
 printf '%s\n' \
-  'deployment requires a registry push, repository@sha256:... reference, and dependency-cache/egress readiness; flags remain off'
+  'deployment requires a registry push and repository@sha256:... reference; runtime dependency install is offline and flags remain off'

@@ -2,123 +2,175 @@ package com.navneet.executespec.deployment;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
 
-import com.navneet.executespec.state.StateStore;
-import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.integration.CorrectionWorkspaceTransaction;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationArchiveService;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RL-2026-05-041 (audit risk #2 — mid-run durability). Checkpoints a run's workspace to GCS at task
- * boundaries so mid-run work survives a node loss (Cloud Run scale-down, MIG auto-heal, container
- * rebuild). Before this, GCS upload fired only on a terminal event ({@code
- * WorkspaceGcsUploadListener}); a node dying mid-run meant the local workspace vanished and the run
- * could only fail {@code WORKSPACE_GONE} — losing work the customer had already paid for at the
- * plan gate.
- *
- * <p>Design (reuses existing infra, no schema change):
- *
- * <ul>
- *   <li>After each terminal task status, async-export the workspace and upload it to GCS under the
- *       run's key (latest-checkpoint-wins — overwrites the same object).
- *   <li>Set {@link PipelineRun#getGcsWorkspaceKey()} (but NOT {@code gcsArchivedAt} — the local
- *       copy still exists). {@code WorkspaceRestoreService.ensureWorkspaceAvailable} then restores
- *       from this key when a resume finds the local workspace gone (see {@code
- *       RunOrchestrator.resumeAfterCrash}).
- *   <li>No-op when GCS is unconfigured (local dev) — guarded by {@link
- *       GcsWorkspaceStore#isConfigured()} so we never pay the zip cost for nothing. Gated by {@code
- *       durability.task-checkpoint.enabled}.
- * </ul>
- *
- * <p>Async + fully self-swallowing: a checkpoint failure must never disrupt the pipeline.
+ * Creates the exact durable checkpoint receipt required before a BUILD generation can be accepted.
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class GcsTaskCheckpointService {
 
-  private final WorkspaceExportService exportService;
-  private final GcsWorkspaceStore gcsStore;
-  private final StateStore stateStore;
+  @FunctionalInterface
+  interface PhysicalWriteObserver {
+    void afterWrite(String key);
+  }
 
-  /**
-   * Per-run checkpoint chain. Checkpoint uploads overwrite one GCS object, so concurrent
-   * fire-and-forget exports can otherwise complete out of order and leave an older workspace as the
-   * latest restore candidate. The chain is deliberately local-process only; the database/GCS lease
-   * still fences cross-JVM recovery, while this prevents the common same-JVM async reorder.
-   */
-  private final ConcurrentHashMap<String, CompletableFuture<Void>> checkpointChains =
-      new ConcurrentHashMap<>();
+  /** Acknowledgement consumed by the workspace-generation acceptance transaction. */
+  public record CheckpointReceipt(
+      String kind,
+      String key,
+      String generation,
+      String artifactDigest,
+      String storageGeneration,
+      long sizeBytes,
+      String crc32c,
+      String etag,
+      Instant completedAt) {}
+
+  private final WorkspaceGenerationArchiveService generationArchives;
+  private final GcsWorkspaceStore gcsStore;
+  private final LocalGenerationCheckpointStore localStore;
+  private final Environment environment;
+  private final PhysicalWriteObserver physicalWrites;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public GcsTaskCheckpointService(
+      WorkspaceGenerationArchiveService generationArchives,
+      GcsWorkspaceStore gcsStore,
+      LocalGenerationCheckpointStore localStore,
+      Environment environment) {
+    this(generationArchives, gcsStore, localStore, environment, key -> {});
+  }
+
+  GcsTaskCheckpointService(
+      WorkspaceGenerationArchiveService generationArchives,
+      GcsWorkspaceStore gcsStore,
+      LocalGenerationCheckpointStore localStore,
+      Environment environment,
+      PhysicalWriteObserver physicalWrites) {
+    this.generationArchives = generationArchives;
+    this.gcsStore = gcsStore;
+    this.localStore = localStore;
+    this.environment = environment;
+    this.physicalWrites = physicalWrites;
+  }
 
   @Value("${durability.task-checkpoint.enabled:true}")
   private boolean enabled;
 
   /**
-   * Checkpoint the workspace after a task boundary. Fire-and-forget; safe to call on every terminal
-   * task status. No-op when disabled or GCS is unconfigured.
+   * Strict checkpoint boundary for V374 workspace-generation acceptance. Unlike the legacy async
+   * method, this either returns an exact acknowledgement or throws; callers must not accept the
+   * generation on failure. Local development writes the same exact archive to a host-bound durable
+   * checkpoint store; the live workspace path is never accepted as a checkpoint.
    */
-  @Async
-  public void checkpointAfterTask(String runId, String taskIdShort) {
-    if (!enabled || runId == null) return;
-    if (!gcsStore.isConfigured()) return; // local dev / GCS off — nothing to do, skip the zip
-
-    enqueueCheckpoint(runId, taskIdShort);
+  public CheckpointReceipt checkpointGeneration(
+      String runId,
+      String taskIdShort,
+      CorrectionWorkspaceTransaction.Checkpoint workspaceCheckpoint) {
+    String generation = workspaceCheckpoint == null ? null : workspaceCheckpoint.generation();
+    return checkpointGeneration(
+        runId,
+        taskIdShort,
+        workspaceCheckpoint,
+        "workspace-generations/" + runId + "/" + generation + ".tar.gz");
   }
 
-  private void enqueueCheckpoint(String runId, String taskIdShort) {
-    for (; ; ) {
-      CompletableFuture<Void> previous = checkpointChains.get(runId);
-      CompletableFuture<Void> next =
-          (previous == null ? CompletableFuture.completedFuture(null) : previous)
-              .handle((ignored, failure) -> null)
-              .thenRun(() -> performCheckpoint(runId, taskIdShort));
-      boolean installed =
-          previous == null
-              ? checkpointChains.putIfAbsent(runId, next) == null
-              : checkpointChains.replace(runId, previous, next);
-      if (installed) {
-        next.whenComplete((ignored, failure) -> checkpointChains.remove(runId, next));
-        return;
-      }
+  /**
+   * Idempotent physical write for a caller-journalled deterministic object identity. The logical
+   * key is persisted before this method is called; GCS enforces create-if-absent and validates the
+   * exact metadata on replay.
+   */
+  public CheckpointReceipt checkpointGeneration(
+      String runId,
+      String taskIdShort,
+      CorrectionWorkspaceTransaction.Checkpoint workspaceCheckpoint,
+      String deterministicObjectKey) {
+    String generation = workspaceCheckpoint == null ? null : workspaceCheckpoint.generation();
+    Path workspaceRoot = workspaceCheckpoint == null ? null : workspaceCheckpoint.workspaceRoot();
+    if (runId == null || generation == null || !generation.matches("[0-9a-f]{64}")) {
+      throw new IllegalArgumentException("WORKSPACE_CHECKPOINT_IDENTITY_INVALID");
     }
-  }
-
-  private void performCheckpoint(String runId, String taskIdShort) {
+    if (deterministicObjectKey == null
+        || deterministicObjectKey.isBlank()
+        || deterministicObjectKey.startsWith("/")
+        || deterministicObjectKey.contains("..")) {
+      throw new IllegalArgumentException("WORKSPACE_CHECKPOINT_OBJECT_KEY_INVALID");
+    }
+    boolean local = !enabled || !gcsStore.isConfigured();
+    if (local && environment.acceptsProfiles(Profiles.of("prod"))) {
+      throw new IllegalStateException("WORKSPACE_GENERATION_DURABLE_CHECKPOINT_UNAVAILABLE");
+    }
     Path zipPath = null;
     try {
-      zipPath = exportService.exportWorkspace(runId);
-      String key = gcsStore.uploadZip(runId, zipPath);
-      if (key == null) return; // upload skipped (race with config) — nothing persisted
-      PipelineRun run = stateStore.findRun(runId).orElse(null);
-      if (run != null) {
-        // Latest checkpoint key; leave gcsArchivedAt null — the local copy is still authoritative.
-        run.setGcsWorkspaceKey(key);
-        stateStore.save(run);
+      zipPath = generationArchives.create(workspaceCheckpoint);
+      String artifactDigest;
+      try (var input = Files.newInputStream(zipPath)) {
+        artifactDigest = org.apache.commons.codec.digest.DigestUtils.sha256Hex(input);
       }
+      GcsWorkspaceStore.ArtifactReceipt artifact;
+      String kind;
+      if (local) {
+        artifact = localStore.store(runId, generation, artifactDigest, zipPath);
+        zipPath = null; // ownership moved into the immutable local checkpoint store
+        kind = "LOCAL_ARCHIVE";
+      } else {
+        artifact =
+            gcsStore.uploadArtifactExact(
+                deterministicObjectKey,
+                zipPath,
+                "application/gzip",
+                java.util.Map.of(
+                    "runId", runId,
+                    "taskId", taskIdShort == null ? "unknown" : taskIdShort,
+                    "workspaceGeneration", generation,
+                    "artifactDigest", artifactDigest));
+        kind = "GCS";
+      }
+      if (artifact.key() == null || artifact.key().isBlank()) {
+        throw new IllegalStateException("WORKSPACE_CHECKPOINT_UPLOAD_UNACKNOWLEDGED");
+      }
+      physicalWrites.afterWrite(artifact.key());
+      Instant completed = Instant.now();
       log.info(
-          "[GcsTaskCheckpoint] run={} task={} workspace checkpointed to GCS {}",
+          "[GcsTaskCheckpoint] strict run={} task={} generation={} key={}",
           runId,
           taskIdShort,
-          key);
-    } catch (Exception e) {
-      log.warn(
-          "[GcsTaskCheckpoint] run={} task={} checkpoint failed (non-fatal): {}",
-          runId,
-          taskIdShort,
-          e.getMessage());
+          generation,
+          artifact.key());
+      return new CheckpointReceipt(
+          kind,
+          artifact.key(),
+          generation,
+          artifactDigest,
+          artifact.storageGeneration(),
+          artifact.sizeBytes(),
+          artifact.crc32c(),
+          artifact.etag(),
+          completed);
+    } catch (java.io.IOException failure) {
+      throw new IllegalStateException("WORKSPACE_CHECKPOINT_DIGEST_FAILED", failure);
     } finally {
       if (zipPath != null) {
         try {
           Files.deleteIfExists(zipPath);
-        } catch (Exception ignore) {
-          // temp zip cleanup is best-effort
+        } catch (Exception cleanupFailure) {
+          log.warn(
+              "[GcsTaskCheckpoint] strict temp cleanup failed run={} task={}: {}",
+              runId,
+              taskIdShort,
+              cleanupFailure.getMessage());
         }
       }
     }

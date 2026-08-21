@@ -2,6 +2,7 @@ package com.navneet.executespec.run.outcome;
 
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.AutomationDisposition;
 import com.navneet.executespec.run.outcome.RunTerminalOutcome.Category;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationFailureProjection;
 
 /**
  * Customer-facing terminal-outcome definition factories, extracted from {@link
@@ -158,6 +159,110 @@ final class RunTerminalOutcomeDefinitions {
         true,
         "CONTACT_SUPPORT",
         "Retry once, and contact support with the support code if the problem continues.",
+        null,
+        AutomationDisposition.FAILED,
+        1);
+  }
+
+  static Definition workspaceGenerationFailure(boolean recoveryFailed) {
+    return new Definition(
+        Category.PLATFORM_FAILURE,
+        recoveryFailed
+            ? "Workspace recovery could not be proven"
+            : "Generated change did not pass the BUILD boundary",
+        recoveryFailed
+            ? "Generated changes were rejected, but ExecuteSpec could not prove that the workspace"
+                + " was restored. Publication was blocked."
+            : "The generated change did not cross the required BUILD acceptance boundary. No"
+                + " unverified generation was accepted or published.",
+        true,
+        "CONTACT_SUPPORT",
+        "Retry after the BUILD trust-boundary issue is corrected; contact support with the support"
+            + " code if it repeats.",
+        null,
+        AutomationDisposition.FAILED,
+        1);
+  }
+
+  static Definition workspaceGeneration(WorkspaceGenerationFailureProjection failure) {
+    return switch (failure.category()) {
+      case ROLLBACK_PROVEN ->
+          new Definition(
+              Category.ACTION_REQUIRED,
+              "Generated code was rejected safely",
+              "Code was generated, deterministic verification did not pass, and the accepted"
+                  + " workspace was restored. Publication remains blocked.",
+              true,
+              "REVIEW_EVIDENCE",
+              "Review the failed deterministic checks before starting a new generation attempt.",
+              null,
+              AutomationDisposition.ACTION_REQUIRED,
+              3);
+      case VERIFICATION_ENVIRONMENT_UNAVAILABLE ->
+          new Definition(
+              Category.PLATFORM_FAILURE,
+              "Verification environment unavailable",
+              "Code was generated, but the disposable verification environment could not produce"
+                  + " product evidence. This is not a product-code failure.",
+              true,
+              "RETRY_RUN",
+              "Retry after the verification environment is available.",
+              null,
+              AutomationDisposition.FAILED,
+              1);
+      case NO_CANDIDATE ->
+          new Definition(
+              Category.ACTION_REQUIRED,
+              "Generation did not produce a candidate",
+              "No candidate generation was frozen. The run stopped before generated product bytes"
+                  + " could be verified.",
+              true,
+              "RETRY_RUN",
+              "Retry generation from the accepted workspace.",
+              null,
+              AutomationDisposition.ACTION_REQUIRED,
+              3);
+      case CHECKPOINT_FAILED ->
+          protocolFailure(
+              "Candidate checkpoint was not proven",
+              "Generated code may exist, but its durable checkpoint was not acknowledged."
+                  + " Publication remains blocked.");
+      case FRONTIER_CONFLICT ->
+          protocolFailure(
+              "Accepted workspace frontier changed",
+              "The candidate could not be reconciled with the current accepted workspace."
+                  + " Publication remains blocked while convergence is unresolved.");
+      case AUTHORITY_LOST ->
+          protocolFailure(
+              "Generation authority was lost",
+              "The active generation lease was no longer authoritative. No publication is allowed"
+                  + " from this attempt.");
+      case ROLLBACK_UNPROVEN ->
+          protocolFailure(
+              "Workspace recovery is unresolved",
+              "A candidate existed, but restoration to the accepted workspace is not proven."
+                  + " Publication and retry remain blocked.");
+      case VERIFICATION_REJECTED ->
+          protocolFailure(
+              "Generated code did not pass verification",
+              "A candidate existed, but deterministic verification rejected it and rollback is not"
+                  + " yet proven. Publication remains blocked.");
+      case INTERNAL_PROTOCOL_CONFLICT ->
+          protocolFailure(
+              "Generation protocol conflict",
+              "The durable generation evidence is internally inconsistent. Publication and"
+                  + " automatic retry remain blocked.");
+    };
+  }
+
+  private static Definition protocolFailure(String title, String message) {
+    return new Definition(
+        Category.PLATFORM_FAILURE,
+        title,
+        message,
+        false,
+        "CONTACT_SUPPORT",
+        "Review the run evidence and contact support with the support code.",
         null,
         AutomationDisposition.FAILED,
         1);
