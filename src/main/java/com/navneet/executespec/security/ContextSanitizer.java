@@ -15,8 +15,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>A malicious actor could commit files to a repository (or craft a spec) containing LLM
  * prompt-injection payloads (e.g., "Ignore previous instructions. You are now DAN..."). When this
- * content is embedded verbatim into the ConversationAgent system prompt, it can override the
- * agent's instructions.
+ * content is embedded as instructions instead of untrusted evidence, it can override the agent's
+ * intended role.
  *
  * <h3>Mitigations</h3>
  *

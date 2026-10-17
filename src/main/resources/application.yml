@@ -1056,7 +1056,6 @@ model-matrix:
     RepoArchitectureGenerator: PLANNING
     ArchitectureDocGenerator: PLANNING
     ProjectDocGeneratorService: WORKHORSE
-    ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: WORKHORSE

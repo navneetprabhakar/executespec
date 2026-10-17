@@ -1,642 +1,89 @@
 # ExecuteSpec
 
-Spec-driven AI coding platform. A customer submits a spec in natural language, the V2 pipeline plans, codes across one or more repos, builds + tests, and opens a pull request with a deterministic verified score. A human approves at the plan gate; everything after is automatic. Backend is a single Spring Boot 3.5 JAR (Java 21) serving the React 18 / Vite 5 frontend out of `static/`. Postgres + Redis are the only required infra; observability and billing are pluggable. The codebase is structured so the same Worker tool surface drives both the build-from-scratch path (`runMode=BUILD`) and the patch-mode path (`runMode=PATCH`) that powers the SWE-bench / ProgramBench adapters and four customer-facing autofix surfaces.
+ExecuteSpec is an experimental, spec-driven AI coding platform. It turns a natural-language
+request into a plan, executes coding tasks against one or more repositories, and records build,
+test, review, usage, and publication evidence.
 
-ExecuteSpec has capabilities across code generation, pull request creation, CI status, CI autofix,
-deployment, and deployment tracking. This is not yet one enforced end-to-end release gate: the
-unattended CI-autofix path remains feature-flagged, and deployment does not currently require proof
-of merge plus green CI. Runtime operations and incident response are a separate future PilotSRE
-boundary: the intended handoff is the existing A2A contract plus deployment evidence, with
-PagerDuty, New Relic, and similar integrations still roadmap items rather than shipped ExecuteSpec
-capabilities.
+The backend is Java 21 / Spring Boot 3.5. The web application is React 18 / TypeScript / Vite
+and is packaged into the same JAR. PostgreSQL with pgvector and Redis provide persistent state
+and coordination.
 
-The Web Agent stores complete chat snapshots and exposes paginated conversation history, but a chat
-snapshot is not a restorable filesystem image. Projects remain the canonical durable repository
-context: the agent can select an existing project or hand off to the normal Projects creation flow
-and return with that project selected. Closing a Web Agent workspace archives its conversation
-after active work is clear; it does not delete the linked project.
-Repository linking uses the caller's stored SCM credential. If that credential cannot see a
-private GitHub or Bitbucket repository, Web and scoped CLI clients receive the same safe,
-provider-specific instruction to grant repository access or reconnect the integration; the failure
-does not create a partial repository or project link.
-Within a selected project, exact repository search is paired with a read-only bounded source-range
-tool: the agent can expand a `file:line` match into up to 200 lines of method/signature context from
-the linked repository's revision-pinned clone. Reads are project-authorized, repository-relative,
-symlink-contained, and exclude Git metadata and credential-like paths/content.
-Plan Review's “Start revised run” uses the canonical Start composer and restores both the revised
-request and its project/repository scope; it no longer falls through the project landing redirect.
-Exact HTTP paths in a submitted request retain their namespace through planning: `/route` and
-`/api/route` are distinct producer contracts, and an added or removed `/api` prefix is rejected
-before approval or code-generation spend. Explicit method-rejection acceptance such as
-`POST /route must return 405` is preserved as a negative contract: the forbidden method must remain
-absent while another supported method proves the path exists, so a 404 cannot masquerade as the
-requested behavior. Web Agent streaming also treats a parsed terminal `done` as authoritative when
-a proxy resets the connection immediately afterward. Its pinned-run event stream never opens
-without a run-scoped SSE token: 401/403/404 outcomes close with an explicit auth/access/not-found
-state, while transient failures use capped exponential reconnects whose budget resets only after a
-stable connection. When that budget is exhausted, the latest durable run snapshot remains visible
-as snapshot-only evidence instead of looping indefinitely.
+## What is here
 
-Run detail's **Screens** tab generates a static visual preview, not a live application runtime.
-New generation is available only after the run is terminal and only for screens affected by the
-run's product-code diff; backend-only changes do not reuse unrelated older screens. Every preview
-is permanently labelled as simulated, renders with a script-only sandbox, and uses one frozen
-provider/model route for the whole job. Exact run pins remain exact; otherwise the payer
-organization's WORKHORSE matrix is resolved once before admission. Parallel surfaces share one
-job-wide deadline, and generated examples use representative populated data unless the source
-itself is an empty, loading, or error screen.
+- BUILD: classification, planning, optional human plan approval, task execution, review, and validation.
+- PATCH: a worker loop for targeted changes and benchmark adapters.
+- Project and repository context, document retrieval, chat, and generated architecture documents.
+- Provider routing and usage accounting; caller-owned SCM credentials for repository access.
+- Durable plan decisions, workspace generations, recovery, and publication checks.
+- Optional billing, deployment, preview, and observability integrations.
 
-The BUILD planner preserves exact behavioral clauses, keeps focused maintained tests with the
-production task they verify, and bounds task breadth to avoid one runaway worker context. Workers
-reject disposable root-level smoke scripts as test substitutes and stop repeated same-path rewrite
-loops that do not obtain a passing test/build. Downloadable source archives omit interpreter and
-test-runner caches such as `__pycache__`, `.pytest_cache`, and compiled Python bytecode.
-Stale project architecture refresh runs durably in the background instead of blocking the planner.
-For monorepos, build and test verification discovers nested manifest roots but selects only modules
-with actual Git working-tree changes; ambiguous unscoped modules are reported unavailable rather
-than building unrelated applications. A provider output cap before the first write gets one bounded
-same-route mutation-only call with expanded output headroom. Recovered writes then re-enter the
-ordinary worker loop so required maintained tests, verification, and a later real `completeTask`
-still have to occur; unadvertised recovery tools are refused and at most two guarded follow-up turns
-are added at the iteration ceiling. Existing zero-write best-guess salvage remains a warning even when the current
-workspace suite is green: passing old tests is non-regression evidence, not proof that requested
-new coverage was delivered.
+This is a research/development codebase. Available runtime surfaces and feature flags constrain
+what can execute. A successful build, passing repository tests, LLM review, and the reported
+verified score are different kinds of evidence; none alone proves every requested behavior.
+Unattended operation and generated-code execution require deliberate sandbox and spend policies.
 
-Library/module changes without explicit server or API intent stay on the library validation
-surface. Node projects using the built-in `node --test` runner contribute their real executable
-counts, and weaker later test events cannot erase stronger proven evidence. Reviewer provider calls
-are recorded separately from worker calls in the run cost/evidence ledger.
+## Local development
 
-Terminal run results use the validation report's reviewer verdict and product-file count as the
-customer-facing truth. Bootstrap/workspace metadata remains visible in Explorer but is not labeled
-generated product code. “Run again” preserves the persisted provider/model route; changing provider
-is a separate, explicit paid action that clears an exact model pin.
-
-Terminal server-owned runs can be continued through
-`POST /api/runs/{sourceRunId}/iterate` with `{ "userRequest": "..." }`. The endpoint creates and
-starts a new BUILD run, records `sourceRunId`, inherits the source route/project/repository and
-execution/publication policies, and initializes from a fail-closed Git-tracked workspace snapshot.
-Callers may provide `Idempotency-Key`; the route requires write access to the source run.
-
-The protected Web surfaces send caller-owned idempotency keys for create, fork, and iterate
-mutations. A key is retained in the current browser tab only while the outcome is ambiguous, so a
-retry or same-tab reload replays the same server claim instead of creating duplicate work; a
-successful, definitively rejected, changed, or deliberately repeated action receives a fresh key.
-The tab ledger stores only a SHA-256 digest of the canonical request plus the idempotency key and
-timestamp; spec/request text is never written to sessionStorage.
-Project Start Work also exposes the existing exact per-run model override to Enterprise users; the
-selection applies to that run only and does not alter the project or organization matrix. Its
-catalog comes from the authenticated run-submitter model endpoint, so Enterprise developers do not
-need ORG_ADMIN access merely to select an allowed exact route.
-
-Active run detail overlays persisted cost with the higher JVM-owned live cost snapshot; terminal
-runs always expose stored durable cost. Effective route evidence keeps `MIXED` for multiple physical
-models, but retains the common provider when every tier stayed on that provider, so a provider-only
-request is not falsely shown as cross-provider divergence. Exact model pins remain strict.
-Terminal result pages render the server-owned outcome verbatim with exactly one primary next action;
-logs, evidence, and files remain secondary diagnostics. User cancellation is presented as a neutral
-stop, while platform failures retain a support code without exposing internal exception detail.
-For BUILD failures, the newest durable generation attempt distinguishes no candidate, rejected and
-restored code, unresolved rollback, verification-environment unavailability, checkpoint failure,
-frontier conflict, lost authority, and protocol conflict. Run detail, lists/CLI, Web, email,
-notifications, activity, and automation exit semantics use that same projection; older failed
-attempts cannot override a later accepted generation. Visible failed acceptance targets are retained
-as evidence, while hidden targets and raw provider/tool errors remain redacted.
-An existing pull request does not by itself prove that the terminal attempt changed code; failed or
-limited attempts leave that impact unknown. Provider and model-route failures lead directly to
-`/provider-keys` rather than offering a retry against the same invalid configuration.
-
-Run-event publication uses bounded per-run lock striping to order Redis replay append, local
-delivery, Redis publication, subscription installation, and completion; unconstrained Spring
-listeners run afterward. Remote Redis callbacks are sequence-reordered in a bounded buffer, and a
-typed terminal event closes peer streams only after it is delivered. A bounded terminal marker
-makes later subscribers replay and close. Each connected Web/CLI subscriber has one ordered
-replay/live lane, bounded FIFO, and virtual-thread writer, so a
-disconnected or non-reading socket cannot stall the run orchestrator, Redis listener, event
-producer, or another subscriber. Heartbeats detect quiet half-open sockets; a 30-second blocked-send
-watchdog retires them, while stuck writer/close work remains bounded and admission-accounted.
-Buffer exhaustion retires only that client and relies on `Last-Event-ID` replay; terminal stream
-completion is queued after already accepted frames so final status/cost/completion events are not
-truncated.
-
-Standalone remote `repoMode=EXISTING` runs clone `repoUrl` into the run workspace before the first
-model call and fail closed unless the checkout contains Git metadata plus a deterministic source
-inventory. Project-linked runs retain their multi-repository admission path, source-run iterations
-retain their required parent snapshot copy, and local-hands runs retain the client working-tree
-handshake.
-
-Plan-gate decisions are durable and restart-safe. V348 routes APPROVE, REJECT, and pre-approval
-CANCEL through one atomic `PlanGateDecisionService` transaction, persists byte-stable canonical
-decision evidence plus a request fingerprint, and updates gate/run/outbox state together. The
-receipt cross-binds provider, execution mode, separate fixed-six-decimal `estimateHighUsd` and
-nullable `hardCapUsd`, expected/confirmed credits, payer, continuation, contract report, and the
-exact persisted typed acknowledgement. A complete pre-V348 acknowledgement tuple is retained
-byte-for-byte: `BREAKING` validity is trim/case-insensitive, while receipt/report equality remains
-exact. An omitted
-legacy client plan fingerprint remains absent with a null match result; a supplied fingerprint must
-match, and ENFORCED RequirementIR approval requires one. An
-approved continuation follows `WAITING → READY → PROCESSING → COMPLETED` under a fenced lease;
-COMPLETED means the dispatcher atomically handed `APPROVAL_RESUMING` to normal durable `WORKING`
-recovery, not that the run finished. The dispatcher validates the leased database tuple before
-workspace restore and revalidates it at the atomic handoff. Approval execution starts only after
-that commit, and startup recovery uses the outbox rather than directly resubmitting
-`APPROVAL_RESUMING`. Versioned gate/outbox evidence and referenced/acknowledged reports reject
-direct child deletion while parent-run deletion retains its normal cascade; the new report→run FK
-is `NOT VALID` only so historical orphan rows do not block deployment while every new write is
-checked. Recovery tasks are registered before executor submission to avoid stale active-run
-handles when an inline/fast executor finishes immediately. The
-`requirement.ir.gate.mode` flag remains `LEGACY`.
-
-V349 corrects external-collaborator approval without weakening tenant isolation: the run and
-project remain in the host organization, while the immutable gate receipt records the submitting
-user's payer/credential organization. REST submit, confirmed Web Agent cloud runs, forks, and the
-unified Execution View now share `CustomerRunSubmissionService`, so project write authority,
-explicit linked-repository selection, provider/key/spend preflight, and durable idempotency are
-applied before dispatch. Pending RequirementIR V1 gates are decoded and approved through a frozen
-V1 wire codec and semantic validator rather than the rolling current-schema implementation.
-
-Committed backend checkpoint `13ead3f40` carries that V350 separation through execution:
-`pipeline_run.org_id` and CUSTOMER `llm_execution_context.org_id` remain the host data/governance
-tenant, while `pipeline_run.billing_org_id` and `llm_execution_context.credential_org_id` retain
-the submitting actor's payer/provider-policy organization for key-policy revalidation and managed-
-AI debit. The migration is forward-only and installs separate PostgreSQL rejection triggers for
-`billing_org_id` and `credential_org_id`; application admission and dispatch guards independently
-enforce the same immutable binding before spend. The V350 migration/immutability and related named
-PostgreSQL gates pass independently, and clean Java 21 verification passes 5,738/5,738 with zero
-failures, errors, or skips. The same locally verified source shape preserves the
-source run's host tenant while assigning the current actor as payer on BUILD iterations, and makes
-server-internal finding PATCH submission resolve its active host project and active actor before
-dedupe or dispatch.
-
-Project architecture and generated-document evidence distinguish an empty Spring parser result
-from positive Spring MVC evidence. Non-Spring repositories are labelled `NOT_ESTABLISHED`.
-Generated project explanations can ground narrowly scoped behavior in digest-validated, exact-SHA
-exported JavaScript/TypeScript function excerpts; incomplete or budget-truncated excerpts are never
-treated as authority.
-
-The current deployment candidate advances the migration source head to V400. V354 adds
-rollout-gated operation-fenced provider-attempt admission; its default remains
-`EXECUTESPEC_LLM_OPERATION_ADMISSION_MODE=LEGACY`, so this deployment does not activate the new
-admission path. V355 adds bounded oldest-first recovery for stale streamed agent turns and never
-replays provider transport. V356 preserves complete Web Agent transcripts with integrity metadata
-and adds tenant-safe archive/close plus paginated conversation history. V357 persists the exact
-per-task routing tier, category, and source before provider dispatch. V358 makes generated project
-documents durable asynchronous jobs with exact-route admission, fenced publication, reloadable
-status, and bounded terminal-job retention. V359 gives each immutable GitHub check-run/head-SHA
-failure a unique database claim before CI autofix submission, binds the canonical PATCH run in the
-next fenced transaction, and permits a later delivery to retry after a fenced failed submission or
-an expired claim with no discoverable run. V373 separates the durable checkout branch from
-existing-PR publication authority. Ordinary Execution View/AIDLC launches may clone a selected
-source branch while still opening a fresh ExecuteSpec PR. Continue-on-PR runs bind the checkout,
-repository, PR number, and head branch before async dispatch; publication revalidates that exact
-identity, fast-forwards without force, and never schedules the pre-existing branch for cleanup.
-PR-review and CI-fix admission also recheck the live open PR, configured base, and captured 40-hex
-head SHA before dispatch; V373 persists that SHA immutably and fresh/recovered clones prove actual
-HEAD before provider spend. An active-run replay is accepted only when actor, tenant, payer,
-selected repository, checkout branch, and publication tuple all match exactly. Private-repository
-clones retain the active actor's in-memory GitHub credential. Crash-recovered clones must prove
-their actual branch before planning, and correction runs project the reused PR's live status/CI
-evidence through their own run-detail API.
-
-V396 closes the hidden dependency-state gap in the shared BUILD protocol. Git-ignored bytes remain
-outside accepted product identity, but Node, Python, Maven, Gradle, Go, and Rust environments are
-reconstructed from accepted manifests under a digest-pinned, network-denied sandbox plan before
-probe, worker, and final verification. Cleanup and materialization receipts are append-only;
-PostgreSQL refuses a protocol-v2 verification transition without the required passing receipts.
-
-V397 closes the filesystem/database split. Every predecessor/candidate archive upload,
-per-repository rollback, and accepted-workspace replacement receives durable intent before its
-physical write and an applied/verified receipt afterward. Archive keys and replacement scratch
-paths are deterministic, rollback resumes only incomplete repositories, and terminal orphan
-archives are deleted only after a fresh database check proves no accepted or unresolved reference.
-
-V398 closes the poison-record observability gap in terminal reconciliation. Failure counts, oldest
-pending age, safe error code, dead-letter threshold, and later resolution are durable and exposed
-only through the no-store SUPER_ADMIN qualification endpoint. Diagnostic persistence is explicitly
-non-authoritative: if it fails, healthy terminal records still reconcile in the same scan.
-
-V399 closes terminal physical-operation ownership. Acceptance or rollback persists the exact
-operation target before reconciliation; task and operation completion have separate immutable
-receipts, later attempt admission remains fenced until both converge, and workspace authority is
-released only after that proof. The local crash matrix kills a real JVM at eight terminal
-boundaries twice each and replays every case twice from replacement JVMs without contradiction.
-
-V400 repairs the pre-dispatch control-plane deadlock. Claimed attempts retain their immutable LLM
-identity while rolling back without a workspace checkpoint; authority acquisition runs in its own
-narrow transaction; failed recovery persists a stable support ID and 30/60/120-second bounded
-schedule. The third failed proof becomes resolved quarantine with mandatory task and physical-
-operation failure receipts before recovery authority is released and the parent may fail. Run
-detail distinguishes recovering, retry scheduled, and exhausted states and says whether operator
-action is required. An ADMITTED crash with no physical operation still receives a completed
-operation-transition receipt, so it cannot block replacement admission. Cancellation atomically
-terminalizes the parent and every nonterminal task before executor interruption and bounded
-workspace convergence. The shared BUILD rollout flag remains false.
-
-V374 makes every initial BUILD task an accepted-generation transaction. Before provider/tool
-dispatch, the server persists an exact task contract, workspace lease, per-task LLM operation, Git
-tree baseline, ignored-artifact baseline, and durable generation archive. A task becomes COMPLETE
-only after server-resolved build/test verification, an immutable receipt, a candidate checkpoint,
-and an atomic accepted-frontier advance. The exact candidate diff is authoritative: zero-diff
-generations fail, and actual code changes require an executed non-empty green test suite even when
-the planner described the task as documentation/configuration. Failure, cancellation, or crash
-restores the exact
-multi-repository predecessor; reviewer/validation/publication require the current bytes to equal the
-accepted frontier. Default workspace/repo exports first honor the latest accepted correction
-generation, otherwise they require the accepted initial BUILD frontier. The initial reviewer is
-read-only. Production BUILD fails closed without durable
-cross-node checkpoint storage, and local-hands BUILD remains blocked until the client proxy carries
-the same generation protocol.
-V375 preserves original rejection and rejected-diff evidence separately from the first recovery
-failure, so crash recovery cannot rewrite causality. Ignored dependency/cache roots are purged at
-task entry and before acceptance (plus rollback/recovery). V380 durably couples rollback to replayable `MARK_PARTIAL` or
-`REOPEN_PENDING` task-row publication; downstream admission remains closed until its independent
-receipt commits. A task may install derived dependencies for deterministic verification, but those
-bytes never cross a task or node boundary. Run detail
-exposes a bounded, patch-free generation-attempt ledger and the Evidence view highlights rejected
-or unresolved attempts using stable codes and immutable digests.
-V376 adds the default-off `build.shared-code-change-loop.enabled` rollout control. When enabled,
-BUILD and PATCH still retain different orchestration but dispatch mutation through the same
-provider-neutral `CodeChangeLoop`. Supported greenfield BUILD tasks start from a deterministic
-executable red baseline; server-frozen schema-v2 commands and paths, not planner prose, determine
-acceptance. Only changed deterministic failure evidence counts as diagnostic progress, and a route
-change starts a new fenced generation attempt from the accepted frontier. V377 makes the exact
-task contract, planned initial failure, requested/effective route, iterations, tool/model calls,
-token usage and cost immutable and inspectable through run detail. V378 separately freezes the
-deterministic initial acceptance probe executed after baseline materialization and before provider
-dispatch; only an observed red result admits dispatch, while green, drifted, or unavailable probes
-roll back without a model call. The exact red count/signature seeds the first post-edit verifier,
-and the latest deterministic failure is pinned outside any generated history-compaction summary.
-Hidden endpoint assertions are omitted from both the worker directive and customer API. Typed
-`WORKSPACE_GENERATION` SSE, metrics, and Evidence UI facts keep candidate, per-check verification,
-rollback, and accepted frontier separate.
-Acceptance checks carry an explicit proof strength. A task contract that requires
-`RUNTIME_CONTRACT` cannot be satisfied by a green build or generic test count. The qualified
-Python HTTP adapter runs an immutable hidden CRUD/runtime contract inside a content-addressed,
-non-root, network-none container using only its pinned offline FastAPI dependency kit. Unsupported
-greenfield HTTP stacks fail before provider spend; malformed OpenAPI, undeclared statuses,
-schema-invalid responses, crashes, non-persistent mutations, and route aliases fail closed.
-Route changes enter a fresh physical generation/LLM attempt before replacement dispatch. Customer
-BUILD ZIP export holds publication authority through file traversal and binds the archive to the
-accepted frontier with `X-ExecuteSpec-Workspace-Generation`; a lease loss aborts and removes the
-partial archive.
-Separately authorized operators can inspect a preserved rejected candidate through the
-SUPER_ADMIN-only, no-store qualification-evidence endpoint; ordinary run detail never exposes the
-raw rejected diff.
-V360 persists a run-bound canonical Spring HTTP surface
-at brownfield admission and blocks route removal after workers, corrections, validation, and
-immediately before publication unless an exact durable `BREAKING` gate receipt authorizes it. V361
-binds every new validation report and ledger entry to a canonical Git-tree workspace generation.
-V362 persists deterministic workflow/config evidence and the exact build/test commands, working
-directories, exit codes, and bounded outputs used for validation. V363 requires explicit
-confirmation before retrying a generated-document job whose provider outcome is uncertain.
-The forward migration widens the durable status column before admitting the longer
-`NEEDS_CONFIRMATION` state, so PostgreSQL recovery writes cannot fail after provider execution.
-V364 claims each exact continuation proposal with one durable approval id before queueing; an
-in-flight duplicate conflicts, while queued/completed duplicates replay that receipt and cannot
-queue or spend twice. Because task-boundary, post-review, and post-validation approvals all execute
-a code-mutating worker, every server-side approved continuation now uses the same reversible
-checkpoint, stale-evidence invalidation, exact approved-route fencing, read-only final review,
-deterministic validation, and accept-or-rollback lifecycle.
-V383 makes that lifecycle the only BUILD mutation kernel: admission persists `ADMITTED`, claims the
-exact physical LLM operation, and acquires workspace authority before provider/tool dispatch;
-same-route smoke retries, model/provider changes, approved continuations, and generated corrections
-all create fresh supervised attempts. Terminal task, LLM-operation, and run-frontier state is
-reconciled after acceptance/rollback and again during crash recovery.
-V384 persists `MARK_COMPLETE` in the same ACCEPTED attempt update, so task completion and physical
-operation success are independently replayable from committed generation/frontier evidence. The
-coordinator no longer infers either terminal outcome from where request control flow failed, and a
-poisoned terminal record cannot stop unrelated runs from being attempted in the same sweep.
-V385 snapshots `LEGACY_V1` or `SHARED_KERNEL_V2` once on initial BUILD admission and copies that
-immutable identity to every generation attempt. Execution never re-reads the rollout flag; unknown
-historical identity and parent/attempt mismatch fail closed. BUILD provider, tool, initial-probe,
-and verification dispatch now carry an explicit process-local `ExecutionContext` capability bound
-to the exact run, task, attempt, workspace lease, and phase, with a fresh database fence per use.
-The coordinator passes that capability directly into the worker dispatch function; no intermediate
-generation-context ThreadLocal remains.
-V386 converts pre-pin BUILD history to explicit `LEGACY_UNKNOWN` without inferring the old rollout
-flag. It persists a separate immutable disposition, promotes proven terminal contradictions to
-quarantine, blocks unknown BUILD publication, and exposes SUPER_ADMIN-only no-store schema
-attestation and digest-bound historical inventory endpoints. Previous-writer null inserts remain
-schema-compatible but are immediately labelled missing evidence and cannot invent protocol v2.
-V387 adds append-only operator adjudication over a minimized causal snapshot. Closing history as
-non-executable keeps its retention hold; deletion requires a distinct applied release receipt, and
-neither action changes the original run/attempt disposition or permits publication. The database
-enforces the hold across direct, retention, GDPR, and project-cascade deletion paths.
-V388 separates canonical RUN sandboxes from exact-generation VERIFICATION sandboxes. Verification
-mounts only `executespec.sandbox.workspace-root/<sandboxId>/workspace`, requires an opaque
-generation-bound capability, never falls back to the RUN sandbox or host, and records durable
-cleanup intent so startup/scheduled reconciliation can delete terminal workspaces after crashes.
-BUILD standards lint/invariants, breaking-change classifiers, CLI smoke, validation tests and
-change inspection now receive that exact VERIFICATION capability rather than reconstructing scope
-from a run id or caller path. Workspace-generation and change-evidence trees use non-executing
-JGit reads/insertion, so repository clean filters, fsmonitor helpers, textconv and external diff
-drivers cannot run while evidence is collected. Safe relative symlinks and executable modes are
-preserved in the disposable copy; absolute or workspace-escaping symlinks are refused.
-V389 adds a durable command journal for those verification sandboxes. Every command is admitted
-before dispatch, fenced to the exact sandbox lease and runtime epoch, and settled with an immutable
-terminal receipt bound to the disposable workspace before/after digests. Protocol-v2 passing
-verification cites only successful receipt ids; a crash after dispatch recovers as
-`INDETERMINATE`, never inferred success. Previous writers remain on immutable command protocol v1
-during the rolling expansion, while every new generation attempt is pinned to v2.
-Exact HTTP requirements and the admitted brownfield surface are checked before the read-only
-reviewer spends tokens, then checked again inside the final-validation chokepoint used by normal,
-crash-recovery, retry-validation, and re-review paths.
-V365 timestamps every continuation-approval transition. A stale pre-queue claim is safely released;
-a stale queued correction without a fresh run heartbeat fails closed, invalidates publication
-evidence, and requires a fresh run instead of guessing whether mutation or provider spend occurred.
-Approved corrections now execute against a reversible Git-tree checkpoint, invalidate earlier
-evidence before mutation, reject no-op/testless output, fence reviewer and validation evidence to
-one generation, and roll back both workspace and durable validation state when any deterministic
-gate regresses. Their durable resolution records before/after generations, changed paths and a diff
-digest, plus a bounded unified patch with truncation/redaction metadata and a typed before/after
-validation delta. V366 persists the exact deterministic causal gate for each newly generated zero
-headline; historical and nonzero rows remain null, and readers never reverse-infer a cause. The
-correction delta covers build, tests, workflow/config, protected contracts, reviewer and score.
-SCM publication and permanent deployment reject stale/unbound evidence, unverified tests, failed
-builds, and approved-route mismatches before any external side effect. The read-only
-`GET /api/runs/{id}/publication-eligibility` contract previews those same deterministic gates
-without rewriting comparison evidence; the run Evidence tab renders route, build, test,
-workflow/config, protected-contract, reviewer result, physical reviewer route, correction
-generations/diff/invalidation, freshness, and publication facts independently rather than treating
-the internal score as publication proof.
-Validation-report responses expose their lifecycle status; a stale/pending/failed report suppresses
-its previously computed pipeline result, and the Evidence UI presents regeneration state instead of
-relabeling old validation as current. Public report links reject those non-complete rows instead of
-publishing earlier scores or test claims. Known non-HTTP reports omit endpoint coverage from both score
-numerator and denominator rather than receiving a penalty or synthetic midpoint credit. V367
-persists that runtime-surface applicability; V368 disables legacy Apply-to-Run until it uses the
-correction lifecycle; V369 persists crash-recoverable correction authority; V370 aligns correction
-digest column types with Hibernate validation; and V371 persists skipped tests separately. A fresh
-exit-zero suite is publication-green only when at least one test passed and
-`passed + skipped == total`; all-skipped, malformed, failed, errored, non-zero-exit, or unverified
-suites remain blocked.
-Historical plan estimates are tenant- and route-scoped: V372 fingerprints the successful physical
-provider/model set, corrected persisted task count, and canonical LOW/MEDIUM/HIGH distribution, so
-an exact model selection no longer loses compatible history or silently borrows costs from another
-model, failover route, or materially cheaper task mix. Project-generated
-setup/explanation documents exclude recursive model-generated architecture prose, reserve exact-SHA
-configuration/Compose/Spring-handler facts ahead of bulk codemap inventory, and retry or fail closed
-on unsupported schema-ownership, Compose-startup, or response-representation claims.
-System Map prose also fails closed on exhaustive function contracts such as allowed fields or
-options unless one complete exact-source entry is bound to the repository and exact source SHA and
-the same function checks a same-variable literal collection whose values exactly equal the claim.
-Declaration inventory, Purpose summaries, unrelated functions/repositories or collections, subset
-claims, unresolved constants, truncated evidence, and combined-project prose cannot authorize the
-claim.
-SCM push failures expose a stable failure code, the exact blocking gate (for example `GIT_PUSH` or
-`PR_CREATION`), and remediation. Correction evidence shows the complete durable task/action history
-instead of only the last transaction.
-The internal headline reserves zero for an explicit deterministic gate. LLM assessments may cap a
-positive score no lower than 1; a zero report carries a `score-zero-cause` ledger row naming the
-exact deterministic artifact, while historical unattributed zeros say that their cause is
-unavailable instead of inferring one.
-RequirementIR also remains `LEGACY`.
-
-## Versions
-
-| Component         | Version             | Source                                                                 |
-| ----------------- | ------------------- | ---------------------------------------------------------------------- |
-| Project           | `2.0.0`             | [`VERSION`](VERSION), [`Version`](Version), [`pom.xml`](pom.xml) `<version>` |
-| Spring Boot       | `3.5.14`            | [`pom.xml`](pom.xml) `<parent>` (bumped from `3.3.0` by Dependabot #132, 2026-05-16) |
-| Spring AI         | `1.1.6`             | [`pom.xml`](pom.xml) `<spring-ai.version>` (BOM import)                |
-| Flyway head       | `V400`              | V399 persists terminal operation intents; V400 adds bounded pre-dispatch recovery and quarantine; next V401 |
-| Frontend          | `2.0.0`             | [`frontend/package.json`](frontend/package.json) `"version"`           |
-
-`VERSION` and `Version` are kept identical by hand; the project's own conventions reference `Version` as the source of truth. The frontend ships under the same release stamp as the backend.
-
-### Strict sandbox toolchain (dark)
-
-`docker/sandbox-toolchain/Dockerfile` builds the representative Java/Maven, Node/Prettier,
-Python/Black, Go, and Rust toolchain from a digest-pinned Debian base. Run
-`docker/sandbox-toolchain/validate.sh` for the local no-network, non-root, read-only-root build
-matrix. A deployment must push the validated image and configure the resulting immutable
-`repository@sha256:...` reference. This does not enable sandbox execution:
-`sandbox.lifecycle.enabled`, `sandbox.runtime.dispatch.enabled`,
-`sandbox.runtime.container-strict-v1.enabled`, and
-`sandbox.runtime.toolchain-readiness.enabled` remain independently default-off.
-The bind-mounted run workspace must also be owned and writable by the configured non-root
-`executespec.sandbox.runtime-uid:runtime-gid` (defaults `65532:65532`). Provisioning verifies the
-existing tree and refuses it without changing permissions; the deployed service/workspace
-ownership must be aligned explicitly before rollout.
-When strict sandbox command routing is enabled, `backgroundJob` rejects new starts rather than
-launching a host process outside the container boundary; status/log/kill remain available so a
-runtime-policy transition cannot strand a process that was already running.
-The local validation script also exercises non-root identity, Docker-socket/host-path denial, zero
-capabilities, cgroup ceilings with swap disabled, no-exec `/tmp`, metadata-network denial, and the advertised compiler
-toolchains. This is not deployment readiness: a cold Maven build currently cannot resolve project
-dependencies under `--network none`, so a digest-pinned dependency cache or governed artifact
-egress is required before the four runtime flags can be enabled.
-
-## Stack at a glance
-
-| Layer               | Tech                                                                                | Source of truth                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| JVM / language      | Java 21                                                                             | [`pom.xml`](pom.xml) `<java.version>`                                            |
-| Framework           | Spring Boot 3.5.14 (Web, Data JPA, Security, OAuth2 client, Mail, Thymeleaf, Actuator, AOP, Validation, Retry, Data Redis) | [`pom.xml`](pom.xml) deps 1, 5, 14–20, 30, 36–39, 60 |
-| LLM SDK             | Spring AI 1.1.6 starters for Anthropic, OpenAI, Google GenAI                        | [`pom.xml`](pom.xml) deps 2–4                                                    |
-| LLM auto-config     | Provider auto-configurations disabled in favor of manual `AgentModelConfig` beans   | [`src/main/java/com/navneet/executespec/ExecutespecApplication.java`](src/main/java/com/navneet/executespec/ExecutespecApplication.java) |
-| Database            | PostgreSQL/pgvector (local container in the current single-VM deployment; managed Cloud SQL remains supported), Flyway migrations head V400 | [`pom.xml`](pom.xml) deps 6–8, `src/main/resources/db/migration/` |
-| Cache / lock        | Redis (Lettuce), ShedLock 7.7.0                                                     | [`pom.xml`](pom.xml) deps 30–32                                                  |
-| Auth                | JJWT 0.13.0 + Spring Security OAuth2 client (Google, GitHub)                        | [`pom.xml`](pom.xml) deps 14–18                                                  |
-| Billing             | Stripe 32.1.0, Razorpay (HMAC), invoice PDFs via OpenPDF 2.0.3 + flying-saucer 9.4.0 | [`pom.xml`](pom.xml) deps 21–22, 56; HMAC via commons-codec 1.22.0 (dep 35)     |
-| GCS / Cloud Run     | google-cloud-{storage, run, build, artifact-registry, resourcemanager, secretmanager}; xDS and Conscrypt transitive clients are excluded from the fat JAR | [`pom.xml`](pom.xml) deps 23–29                                                |
-| Code intelligence   | JGit 6.9.0, JavaParser 3.28.1 (no symbol-solver), Tika 3.3.0 with document/code/text/PDF/Microsoft parsers retained and unsupported Apple/audio/CAD/crypto/font/image/mail/news/OCR/package/webarchive/XMP parsers excluded | [`pom.xml`](pom.xml) deps 9–11, 59                                              |
-| Observability       | Micrometer + OTel bridge + Prometheus registry; structured JSON via logstash encoder; local Grafana / Prometheus / Tempo stack | [`pom.xml`](pom.xml) deps 40–48, [`observability/docker-compose.yml`](observability/docker-compose.yml) |
-| Build               | Maven; Spotless 3.4.0 (google-java-format 1.22.0), JaCoCo 0.8.14, Surefire (excludes `e2e,integration,chaos`) | [`pom.xml`](pom.xml) `<build><plugins>` |
-| Frontend            | React 18.3, React Router 6.22, Zustand 4.5, TypeScript 5.3, Tailwind CSS 4.3, Vite 5.1 | [`frontend/package.json`](frontend/package.json), [`frontend/vite.config.ts`](frontend/vite.config.ts), [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts) |
-| Charts / UI         | Monaco editor 4.7, d3 7.9, recharts 2.12, framer-motion 11, lucide-react, cmdk, Radix Tabs, react-markdown + remark-gfm | [`frontend/package.json`](frontend/package.json) |
-| Frontend telemetry  | OpenTelemetry web SDK 2.7 + auto-instrumentations 0.63 + OTLP HTTP exporter; PostHog | [`frontend/package.json`](frontend/package.json), [`frontend/src/main.tsx`](frontend/src/main.tsx) |
-| Typography          | JetBrains Mono (variable) — `font-family: 'JetBrains Mono', ui-monospace, ...` for both `sans` and `mono` aliases | [`frontend/tailwind.config.ts`](frontend/tailwind.config.ts), [`frontend/src/index.css`](frontend/src/index.css) |
-| CI                  | GitHub Actions: `lint.yml` on PRs to `dev`/`main`; `deploy.yml` on push to `dev`/`benchmark` plus manual protected `prod` dispatch. Deploy reconciles an atomic source/artifact/attempt host tuple, verifies the healthy JVM's startup tuple, then generation-CAS-publishes `CURRENT_SHA`. | [`.github/workflows/lint.yml`](.github/workflows/lint.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
-| Cloud               | GCP us-east4 — private 4-vCPU/8-GiB GCE VM, local PostgreSQL + Redis, Cloud NAT, and Cloudflare Tunnel at `app.executespec.ai`; Cloud Run for on-demand previews; Workload Identity Federation for deploy auth | [`infra/SINGLE_VM.md`](infra/SINGLE_VM.md), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) |
-
-Browser session hydration is fail-visible: protected routes retain a valid session across a
-transient `/auth/me` failure and show an explicit Retry action instead of an indefinite loading
-screen. Automatic cookie refresh uses the same bounded 30-second transport deadline as other API
-requests.
-
-Python previews resolve bounded nested application packages: a FastAPI app declared in
-`app/main.py` is launched as `app.main:app` for both VM/Docker and Cloud Run preview commands.
-
-### Current model catalog
-
-The 2026-07-24 provider-catalog refresh adds account-visible Claude Fable 5, GPT-5.6
-Sol/Terra/Luna, Gemini 3.6 Flash, Gemini 3.5 Flash-Lite, Gemini 3.1 Flash-Lite, and the latest
-curated OpenRouter agentic routes (Kimi K3, Qwen 3.7 Plus/Max, Grok 4.5). Native DeepSeek V4
-Pro/Flash remains current. The Fireworks allow-list now contains only the four serverless coding
-models its live account catalog actually returns: DeepSeek V4 Pro, Kimi K2.6, GLM 5.1, and GLM
-5.2; persisted removed IDs resolve to a live replacement.
-
-New frontier routes are selectable but not tier defaults until they pass ExecuteSpec's
-output-quality evaluation. Models with stepped long-context pricing use the conservative upper
-rate so managed-AI usage cannot be undercharged. Existing tier defaults remain benchmark-based: Sonnet 5, GPT-5.4,
-Gemini 3.5 Flash/3.5 Flash-Lite, native DeepSeek V4, and the surviving Fireworks routes.
-
-## Repository layout
-
-```
-.
-├── pom.xml                       Maven build descriptor (parent SB 3.5.14, Spring AI 1.1.6 BOM)
-├── VERSION / Version             Single-line version stamps (2.0.0)
-├── lombok.config                 Stop-bubbling + Spring @Qualifier propagation for constructor injection
-├── .env.template                 Copy-to-.env env var template (LLM keys + integrations)
-├── src/main/java/com/navneet/executespec/
-│   ├── ExecutespecApplication.java  Spring Boot entry; excludes provider auto-configs
-│   ├── agent/                    OutlinePlanner, WorkerAgent, LlmRouter, SmartClassifier, ...
-│   ├── harness/                  SequentialExecutor (per-task tier-routed Worker + smoke build)
-│   ├── reviewer/                 ReviewerAgent (general + wiring passes)
-│   ├── tool/                     11 tools (readFile, writeFile, editFile, shell, gitDiff, ...) + ToolRegistry
-│   ├── integration/              RunOrchestrator + scm/ScmPushService
-│   ├── codeintel/ memory/        Project workbench: codemaps, architecture pipeline, RAG, ledger
-│   ├── prreview/ codereview/ finding/  PR Review + Code Review agents + four-surface autofix chokepoint
-│   ├── billing/ auth/ ratelimit/ Tier + payment + JWT + scoped SSE token paths
-│   ├── swebench/ programbench/   Cleanroom container adapters for the patch-mode pipeline
-│   ├── agentsession/             Durable CLI/VS Code agent-session protocol (V240, /api/agent/*)
-│   └── ... (78 package roots total under com.navneet.executespec)
-├── src/main/resources/
-│   ├── application.yml           Single source of truth for model matrix, provider routes, pricing, failover
-│   ├── db/migration/             Flyway V*.sql (head V400; next V401; 386 migration files; immutable post-apply)
-│   ├── prompts/                  External LLM prompts (assembled by PromptAssembler)
-│   └── static/                   Vite build output served by Spring Boot
-├── src/test/java/                Unit + ArchUnit guard tests (e.g. AccessGuardCoverageTest)
-├── frontend/
-│   ├── package.json              React 18, Vite 5, Tailwind 4, TS 5.3
-│   ├── vite.config.ts            `@` → `./src`, dev port 5173, proxies /api → http://localhost:8080
-│   ├── tailwind.config.ts        Var-driven theme (CSS custom properties), class-based dark mode
-│   ├── public/                   logo-{192,512}.png, manifest.webmanifest, sw.js (PWA shell cache)
-│   └── src/
-│       ├── App.tsx               Top-level routes + LegacyRedirect for retired /v3, /v4, /signal paths
-│       ├── main.tsx              React entry, OTel init, service-worker registration (prod only)
-│       ├── tokens.css            Graphite + Signal design tokens (:root dark default, [data-theme='light'] overrides)
-│       ├── index.css             Global stylesheet (Tailwind v4, mobile/iOS Safari fixes, component utilities)
-│       ├── console/              Protected web control-plane shell (ConsoleShell + ConsoleHome + ConsoleDecisions)
-│       ├── ide/                  Route-level protected surfaces for runs/projects/org/billing/benchmark
-│       ├── signal/               Public pages (auth/marketing/legal/shared) + AdminPage + shared components reused by the IDE
-│       ├── design-system/        Color primitives + low-level tokens (loaded before tokens.css)
-│       └── hooks/ stores/ lib/ types/  Cross-cutting React + Zustand + API client + telemetry
-├── observability/                Local Prometheus + Grafana + Tempo (docker compose up -d)
-├── .github/workflows/            CI: lint.yml + deploy.yml (dev + benchmark push trigger)
-└── docs/                         All project docs (see "Where to go next")
-```
-
-Note on the frontend tree: the legacy `/v3/`, `/v4/`, `/components/`, and `/pages/` directories under `frontend/src/` were retired in commit `5f5e4aaa`. The protected web chrome is now the **Console** control plane (`console/`); `App.tsx` mounts `ConsoleShell` for every protected route. The old `ide/IdeWorkspace` shell and `localStorage es:console` opt-in path are gone, while `ide/` remains the route-level implementation layer for runs, projects, org settings, billing, benchmark tracking, and related surfaces. The retired Signal chrome's pages were ported then deleted in the 2026-05-23 cleanup, leaving `signal/` with the public pages (auth/marketing/legal/shared), `AdminPage`, and shared components reused by protected surfaces. `App.tsx` keeps a `LegacyRedirect` to absorb bookmarks of the old paths.
-
-## Run it locally
-
-**Prerequisites**
-
-- Java 21 (Temurin recommended). On macOS, `JAVA_HOME=/opt/homebrew/opt/openjdk@21` is the project convention.
-- Maven (or use the wrapper if present).
-- Node.js LTS (matches the `lts/*` pin in CI).
-- Docker (for local Postgres, Redis, and the observability stack).
-- PostgreSQL 14+ and Redis reachable on the defaults (`localhost:5432` / `localhost:6379`) — Flyway will create the schema on first boot.
-- At least one LLM API key. The backend boots without any keys (provider auto-configs are excluded and `AgentModelConfig` degrades gracefully) but any run that needs that provider will fail.
-
-**Backend**
+Install JDK 21, Maven, Node.js, npm, and Docker. Set `JAVA_HOME` to JDK 21; on Homebrew macOS:
 
 ```bash
-cp .env.template .env                      # fill in keys
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # macOS only
-mvn spring-boot:run                        # serves on http://localhost:8080
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 ```
 
-**Frontend (dev mode with HMR)**
+Copy `.env.template` to a local `.env`, replace placeholders, and export the values into the
+process environment using your preferred environment loader. Spring Boot does not automatically
+read a root `.env` file. At minimum, configure a strong `JWT_SECRET`, your selected provider keys,
+and the database credentials. Shared environments also require configured credential encryption.
+
+Start disposable local PostgreSQL/pgvector and Redis:
 
 ```bash
-cd frontend
-npm ci
-npm run dev                                # http://localhost:5173
+export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
+docker compose up -d
+export SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD"
+export JWT_SECRET="$(openssl rand -hex 48)"
 ```
 
-The Vite dev server proxies `/api` to `http://localhost:8080` (overridable via `VITE_BACKEND_URL` to run multiple worktrees side-by-side, per the inline note in [`frontend/vite.config.ts`](frontend/vite.config.ts)).
+The default database is `executespec`, user `postgres`, at `localhost:5432`; Redis is at
+`localhost:6379`. Docker volumes persist database state. Keep the same database password when
+restarting an existing volume; changing the environment does not rotate an initialized database.
 
-The `local` and `dev` profiles converge release-validation gates at startup: goal-decision
-enforcement, verify-before-complete, auto-verification, Ask, and screen rendering are enabled.
-Remote-sandbox lifecycle, dispatch, strict runtime, toolchain readiness, and live-preview network
-access remain disabled and fail closed. The initializer updates only flags already created by
-migrations; a missing required row is logged without inventing configuration or failing startup.
-
-Run submit advanced options include continuation controls: "Confirm model upgrades" maps to `requireConfirmationBeforeExpensiveContinuation`, while "Require benchmark evidence" maps to `requireBenchmarkPriorForAutomaticContinuation`. Web Compose and Project Start send both choices explicitly, so an unchecked control cannot silently inherit a stricter server fallback. Exact model pins still forbid automatic route changes; Enterprise recovery candidates remain limited to effective organization model-matrix cells. An ordered Enterprise recovery ladder is not yet implemented.
-
-`Apply to Run` is temporarily fail-closed. V368 force-disables the legacy direct-mutation path until it uses the same checkpointed correction, evidence invalidation, deterministic validation, read-only review, rollback, and publication-admission lifecycle as approved continuation corrections.
-
-Operator benchmark smokes are disabled by default. For a local/dev SWE-bench run, set `SWEBENCH_ENABLED=true`, `SWEBENCH_OUTPUT_BASE` to a writable directory, and `SWEBENCH_INSTANCES_FILE` to the task JSON; the base configuration binds these controls without requiring the benchmark profile. Keep `SWEBENCH_DEFAULT_PROVIDER=deepseek` for the approved DeepSeek-only smoke lane. The benchmark generation request accepts `absoluteDeadlineEpochMs` and `shutdownReserveMs`; the server tightens that deadline to `SWEBENCH_TASK_WALL_TIMEOUT_MINUTES`, keeps at least 120 seconds for cleanup/result publication, and rejects an unusable deadline before container or provider work.
-
-The authorization-gated paired BUILD qualification is defined by
-`scripts/build-qualification/paired-build-v1.json`. It binds the control/candidate arms to distinct
-release SHAs on one HTTPS host, pins the same held-out spec/evaluator digests and exact
-Anthropic/Sonnet 5 plus OpenRouter/GLM 5.2 routes, and requires accepted-generation evidence, zero
-unresolved generation attempts, a content-addressed export, all held-out tests, and an independent
-archive-bound code review. The control arm is two immutable historical rollbacks and creates no
-fresh run. The candidate arm permits exactly two fresh runs, one per route, capped at $5 each and
-$10 total. `scripts/run-paired-build-qualification.sh --dry-run` performs no login, submission,
-provider call, flag mutation, or deployment. `--execute` additionally requires
-`BUILD_QUAL_AUTHORIZATION_ID`, credentials, the exact candidate SHA, reviewed controls, and a
-proof that `build.shared-code-change-loop.enabled=false` before opening the qualification window.
-The executor then enables the flag once, repeats a positive read immediately before each paid
-submission, and installs EXIT/INT/TERM cleanup that restores and reads back `false`; the cleanup
-receipt is persisted without credentials. It also compares the candidate SHA with the SUPER_ADMIN
-no-store `GET /api/admin/release-identity` response, whose authority is the serving JVM's
-startup-captured source SHA, artifact SHA-256 and deployment-attempt tuple; missing, malformed or
-mismatched identity aborts before run creation.
-Accepted artifacts persist that complete attested tuple, canonical authority and live-read timestamp;
-candidate results are rejected unless the attested SHA equals the frozen candidate release and the accepted attempt
-also contains an observed failure-first result and frozen acceptance checks. The harness never
-leaves the global flag enabled after a normal exit or catchable interruption.
-`scripts/validate-paired-build-results.mjs` refuses an incomplete pair or system score in place of
-the held-out and manual evidence.
-
-Before deployment, `scripts/build-qualification/mixed-binary-schema-matrix.sh` launches packaged
-previous and candidate JARs against real PostgreSQL 16 schemas. Callers provide both expected
-migration heads explicitly; the current candidate verifies the supported V399→V400
-migration, a previous-binary dark start on expanded V400, a fresh V400 boot, and fail-closed
-candidate startup when migrations are deliberately disabled on V399. The evidence also records JAR
-digests, migration heads, the shared-BUILD flag, and before/after control-plane row counts.
-
-`scripts/build-qualification/real-container-command-recovery.sh` repeats the five command crash
-windows against PostgreSQL 16 and the strict Docker toolchain. It kills a live `docker exec`,
-fences late settlement, and launches recovery/teardown and janitor takeover in a separate JVM.
-The evidence bundle hashes the V391 command migration, V392 publication migration, V393 recovery-
-cleanup migration, V394 checkpoint-identity migration, V395 typed-verification migration, V396
-environment-receipt migration, V397 filesystem-saga migration, V398 reconciliation-diagnostic migration,
-V399 terminal-operation-intent migration, V400 bounded-recovery migration, fixture, image,
-test report and log; shared BUILD
-remains false throughout.
-
-`scripts/build-qualification/real-git-publication-recovery.sh` runs the exact prepared-commit
-dispatcher against two real local bare-Git remotes twice. It kills the publisher after the second
-remote ref moves but before settlement, then proves replacement-JVM recovery records
-`INDETERMINATE` and blocks blind replay while preserving the first `PUBLISHED` receipt. This lane
-uses no provider credential and does not replace deployed GitHub/Bitbucket reconciliation.
-
-Before any paid live qualification, run the provider-free mechanism corpus:
+Build the web app before starting the backend:
 
 ```bash
-node scripts/build-kernel-provider-free-qualification.mjs
-node --test scripts/build-kernel-provider-free-qualification.test.mjs
+npm --prefix frontend ci
+npm --prefix frontend run build
+mvn spring-boot:run
 ```
 
-It covers empty Python/REST/TypeScript/frontend builds plus brownfield feature/bug, multi-file,
-migration, multi-task and multi-repository changes. Arm A models one-pass legacy BUILD acceptance;
-arm B models failure-first BUILD with exact rollback and retry from the accepted frontier; arm C
-models PATCH where applicable. The held-out evaluator never reads ExecuteSpec's verified score.
-The current deterministic scripted run is A=30%, B=100%, C=100%, with zero B wrong accepts,
-unresolved attempts, rollback mismatches or PATCH regressions. This is provider-free mechanism
-evidence, not a live-model-quality result. Evidence is written to
-`target/build-kernel-qualification/provider-free-v1.json`.
+Open `http://localhost:8080`. For frontend development, run `npm --prefix frontend run dev` in
+another terminal and use `http://localhost:5173`; Vite proxies `/api` to port 8080.
+OAuth, billing, mail, previews, deployment, and live provider tests require additional credentials
+and setup. The cloud profiles and `infra/` are deployment examples, not a turnkey local setup.
+Applied Flyway migrations must remain immutable.
 
-Live provider fixtures are also fail-closed. Reserve an exact provider/model/run scope with
-`scripts/provider-budget-ledger.mjs`, then boot with the Maven live-test profile and that reservation:
+## Verification
 
 ```bash
-mvn -Plive-llm-test \
-  -Dexecutespec.live-llm.reservation-id="$RESERVATION_ID" \
-  spring-boot:run -Dspring-boot.run.profiles=local
+mvn verify
+npm --prefix frontend test
+npm --prefix frontend run build
+npm --prefix frontend run format:check
+npm --prefix frontend run lint
+python3 scripts/check-public-release.py
 ```
 
-The Spring Boot plugin propagates the profile's safety properties into the forked application JVM.
-Without both the profile and a matching reservation, `LlmRouter` rejects provider dispatch. Reconcile
-or conservatively close the reservation after the test; never reuse it for a different run.
+The default Maven suite excludes tests tagged `e2e`, `integration`, or `chaos`. The integration
+profile requires Docker and its declared external dependencies:
+
+```bash
+mvn -Pintegration test
+```
+
+Provider-backed tests require a separate explicit live-provider opt-in and spend authorization;
+they are not enabled by the commands above. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Live pipeline qualification
 
 The authenticated pipeline E2E is not part of normal `mvn verify`: Surefire excludes the `e2e`
 tag unless `-Pintegration` is explicit. Each live invocation runs exactly one lifecycle scenario
@@ -667,283 +114,28 @@ run's recorded cost or use `close-unknown` to charge the full reserved `$0.10` c
 Missing scenario, UUID, live-test profile, or reservation skips the provider-backed scenario; the
 router independently remains fail-closed.
 
-Operators can set `execution.continuation.low-complexity-worker-start-tier=LIGHTWEIGHT` to start LOW worker tasks on the cheaper tier while preserving automatic step-up; the default remains `WORKHORSE`. Web Compose, web/CLI/VS Code agent confirmation, and legacy spec-chat `submit_run` can send `lowComplexityWorkerStartTier=LIGHTWEIGHT` without setting `modelName`, so it is not a route pin. Run-detail continuation policy evidence shows both the configured and effective LOW start tier, so invalid values that fell back to `WORKHORSE` stay visible.
+## Code map
 
-### Project Chat paid actions
+| Path | Responsibility |
+| --- | --- |
+| `src/main/java/com/navneet/executespec/` | Backend packages and package-local contributor notes |
+| `src/main/resources/prompts/` | Agent prompts and fragments |
+| `src/main/resources/db/migration/` | Forward-only Flyway migrations |
+| `frontend/src/console/` | Protected application shell |
+| `frontend/src/ide/` | Run/project and other route implementations |
+| `frontend/src/signal/` | Public pages and shared UI primitives |
+| `frontend/public/` | Canonical static public assets; Vite copies these into its build |
+| `scripts/` | Verification, evaluation, and operator tools |
+| `docker/` | Generated-code sandbox toolchain |
+| `infra/` | Optional GCP deployment examples and benchmark infrastructure |
+| `observability/` | Optional local metrics/tracing stack |
 
-Project Chat's model-selected tool surface is read-only. Web and CLI/OpenTUI offer three explicit
-human actions—regenerate architecture, generate an EXPLANATION/SETUP document, and run a linked
-repository Code Review. They are buttons/commands, not proposals generated by the chat model.
+Generated web output under `src/main/resources/static/`, local workspaces, captures, and runtime
+reports are ignored. Their source inputs and reproducible tools belong in Git.
 
-Each action first issues a V292 confirmation scoped to the initiating actor, host org, project,
-action, exact provider/model, canonical target, and a hard action budget. Only a SHA-256 token
-digest is stored; the bearer is returned once, kept in client process memory, expires after five
-minutes by default, and is consumed under a PostgreSQL row lock before any side effect. Execution
-uses the action-specific route returned by `GET /api/projects/{projectId}/chat/info`, including
-Enterprise org matrix overrides. It cannot adapt or fail over, including across the asynchronous
-Code Review executor; an unavailable or drifting route returns 503. Usage is attributed to the
-initiating actor while credential resolution remains bound to the host project subject.
+[Documentation](DOCS.md) · [Contributor instructions](AGENTS.md) · [Security](SECURITY.md)
 
-Hard limits apply to the configured token and provider-call counts: architecture **1,000,000 tokens
-/ 64 calls**, generated docs **200,000 / 2**, and code review **300,000 / 2**. The corresponding
-**$10 / $3 / $5** ceilings are reconciled from successful provider usage; the final admitted call
-can cross its dollar ceiling before a later call is denied. A consumed grant is never resurrected
-after failure. Issue, deny, consume, expiry, replay, completion, and failure decisions enter the
-hash-chained `activity_audit`; V292 rejects audit-row UPDATE/DELETE and serializes cross-JVM chain
-appends with a PostgreSQL transaction advisory lock.
+## License
 
-Durable Web document jobs enforce the same generated-doc token/call limits and post-call dollar
-reconciliation per confirmed attempt, and use the short interactive retry envelope. If provider
-dispatch began but delivery remains uncertain and nothing was published, the job requires explicit
-confirmation before replay and shows a stable safe failure code; it does not silently create
-another billable attempt.
-
-### Enterprise LLM usage audit
-
-Managed FREE accounts expose and persist only the configured native DeepSeek Flash route. A
-premium provider/model submitted by an older client is normalized before the run record, plan
-gate, or UI summary is created; dispatch still reauthorizes the same lock. BYOK, TEAM, and
-ENTERPRISE routing remains governed by the customer's key-source and model-matrix policy.
-
-V293 records an immutable write-ahead intent before each known physical provider operation and an
-append-only terminal fact afterward. Retries, failovers, Gemini cache operations, Anthropic forced
-tool fallbacks, token/cache/reasoning usage, actual key source, actor, role, feature, project and run
-causality remain separately attributable. A missing terminal is surfaced as `MISSING_TERMINAL`
-rather than disappearing, and managed-AI credits link to the exact usage event instead of a fuzzy
-provider/model/time match.
-
-ORG_ADMIN users can inspect their own organization in Org settings; SUPER_ADMIN users can select a
-tenant in Admin analytics. JSON and formula-safe CSV exports use an inclusive organization-calendar
-date range plus an explicit IANA timezone. The same guarded API is available at
-`GET /api/admin/analytics/llm-usage-audit` and `/llm-usage-audit.csv`. Provider invoice comparison
-remains explicitly unavailable until a real upstream invoice/request ingestion contract exists.
-
-### Governed public validation reports
-
-New validation-report shares use the project-share lifecycle: SHA-256 bearer storage, seven-day
-default expiry, revocation, access audit, and project/run scope validation. V294 preserves
-historical `/reports/shared/{token}` URLs for a bounded migration grace period while clearing their
-plaintext bearers. A standalone run must be attached to a project before it can mint a public
-report link.
-
-**Local observability (optional)**
-
-```bash
-cd observability
-docker compose up -d
-# Grafana http://localhost:3001  (admin/admin)
-# Prometheus http://localhost:9090
-# Tempo API http://localhost:3200
-```
-
-Prometheus scrapes the Spring Boot app at `host.docker.internal:8080/actuator/prometheus` every 15s; Grafana auto-provisions both datasources and two dashboards (JVM + HTTP, and ExecuteSpec product/pipeline metrics).
-
-## Build / test / lint
-
-**Backend**
-
-```bash
-mvn compile -q                  # quick compile
-mvn verify -q                   # full gate: spotless:check + JaCoCo report + Surefire (unit tests only)
-mvn spotless:apply              # auto-format to google-java-format 1.22.0
-mvn -Pintegration verify        # opt-in integration tests (e2e, integration, chaos groups)
-```
-
-`mvn verify` runs Spotless in `check` mode (the same gate CI enforces in `lint.yml`) and binds JaCoCo so a coverage report lands under `target/site/jacoco/`. Surefire excludes the `e2e`, `integration`, and `chaos` JUnit groups by default; pass `-Pintegration` (or the equivalent profile your CI uses) to run them.
-
-For provider-free protected-Web functional coverage, run
-`scripts/run-web-provider-free-functional.sh`. It launches disposable PostgreSQL and Redis
-containers, starts the backend with the isolated `web-qa` profile, creates a one-run QA identity,
-and drives the real React UI through login, workspace creation, run tabs, failure recovery, plan
-gate rendering, and fixture-only lifecycle transitions. The profile disables live LLM dispatch and
-does not activate the local/dev feature-flag initializer; the harness also compares a digest of all
-feature-flag values and audit metadata before and after the browser run. Browser session creation
-uses the real provider-free backend contract and its exact session is included in fixture cleanup.
-The fixture assigns the disposable user an unusable DeepSeek readiness marker solely so real project
-create/delete policy can be exercised. Live dispatch remains disabled. Browser-only cleanup removes
-the marker; a combined browser/CLI pass retains it between those phases, then destroys the database.
-Frontend, browser, backend, and optional CLI child processes receive purpose-specific allowlisted
-environments; the harness never reads a credential file and destroys its disposable services on
-exit. This proves deterministic browser contracts, not provider-backed Ask answers, screen
-generation, sandbox isolation, or generated-code quality.
-
-Set `WEB_QA_CLIENT_ROOT` to an absolute standalone client-checkout path to run the CLI behavioral
-suite against that same disposable backend and identity after the browser checks. The client harness
-mints and revokes its own PAT in guaranteed cleanup, removes its temporary config/workspaces, and
-removes the disposable email/password plus unrelated credentials from all child processes. Live-web
-and update checks are disabled for that optional pass. The variable is optional; no client checkout
-path is hardcoded.
-
-Validation evidence is fail-closed: code-changing tasks require an admitted baseline-to-final product
-diff attributable to that task, and persisted executable verification distinguishes `PASSED`,
-`BUILD_ONLY`, `FAILED`, and `UNAVAILABLE`. The Web evidence ledger exposes those deterministic facts;
-the headline score is a summary and must not be treated as independent proof.
-Standalone existing-repository runs persist the actual checked-out branch and immutable starting
-commit even when the default branch was implicit; root-workspace Files and change evidence use
-that baseline, while Render uses the admitted repository layout. Restored project Preview/Render
-use their nested `repos/<name>` content even though archives omit nested Git metadata; change
-evidence and required iteration copies fail closed when the original nested Git proof is
-unavailable. Project architecture and generated-doc
-admission return structured provider/matrix error codes, generated EXPLANATION workflow guidance is
-rebuilt from exact-revision setup evidence, and unbuilt semantic indexes are shown as unmeasured
-rather than misleading `0/0` coverage.
-Post-run Ask follows the same rule: configured build success is not test success, missing concrete
-test counts remain an explicit verification gap, and provider tool-protocol markup is suppressed
-rather than displayed to customers. A post-run Ask response stopped by `length` / `max_tokens`
-returns `complete=false` with `incompleteReason=PROVIDER_OUTPUT_LIMIT`; the web client retains the
-partial text but renders an explicit incomplete/retry notice instead of treating it as a complete
-answer. Web/CLI agent answers have bounded 8,192-token direct and
-4,096-token final-synthesis ceilings and visibly warn when a provider stops for output length.
-System-map refresh is a durable asynchronous job: the write-gated POST returns 202, identical
-compatible requests reuse one stable job id, and the web console resumes/polls persisted state
-without holding a provider-duration HTTP request open. Admission performs only database/config
-work. PREPARING snapshots every linked repository at an exact revision using that link's credential
-subject, binds separate exact PLANNING repo-map and project-synthesis contexts, and
-never persists SCM credentials. Paid execution is not automatically replayed after an expired
-lease: uncertain work becomes `NEEDS_CONFIRMATION`. Generated artifacts remain invisible until one
-transactional publisher verifies the database lease/fence, unchanged source revisions, and staged
-digest, then saves every canonical artifact and marks the job SUCCEEDED atomically. Cancellation,
-deadlines, and abnormal provider finish reasons fail closed; truncated provider prose is never
-published. Other classified provider failures may use an explicit WARNING-quality deterministic
-fallback rather than being mislabeled as provider success. Async refresh deliberately
-suppresses customer-repository codemap PR publication until that external side effect has its own
-idempotency/fencing contract.
-`NEEDS_CONFIRMATION` blocks ordinary retries for web, CLI, and API callers; only the explicit
-confirm-retry action by the original requester can requeue the same durable identity, and every
-confirmation appends an immutable actor/time receipt. The latest-job read restores terminal truth
-after reload. Per-repository regenerate intent also enters this project-wide boundary so it cannot
-race a whole-project refresh.
-Compare History renders the
-actual authorized document-content diff, Timeline omits invalid timestamps instead of fabricating
-epoch durations, and the provider-key screen exposes OpenRouter's organization-scoped status and
-route to org settings.
-
-Generated EXPLANATION/SETUP documents use provider-neutral external prompts and a fair 60k source
-budget across architecture plus every linked repository. Each repository section must come from the
-codemap at the exact SHA captured by that architecture version; source drift fails closed. Every
-abnormal provider finish reason is rejected. Required structure, balanced code fences, secrets, and
-tool-protocol leakage are checked before save, while reads/downloads re-scan retained legacy
-documents. SETUP publication deterministically rebuilds the complete operational guide from exact
-setup authority: clone targets and projected commands are repository-scoped and fenced one command
-at a time, while unproven environment, startup-order, health, or troubleshooting details are stated
-as unknown. Provider-authored setup commands are never published. EXPLANATION output also fails closed on concrete symbol-to-symbol call edges and
-inactive/unused/stub/dead-code claims, plus directional Mermaid edges, that declaration-only
-codemaps cannot prove. Relationship euphemisms such as works/interacts/collaborates/depends/uses and
-symbol-local hinted/placeholder/prototype/candidate labels are covered by the same narrow gate.
-Unsupported prose is deterministically reduced to declaration-only symbol notes before validation;
-any prose sentence containing two or more distinct known codemap symbols is conservatively treated
-as an unproven relationship regardless of verb, while single-symbol inventory remains unless it
-claims reliance, a hinted mechanism, or incomplete integration. Directional Mermaid/sequence
-blocks are replaced by a non-directional evidence-limit note. The provider retry is reserved for
-remaining structural failures, and cached output is revalidated under the same rule before reuse.
-Provider transport runs without a database
-transaction; only the exact-source recheck,
-shared project publication lock, cache recheck, version allocation, save, and pruning use a short
-transaction.
-
-**Frontend**
-
-```bash
-cd frontend
-npm run build                   # tsc strict compile + vite build → ../src/main/resources/static
-npm run format                  # prettier --write
-npm run format:check            # prettier --check (CI gate)
-npm run lint                    # eslint (--max-warnings 9999; severity gated via eslint config)
-npm run lint:fix                # eslint --fix
-```
-
-`npm run build` writes the production bundle into `src/main/resources/static` with `emptyOutDir: true`, so it wipes and rebuilds the Spring Boot static folder. Run `mvn package` afterward to embed the bundle in the JAR. The fat JAR intentionally prunes unused heavyweight transitive dependencies from Spring AI Anthropic, Tika, and Google client libraries; keep `DocumentExtractorTest` green when changing parser exclusions.
-
-## Where to go next
-
-The long-form documentation now lives in the central docs repo — see [`DOCS.md`](DOCS.md):
-
-→ **https://github.com/navneetprabhakar/executespec-docs/tree/main/backend** — architecture · product · operations · security · design · plans · ADRs · reason-logs · business · competitive analysis · reference.
-
-The REST API contract is maintained in the central docs repository at
-[`backend/reference/openapi.yaml`](../executespec-docs/backend/reference/openapi.yaml).
-
-## Worker safety ceilings
-
-Workers stop authorizing provider/tool turns after configured live task ceilings are observed. The
-per-solve dollar cap is task-scoped. `worker.best-effort-max-task-cost-usd` and
-`worker.best-effort-max-task-total-tokens` optionally stop task spend and input+output tokens in the
-current JVM; both default to `-1` (disabled), and Terminal-Bench is exempt from these defaults.
-Before a worker provider call, ExecuteSpec also reserves a conservative estimate of the complete
-next call against the run and task cost caps. Admission runs after managed routing and on failover,
-so it prices the effective provider/model rather than an earlier requested route. The estimate
-assumes uncached input with headroom and the requested maximum output; it reduces material one-call
-overshoot but is not an exact invoice guarantee because provider tokenization and cache results
-arrive after the response. Missing model pricing falls back to observed-spend enforcement rather
-than being treated as free. These are
-safety stops, not durable authorization boundaries: restart recovery does not yet hydrate
-`RunCostTracker` from `run_step_usage`. A successful build/test/shell check counts as progress
-once after a workspace mutation, but repeated verification against unchanged files cannot keep a
-worker alive indefinitely.
-
-## Required environment variables
-
-Copy [`.env.template`](.env.template) to `.env` and fill in values. Names below match the template verbatim.
-
-**Required**
-
-| Variable               | Purpose                              |
-| ---------------------- | ------------------------------------ |
-| `ANTHROPIC_API_KEY`    | Anthropic provider (Claude)          |
-| `OPENAI_API_KEY`       | OpenAI provider (GPT)                |
-| `GOOGLE_API_KEY`       | Google GenAI provider (Gemini; retained for operator regression while buyer-facing Gemini is temporarily darked) |
-| `GITHUB_OWNER`         | Default GitHub owner / org           |
-| `RAZORPAY_KEY_ID`      | Razorpay test or live key            |
-| `RAZORPAY_KEY_SECRET`  | Razorpay key secret                  |
-| `RAZORPAY_WEBHOOK_SECRET` | HMAC for webhook verification     |
-| `RAZORPAY_WEBHOOK_URL` | Webhook callback URL                 |
-
-The application boots without LLM keys (provider auto-configs are excluded; manual beans degrade gracefully), but any pipeline that needs a missing provider will fail. The template foregrounds Razorpay because the dev default gateway is Razorpay; prod default is Stripe (toggle via `BILLING_DEFAULT_GATEWAY=stripe`).
-
-The Spring AI provider settings resolve the variables above (and the optional `OPENROUTER_API_KEY`,
-`DEEPSEEK_API_KEY`, and `FIREWORKS_API_KEY`) at startup; do not edit provider keys into the tracked
-YAML configuration.
-
-Native DeepSeek thinking/tool calls use a 300-second read window by default (`DEEPSEEK_READ_TIMEOUT_SECONDS`);
-OpenAI, OpenRouter, and Fireworks retain the shared 120-second OpenAI-wire default.
-
-**Optional**
-
-| Variable                                                                                   | Default / notes                                                       |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `POSTGRES_HOST` / `POSTGRES_PORT` / `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`  | `localhost` / `5432` / `executespec` / `postgres` / `postgres`        |
-| `REDIS_HOST`                                                                               | `localhost`                                                           |
-| `CRYPTO_LOCAL_KEY` / `CRYPTO_GCP_SECRET_RESOURCE`                                          | Shared dev/prod/benchmark require one. Local key is Base64 AES-256; GCP resource must end in immutable `/versions/<number>` (never `latest`). |
-| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET`                   | Required when `BILLING_DEFAULT_GATEWAY=stripe`                        |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`                                    | Enables Google OAuth2 login                                           |
-| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`                                    | Enables GitHub OAuth2 login                                           |
-| `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` / `SLACK_SIGNING_SECRET`                         | Enables Slack integration                                             |
-| `DEPLOYMENT_RECOVERY_SAFE_ENABLED`                                                         | Explicit prod attestation required to expose deployment creation; defaults to `false` |
-| `EXECUTESPEC_MIN_CLI_VERSION`                                                              | Oldest supported CLI/VS Code protocol version advertised on API responses; defaults to `1.0.0` |
-| `SANDBOX_IMAGE` / `SANDBOX_WORKSPACE_ROOT`                                                 | Strict BUILD sandbox image and host root. Release qualification requires an immutable `@sha256:` image and absolute root. |
-| `EXECUTESPEC_CONTROL_PLANE_GRAPH_SHA256` / `EXECUTESPEC_CONTROL_PLANE_GRAPH_MANIFEST_SHA256` | Exact code-only Graphify artifacts generated from the deployed source SHA. The deploy workflow stamps both into the running JVM. |
-| `EXECUTESPEC_GRAPHIFY_VERSION` / `EXECUTESPEC_GRAPHIFY_SQL_PARSER_VERSION` / `EXECUTESPEC_GRAPHIFY_HCL_PARSER_VERSION` | Pinned extractor/parser provenance for SQL/HCL graph coverage. |
-
-Release safety: production and benchmark profiles do not deliver outbound integration lifecycle
-updates because the current adapters are non-idempotent, best-effort append operations. Deployment
-creation is also hidden and returns 503 unless durable external-resource recovery has been
-explicitly attested with `DEPLOYMENT_RECOVERY_SAFE_ENABLED=true`; existing deployment read,
-rollback, and destroy operations remain available for cleanup.
-
-The SUPER_ADMIN-only `GET /api/admin/control-plane-release-attestation` endpoint exports one
-`Cache-Control: no-store`, digest-bound release tuple: running source/JAR identity, all applied
-Flyway versions and checksums, full required PostgreSQL trigger/index definitions, persisted versus
-process-effective control flags, protocol mode, sandbox image/mount/limit configuration, and graph
-provenance. `evidenceComplete` and `safeDarkState` are separate: an exact snapshot can be complete
-while shared BUILD is enabled, but it is no longer a dark qualification state. Use
-`scripts/build-qualification/capture-control-plane-release-attestation.sh` to capture and validate
-the deployed tuple against expected immutable hashes. A source checkout or migration file is not
-deployed-release evidence. Deployments also compare the code-only graph of the currently serving
-source SHA with the candidate. Any control-plane node or edge addition/removal fails before deploy
-unless `qualification/control-plane-graph-review.json` carries the exact semantic graph hashes,
-diff digest, independent reviewer, timestamp, impacted-area coverage, and a substantive rationale;
-the failed workflow retains a review template with the graph artifacts.
-| `APP_SURFACE_RETURN_URL`                                                                   | Browser OAuth callback URL (e.g. `http://localhost:5173/auth/callback`) |
-| `DASHBOARD_URL`                                                                            | Dashboard URL used in Slack and notification links                    |
-
-Additional environment variables consumed at runtime (cookies, CORS, mail, preview engine, OTel) are set per-environment by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) (`env-patch.sh`) rather than committed to the template.
+Copyright 2026 Navneet Prabhakar. Licensed under [Apache License 2.0](LICENSE).
+Third-party dependencies retain their respective licenses.

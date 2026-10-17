@@ -225,7 +225,6 @@ class GodClassLineCeilingTest {
    */
   private static final Set<String> PRE_EXISTING_OVERSIZED_CLASSES =
       Set.of(
-          "com/navneet/executespec/agent/ConversationAgent.java",
           "com/navneet/executespec/agent/GeminiNativeToolClient.java",
           "com/navneet/executespec/agent/LlmRouter.java",
           "com/navneet/executespec/agent/SmartClassifierAgent.java",

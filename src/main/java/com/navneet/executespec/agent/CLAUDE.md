@@ -71,8 +71,7 @@ Anthropic transports are not written; their flags are placeholders.
 compatibility forms, removes zero-width delimiter tricks, strips cross-label delimiters, and
 neutralizes Base64-encoded boundary closers. Repository, document, memory, report, build, diff,
 tool-derived, and user-controlled payloads must remain `UserMessage`/tool evidence; only static
-role/tool/output policy belongs in `SystemMessage`. Legacy post-run conversation and suggestion-plan
-paths now follow that separation as well.
+role/tool/output policy belongs in `SystemMessage`. The active run chat and project chat paths follow that separation.
 
 > Last reviewed: 2026-07-13 (ExecuteSpec 2.0 release track).
 
@@ -294,7 +293,6 @@ fails closed; unrelated entities' generic `id` fields are never conflated.
 | `requirement/RequirementIrDocument.java` + compiler/validator/codec + `entity/RunRequirementContract` + binding/evidence services | RI-P1 schema-first contract. V345 adds the immutable exact-source/exact-plan artifact, V346 exact binding, V347 atomic gate opening, and V352 permits an exact structurally valid BLOCKED artifact to open a visible pending ENFORCED gate while approval remains restricted to BOUND/READY/zero blockers. `RequirementIrApprovalCompatibilityRegistry.projectFrozenVersion` validates canonical identity, persisted summary and structure before returning a version-neutral secret-free projection; frozen V1 validation deterministically adds any derived blocker codes missing from an older persisted issue ledger so the approver still sees why approval is unavailable. It never exposes the retained wire codec. `RequirementGateEvidenceService` cross-checks run, gate, contract, source, plan, artifact, and bound identities for guarded run/execution reads and fails closed on corruption or unsupported versions. Pending schema-v1 approvals still route through the frozen V1 wire DTO/validator. Enforcement remains inactive by default and no provider call or prompt mutation occurs. |
 | `PlannerOutputUtils.java` | Static helpers: `parsePlanFromArgs`, `validatePlan` (Validation v3 Pillar 1), `salvagePlanFromText` (Gemini pseudo-code recovery), `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`, `truncate`. |
 | `CompleteTaskTool.java` | Native termination tool — the worker calls it as a tool to end the loop. |
-| `ConversationAgent.java` | **Legacy** chat copilot + the live `generateSuggestionPlan` (Apply-to-Run mini-plan). Both text paths use `LlmRouter.callText`; suggestion-plan generation requests `LlmRequest.PromptCacheStrategy.SYSTEM_ONLY` so Anthropic retains its stable-system-prompt cache behavior. The live post-run **chat** is `chat/ChatService` (LlmRouter + read-only `chat/RunChatTools` tool loop since RL-2026-05-047), NOT this `chat()` method. |
 | `CostEstimator.java` + `RunCostEstimate.java` | Pre-plan cost estimate. V2 path uses `RunCostTracker.estimateRunTierAware` (see `cost/`). |
 | `ApiKeyResolver.java` | Resolves API keys: user → org → system fallback. V237 adds user/org DeepSeek and Fireworks key lanes (`app_user.*` + `org.*`) alongside Anthropic/OpenAI/Gemini and org-only OpenRouter. `isOwnKeysMode(userId)` returns true when org is `OWN_KEYS` (drives the BYOK cost-cap exemption). |
 | `RunKeyStore.java` | **Deleted 2026-07-19.** The unused JWT-secret-derived Redis credential cache was removed; V282 dispatch reloads current credentials by exact tenant context. |
@@ -310,7 +308,7 @@ fails closed; unrelated entities' generic `id` fields are never conflated.
 |------|--------|
 | PLANNING | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
 | WORKHORSE | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
-| LIGHTWEIGHT | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator, **ToolOutputCompactor** (in `tool/`, RL-2026-05-052) |
+| LIGHTWEIGHT | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, TestReportGenerator, **ToolOutputCompactor** (in `tool/`, RL-2026-05-052) |
 
 ## Patterns
 
@@ -333,3 +331,10 @@ fails closed; unrelated entities' generic `id` fields are never conflated.
   `GET /health`; normalizing inline-code slash spacing must never collapse that to `GET/health`
   because the exact source-route gate would then reject the synthesized plan before worker spend.
 - **Prompts** in `src/main/resources/prompts/*.md` plus active `.txt` prompts loaded by specific non-tool agents. Dead rollback archives (`planner.v*.txt`, legacy `planner.txt`, `triage.txt`, `reviewer-v2.txt`) were removed in the 2026-07-02 prompt-audit cleanup; rollback uses `PromptAuditEntry.previousContent` and dynamically-created backups for live prompt files, not inert classpath archives.
+
+## Public cleanup (2026-10-17)
+
+The unreferenced `ConversationAgent` service and its sole-use
+`ApplySuggestionTooLargeException` are removed. No production caller or route referenced that
+service. Active post-run Ask remains `chat/ChatService`; `/api/conversation` still uses
+`ConversationController` and its shared `conversation-system.md` prompt. The prompt is retained.

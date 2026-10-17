@@ -255,3 +255,19 @@ scripts/model-sample-results/raw-*/
 
 # Transient web-agent release smoke captures (founder disposition 2026-07-19: transient, not evidence)
 scripts/web-agent-release-results-dedicated-*/
+
+# Local agent work, generated evidence, and private publication review
+/.codex-work/
+/output/
+/outputs/
+/src/main/resources/static/
+/scripts/web-agent-release-results/
+/scripts/web-live-recovery-results/
+/scripts/test-resilience-results/
+
+# Terraform plans and credential containers
+*.tfplan
+**/tfplan
+**/tfplan-*
+*.p12
+*.pfx

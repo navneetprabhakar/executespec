@@ -1,0 +1,26 @@
+name: Repository hygiene
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check tracked artifact boundaries
+        run: python3 scripts/check-public-release.py
+      - name: Test repository guard
+        run: python3 -m unittest discover -s scripts -p test_public_release_guard.py
+      - name: Scan credentials
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

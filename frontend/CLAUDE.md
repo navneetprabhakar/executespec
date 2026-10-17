@@ -461,3 +461,11 @@ Before/after evidence for the pass lives outside the repo in `ux-gallery/` (92 p
 - **PR Review autofix + Tech-debt fix + Code Review autofix** wired through `FindingPatchSubmitter` in the backend; UI dispatch buttons in their respective panels.
 - **External project sharing UI** — invite popover + share-link popover on ProjectMembersPanel + public `Shared*Page` components.
 - **VerdictPill rollout** — numerics on ValidationReportPanel / ScoreCard / SignalBreakdown demoted to disclosure; pill leads.
+
+## Public-source cleanup (2026-10-17)
+
+`frontend/public/` is the sole source of public static assets. Vite copies them into the ignored
+`src/main/resources/static/` build tree. The unused Radix Tabs, class-variance-authority, cmdk,
+d3, framer-motion, qrcode.react, recharts, and @types/d3 dependencies are removed after an import
+inventory; no active route or shared primitive imports them. Generated audit/result captures are
+local artifacts rather than application sources.

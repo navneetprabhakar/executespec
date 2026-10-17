@@ -1,590 +1,73 @@
-# Project: ExecuteSpec
-
-> This file is read by Claude Code at session start. Keep it accurate.
-
-**Version:** `2.0.0` ([`Version`](Version)). Current worktree migration head: **V371**; next allocatable migration **V372**, with **357 migration source files**. V351 adds the dormant per-operation LLM attempt-fencing foundation; V360–V364 add the brownfield, validation-generation, command/workflow, uncertain-document-retry, and continuation-approval trust boundaries; V365 bounds stale continuation-receipt crash recovery; V366 persists exact score-zero causality; V367 binds validation reports to runtime-surface applicability; V368 disables legacy Apply-to-Run until transactional correction is proven; V369 persists crash-recoverable correction authority; V370 corrects correction-attempt digest column types; V371 persists skipped-test counts. `requirement.ir.gate.mode` remains `LEGACY`. Default branch: `main`. Dev environment: `dev.executespec.ai`.
-
-Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
-
-## Architecture (5-minute orientation)
-
-- **Backend:** Java 21, Spring Boot 3.5, Spring AI 1.1.6, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
-- **Frontend:** React 18, Vite 5, Tailwind CSS 4, TypeScript 5.3. **Console** (`frontend/src/console/`) is now the only protected web-app shell (RL-2026-06-027): `App.tsx` mounts `ConsoleShell` for every protected route, `/home` renders `ConsoleHome`, `/decisions` renders `ConsoleDecisions`, and the old `localStorage es:console` gate plus `IdeWorkspace` shell are gone. The VS Code-style `frontend/src/ide/` package remains the route-level implementation surface for runs, projects, billing, org settings, benchmark tracking, etc., while the actual in-editor IDE metaphor belongs to the VS Code extension. Protected routes lazy-load the heavy admin/discovery/billing/org/legal chunks so the run loop stays in the entry path. The production **Signal** chrome was retired and its pages were ported IDE-native then **deleted in the 2026-05-23 cleanup** (App.tsx's dead `ide ? Ide : Signal` ternaries collapsed + the `const ide` flag dropped; `Shell.tsx` + 22 orphaned pages removed). `frontend/src/signal/` now holds only the standalone **public** pages (auth/marketing/legal/shared + `AdminPage` for `/admin/*`) plus shared `components/` + `signal.css` reused by protected surfaces. The legacy V2 sidebar + V3 top-bar chromes (`components/`, `pages/`, `v3/`) were **deleted** (commit `5f5e4aaa`) — only `signal/`, `ide/`, `console/`, `hooks/`, `lib/`, `stores/`, `types`, `design-system/` remain under `frontend/src/`.
-- **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
-- **Codebase shape:** 78 Java package roots / major package groups under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). Current source includes 107 REST controller classes, `agentsession/` for cross-surface agent sessions, the committed `repositoryintel/` read-only evidence port, and the provider-free `repositoryexplorer/` selection/bundle contract. Frontend ~75K LOC.
-
-### V2 pipeline (the only execution path)
-
-```
-RunOrchestrator
-  ├─ SmartClassifierAgent (LIGHTWEIGHT)            classify spec: SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY
-  ├─ OutlinePlannerAgent (PLANNING)                emit Plan via submitPlan tool
-  │   └─ for LARGE/LEGACY: SKELETON_ONLY → parallel TaskExpanderAgent (WORKHORSE) → CoherencePlannerAgent (LIGHTWEIGHT)
-  ├─ plan gate (PRODUCTION pauses at AWAITING_APPROVAL; PROTOTYPE bypasses)
-  ├─ SequentialExecutor                            per-task tier-routed WorkerAgent + per-task buildProject smoke
-  ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware) + PostEditFormatter + fix-build third pass (if final build red)
-  ├─ ValidationReport persistence + verifiedScore
-  └─ auto-preview kickoff + test generation in background
-```
-
-**C03C plan-gate contract (V348):** `PlanGateDecisionService` is the only plan-decision
-transaction. It records APPROVE, REJECT, and pre-approval CANCEL as distinct decisions; locks run,
-gate, outbox, optional contract report, RequirementIR, and policy rows in fixed order; persists
-byte-stable `DecisionEvidenceV1` plus the SHA-256 of canonical `DecisionRequestBytesV1`; and performs
-no filesystem, SSE, executor, or provider side effect in the transaction. Exact replay returns the
-stored receipt without re-evaluating mutable policies, while an opposite decision conflicts.
-The transaction coordinator is 400 lines after extracting the exact 73-field receipt/replay checks
-to package-private `PlanGateDecisionEvidence` (478 lines) and the locked admission/acknowledgement
-evaluation to `PlanGateDecisionAdmission` (266 lines); all three remain below the 600-line new-class
-ceiling. The decomposition's focused compile/receipt/service/architecture cohort passes 35/35, but
-C03C is now `VERIFIED`: all six independent PostgreSQL classes pass 73/73
-(12+32+18+5+5+1), the active-registry/continuation/dispatcher cohort passes 31/31, architecture
-ceilings pass, and a clean Java 21 `mvn clean verify -q` passes 5,630/5,630 with zero failures,
-errors, or skips.
-The receipt is cross-bound to the run's provider, execution mode, fixed-six-decimal
-`estimateHighUsd`, separate nullable `hardCapUsd`, expected/confirmed credits, payer, continuation,
-exact contract-report digest, and the report's typed-ack timestamp/actor/text. New C03C
-acknowledgements persist uppercase `BREAKING`. Existing pre-V348 text, including lowercase or
-whitespace, is never rewritten; APPROVE/REJECT/CANCEL snapshot the exact tuple, with REJECT/CANCEL
-outcome `NOT_EVALUATED`. A legacy client that omits `planFingerprint` is recorded
-honestly as absent with `planFingerprintMatched=null`; a supplied fingerprint must match, and an
-ENFORCED RequirementIR binding cannot be approved without one.
-APPROVE commits `PENDING → APPROVED`, `AWAITING_APPROVAL → APPROVAL_RESUMING`, and
-`WAITING → READY` together. REJECT/CANCEL cancel the run/outbox atomically; cancellation after
-approval preserves the APPROVE receipt.
-
-`PlanGateResumeDispatcher` owns the leased `WAITING → READY → PROCESSING → COMPLETED` continuation
-lifecycle. COMPLETED means the transaction handed the run to durable WORKING recovery, not that the
-run itself completed. It claims with `FOR UPDATE SKIP LOCKED`, fences owner/token/expiry, validates
-payload/schema/receipt/plan/cross-row identity, performs a leased database preflight before any
-workspace restore, renews the lease during bounded restore, then repeats the identity fence while
-atomically writing run `APPROVAL_RESUMING → WORKING` and outbox `PROCESSING → COMPLETED` before
-executor dispatch. AFTER_COMMIT, scheduled, and startup sweeps drive it; generic startup recovery
-does not submit APPROVAL_RESUMING runs. V348 blocks direct deletion of versioned gate/outbox rows
-and referenced or acknowledged contract reports while their run exists, but preserves the existing
-parent-run retention/GDPR cascade. Its report→run foreign key is `NOT VALID`: new writes are checked
-without making historical orphan reports a deployment blocker. Recovery registers each `FutureTask`
-in the active-run map before executor submission, closing the fast/inline-executor stale-handle
-race; executor rejection removes that registration. `requirement.ir.gate.mode` remains `LEGACY`.
-`PlanGateResumeStore` is 564 lines after extracting the 220-line
-`PlanGateResumeIntegrityValidator`; `PlanGateResumeDispatcher` is 475 lines and
-`ActiveRunRegistry` is 152 lines. Active-run registration now fails closed unless the durable
-ownership claim updates exactly one row, rolls back the exact new registration on zero-row claims
-or repository errors, restores a replaced prior registration on failed replacement, and prevents
-stale cleanup from removing a newer Future. C03C proves the gate-to-WORKING handoff boundary; it
-does not add per-attempt fencing to later WORKING tool/provider calls or terminal output generation.
-
-Run modes (`pipeline_run.run_mode`): **`BUILD`** (default — the diagram above) and **`PATCH`** (single thin-agent loop against a failing-test spec; skips classifier / planner / reviewer; used by the four autofix surfaces below and the SWE-bench / ProgramBench adapters).
-
-Tools (`tool/`): `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, `runTests` (patch-mode only), plus `completeTask` for native termination. `ToolRegistry.bindForWorker(ctx)` filters `gitCommit` from worker authority (auto-push happens at run-end via `ScmPushService.pushMultiRepo`).
-
-LLM router (`agent/LlmRouter.java`): native tool calling end-to-end across direct providers (Anthropic via Spring AI; OpenAI via `OpenAiNativeToolClient`; Gemini via `GeminiNativeToolClient`; DeepSeek via the OpenAI-wire client) and aggregator transports (OpenRouter and Fireworks via the OpenAI-wire client). V256 removes the retired Sarvam provider/model route and clears persisted dispatch preferences. OpenRouter requests include a provider-routing hint `provider.sort=latency` after the 2026-06-10 MiMo probe showed lower local request latency than default price routing or throughput routing. Every call flows through `RunCostTracker` (cache-aware pricing from `application.yml model-matrix.model-pricing`; OpenRouter literal rows win before legacy owner-provider fallback). All text-only agents, including PromptOptimiserAgent and ContextAgent, use the canonical `LlmRouter.callText`; the retired compatibility router was removed in ExecuteSpec 2.0.
-
-Workspaces: `<agent.workspace>/<runId>/` (local disk on the VM). Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/`. Worker writes flow through tool dispatchers; cleanroom container mounts (SWE-bench, ProgramBench) bind the workspace dir at `/workspace` so host-side tools and container-side tools see the same files.
-
-Workers (`engine/WorkerAgent.java` — relocated from `agent/` in the Phase-4 engine extraction, RL-2026-05-052) — sequential, multi-turn. Per-complexity caps (set in `SequentialExecutor.tierConfigFor`, which ALSO routes the worker model by complexity — LOW→WORKHORSE (RL-2026-06-052 decouple; was LIGHTWEIGHT), MEDIUM→WORKHORSE, HIGH→PLANNING; so the worker runs on the flagship Sonnet/GPT-5.4 for LOW/MEDIUM and PLANNING for HIGH — it no longer uses the cheap LIGHTWEIGHT tier, now reserved for light non-worker agents): LOW=60 iters / 4k tokens / 30-min wall-clock, MEDIUM=120 / 8k / 45-min, HIGH=180 / 16k / 75-min (project runs ×2 on iters + wall-clock). Per-provider PATCH-mode caps: Anthropic 220, OpenAI 150, Gemini 180, DeepSeek/OpenRouter 220. Outcomes: `COMPLETED | COMPLETED_BY_STAGNATION | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | BUDGET_EXCEEDED | ERROR`. Resilience is **one progress signal** since 2026-05-19 (RL-2026-05-005, unifying the old Lever A + Lever C + stagnation warn/force): `itersSinceProgress` counts iterations with no `writeFile`/`editFile`; crossing `progressWarnAfter` (per-tier `req.stagnationWarnAfter`, default 8) injects ONE corrective UserMessage nudge — commit to an edit / call `completeTask` / fix the build — which also fires on a premature text-only stop; crossing `progressForceAfter` (default 12) force-terminates with `COMPLETED_BY_STAGNATION`. **Terminal-Bench remote-worker runs count `shell` as progress, use a 120-iteration floor, add terminal-artifact checkpoints around iterations 16 and 32, run a restricted terminal finalizer at iteration 64 even if shell calls keep resetting progress, run one restricted finalizer before wall-clock failure, force a terminal finalizer after a second text-only stop, and cap wall-clock at 1410s (below Harbor's 1500s agent timeout, with a 90s buffer for one slow in-flight tool/LLM turn plus the terminal finalizer) so extra turns produce the requested `/app` deliverable without turning long runs into Harbor timeout errors.** **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / progress-force when `totalWriteCalls=0`) and the dollar budget cap survive unchanged. Conversation snapshots persisted every 5 iters to Redis at `v2:agent-ctx:{runId}:{taskId}` (24h TTL). The worker base system prompt (`SequentialExecutor.SYSTEM_PROMPT_BASE`, exposed read-only via `workerSystemPromptBase()` for the tier-eval) carries a **tests-are-mandatory** directive since 2026-05-19: any task that touches a function / endpoint / module must ship at least a happy-path test + an error/edge test before `completeTask`, or justify in the summary why it's genuinely untestable.
-
-Scoring (`scoring/`, `report/`): `verifiedScore` is **additive-weighted** since 2026-05-19 (flag `scoring.additive-v2`, default ON, seeded by V201) — five slots with documented weights: **CODE_DELIVERED (30)** + **BUILD (25)** + **TESTS (20)** + **REVIEWER (20)** + **CRITICALS (5)**. Weighted-average over slots that actually fired; unmeasured signals drop from both numerator and denominator instead of defaulting to 1.0. Hard floor: `filesGenerated == 0` ⇒ headline 0. Test slot reads real `passed/total`: BUILD mode runs the worker's own tests in the workspace post-build via `smoketest/WorkspaceTestRunner` (flag `scoring.real-test-exec`, default ON, seeded by V203 — RL-2026-05-001), sandboxed (resolver-derived command + `ShellSandboxPolicy` + cleanroom container where one exists). Falls back to **damped** LLM-judged coverage (GOOD/COMPREHENSIVE=70, PARTIAL=40, NONE=10) when no runner resolves or output is unparseable — LLM grades cap at 70/100. `endpointFactor` and the two 2026-05-10 / 2026-05-16 trust gates are retired; the reviewer's wiring pass already catches the bug class they were guarding against. **Anti-gaming guards (RL-2026-05-042, audit #7, flag `scoring.gaming-guards`, default ON, seeded by V214):** tighten-only adjustments so the system can't vouch for a gamed run — (A) CODE_DELIVERED is linked to the deterministic endpoint-coverage % (files-written alone no longer ⇒ 100 when the spec's endpoints aren't exposed); (B+E) the TESTS slot blends the real pass-rate with the coverage-QUALITY judgment (NONE caps the slot at 30, PARTIAL at 70) so trivial always-passing tests can't score 100. **RL-2026-06-026 trust caps:** the weighted score keeps partial credit, then the headline is capped by failed review (70), unresolved reviewer issues (80), unresolved criticals (85 or 70 for 3+), failed build (75), failed concrete tests (85 or 70 for zero pass), or missing/none test coverage (90/75). The report DTO now includes a `verificationEvidence[]` ledger that labels each claim as deterministic, LLM reviewer, LLM assessment, hybrid, or internal formula so `verifiedScore` is visibly a summary, not independent proof. Legacy multiplicative formula stays in `computeVerifiedScoreMultiplicative` and runs when the additive flag is off — pinned by `ValidationReportServiceVerifiedScoreTest`; the new shape (+ guards + caps) is pinned by `ValidationReportServiceAdditiveScoreTest` and `ValidationReportServiceVerificationLedgerTest`. `accuracyScore` (LLM-judged) survives as a pre-V106 fallback; UI surfaces only `verifiedScore` since 6f6feeff. PARTIAL status survives but each one carries a `status_reason` (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN) so the UI can disambiguate; `StatusBadge` shows it as a tooltip.
-
-Reviewer (`reviewer/ReviewerAgent.java`): general pass → wiring pass → `PostEditFormatter` → final `buildProject` smoke. **Fix-build third pass** (2026-05-19, flag `reviewer.third-pass.enabled`, default ON, seeded by V202): when the final build is still red after the earlier passes, run ONE more targeted pass with the verbatim build error as the user message (reviewer-general prompt, `FIX_BUILD_PASS_MAX_ITER=35` iters, `FIX_BUILD_PASS_TIMEOUT_SECONDS=360`), then re-run `buildProject` and keep the post-pass state. Rescues the "one typo from CLEAN" class (stray import / wrong type / missing decorator) — empirically 4 of 30 sampled "complete" runs had a passing reviewer but a red final build. `FIXED_ISSUES` verdicts now also emit a synthetic visibility issue (`SYNTH-FIX-1`, severity MINOR, `autoFixed=true`) via `RunOrchestrator.describeReviewerFixes` so the Issues panel shows what the reviewer actually changed; `countUnfixedCritical` filters `SYNTH-FIX-*` out of the critical penalty, so it's visibility-only. `AccuracyAssessmentService` now grades `testCoverageLevel` against explicit NONE/PARTIAL/GOOD/COMPREHENSIVE bands instead of defaulting to PARTIAL.
-
-### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
-
-All routed through one chokepoint `finding/FindingPatchSubmitter`. The committed V350-era
-implementation resolves the host project's org as the PATCH data tenant and the active finding
-actor's home org as payer/provider-policy authority before dedupe or dispatch. Submitter dedupes per
-finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline`
-auto-pushes via `scmPushService.push()` on terminal; current-source deterministic verification is green:
-
-| Phase | Surface                               | UX                                                                                                                 |
-| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| 1     | `prreview/PrReviewAutofixService`     | PR Review verdict popover → "Autofix N comments" → pushes to PR head branch via `branchOverride`                   |
-| 2     | `project/techdebt/TechDebtFixService` | TechDebtPanel category rows → "Fix" per category → fresh PR per category                                           |
-| 3     | `project/pr/CiFailureAutoFixService`  | GitHub `check_run` webhook auto-fires on PR CI failure (flag `ci.autofix.enabled`, default OFF; max 3 attempts/PR) |
-| 4     | `codereview/CodeReviewAutofixService` | CodeQualityPanel severity chips → "N CRITICAL" / "N MAJOR" → one PR per severity                                   |
-
-Phase 3's webhook stays OFF until SWE-bench Lite resolved% justifies the unattended-bot path.
-
-### Tier ladder (live on `dev` + `main`)
-
-**FREE** ($0, 200 AI credits/month, low-price native DeepSeek only) → **PRO** ($20/month, 2,000 AI credits/month, all default models, solo feature set) → **PRO+** ($100/month, 125,000 AI credits/month, hidden upsell from Pro checkout or mid-cycle exhaustion) → **BYOK** ($50/month, single-person org, mandatory provider keys, model matrix, no provider markup) → **TEAM** ($50/seat/month, 2-seat minimum, BYOK, shared org controls) → **ENTERPRISE** (custom, advanced governance/procurement/security path). V253 refreshes the active tier and billing-plan rows to this ladder. Team remains monthly-only; Pro+ is deliberately hidden from the normal pricing grid.
-
-Each run costs 1–N run credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`. Charged at plan approval (not submission); refunded on FAILURE. Customer can voluntarily lower the ceiling via `RunRequest.userCostCap` (clamped against the platform cap). BYOK orgs (`keySourceMode=OWN_KEYS`) skip the platform cap entirely; HYBRID + SYSTEM stay capped.
-
-**Managed AI credits (V245 + V253):** `$1.25 = 100 AI credits` for monthly grants and top-ups, configured as `managed-ai.credit-pack-usd` + `managed-ai.credit-pack-credits`; successful platform-key LLM calls debit `ceil(raw_cost_usd * retailMultiplier * creditsPerUsd)` from the user's monthly managed-AI period. Top-ups are marginal purchases at the explicit package/custom rate (`$5 → 500`, `$10 → 1,000`, custom `$X → X*100`) and add `purchased_ai_credits` to the current period instead of the old bonus-run ledger. PRO is configured as 2,000 included credits; PRO+ is configured as 125,000 included credits; FREE is configured as 200 credits and model-locked to native DeepSeek. BYOK/TEAM/ENTERPRISE are ungated for managed credits; the balance API exposes `unlimitedAiCredits=true` and `includedAiCredits` / `aiCreditsRemaining = -1` for those zero-cap unlimited tiers. Customer-facing web surfaces show AI credits and hide raw USD spend/caps unless the viewer is SUPER_ADMIN. `LlmRouter` pre-authorizes each call against `ManagedAiUsageService`; disallowed model classes step down to the same provider's cheap route when available, critical planner/reviewer calls in `VALUE_MODE` can step up to a same-provider frontier model while frontier budget remains, and exhausted states fail before provider spend. Successful calls write `managed_ai_usage_event`, update `managed_ai_usage_period`, and trigger in-app/email transition notifications via `ManagedAiNotificationService`. `ManagedAiTierResolver` owns the managed-credit tier lookup directly from user/org/external-project repositories so `ManagedAiUsagePeriodService` does not depend on `TierEnforcementService`; this avoids the V253 deploy-time bean cycle through `RunTopupService`.
-
-### Auth + RBAC
-
-JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). OAuth authorization requests are persisted in short-lived signed HttpOnly cookies keyed by `state` (`CookieOAuth2AuthorizationRequestRepository`, 5-min TTL, `SameSite=Lax`) instead of relying only on the Tomcat session, so provider callbacks survive stale/missing session cookies and parallel OAuth attempts (RL-2026-06-032). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. **Personal Access Tokens** (V215, `personal_access_token`) provide programmatic auth for headless clients (CLI / VS Code / CI): a revocable, SHA-256-hashed (never-plaintext) `es_pat_…` bearer the user mints via `POST /api/auth/me/tokens`; `JwtAuthenticationFilter` resolves the `es_pat_` prefix to the **same `AppUserDetails`** a JWT would (identical roles + tenant), and tags the request auth source so server-only capabilities can distinguish PAT from browser JWT. **Local-hands run submit is PAT-only** (RL-2026-06-037): even when `worker.local-hands.enabled` is ON, `POST /api/runs localExecution=true` is rejected for browser/JWT sessions because the web UI cannot enforce local command/file approvals; CLI and VS Code use PAT sessions for that path. **Provider preference** (V242, `app_user.preferred_ai_provider`) is account-scoped: `GET/PUT /api/auth/me/provider-preference` lets web, CLI, and VS Code share one default provider. Explicit per-run/per-chat provider input still wins and is remembered; absent input resolves to the account preference, then existing project/YAML defaults. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). External cross-org invites also gated by **V198** per-org flag `org.external_sharing_enabled` (default false; flip via `PUT /api/org/me/settings/external-sharing`; ORG_ADMIN-of-own-org or SUPER_ADMIN only). Accepted external project collaborators now inherit the highest active host-project org tier as an **effective entitlement** through `TierEnforcementService` / `EntitlementResolver` / auth DTOs; the user's personal billing tier is not mutated, so removing the project membership automatically falls back to their own tier. Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`); paid users can convert that personal workspace into a real org through `POST /api/org`, and `OrgDto.isPersonal` tells the web UI whether to show the conversion surface.
-
-`AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard — AND that write handlers (POST/PUT/DELETE/PATCH) use `assertCanWrite`, not `assertCanRead` (RL-2026-05-040; genuine read-only POSTs allowlisted in `READ_ONLY_WRITE_HANDLERS`). `KNOWN_LEGACY_DRIFT` is empty (35/35 cleared); new violators fail the build.
-
-### Security
-
-8-layer defense-in-depth: request validation → input sanitization (`InputSanitizer` — NFKC + zero-width strip + base64 decode+scan) → LLM prompt defense → code abuse scanning (`CodeAbuseScanner` — crypto, shells, PowerShell, DNS exfil, cloud metadata, obfuscation) → shell sandbox (`ShellSandboxPolicy`) → file sandbox → process isolation → container hardening. Configurable headers (CSP, HSTS, X-Frame-Options) via `SecurityProperties`. Three guardrail levels (LOW / MEDIUM / HIGH) flip via `security.guardrail_level` flag.
-
-Cleanroom containers (SWE-bench / ProgramBench) run with `--rm --network none -v <hostDir>:/workspace`. `ShellTool` + `BuildProjectTool` consult `ProgramBenchContainerStore` per invocation; when a containerId is set for the run, the tool dispatches via `docker exec` instead of host shell.
-
-Terminal-Bench 2.0 (`terminalbench/`, RL-2026-06-004) is an operator-only **local/dev** benchmark adapter, not a customer surface. `POST /api/v2/test/terminal-bench/start` (SUPER_ADMIN + `@Profile({"local","dev","benchmark"})` — the `benchmark` profile was added so TB runs on the dedicated benchmark env) persists a `TERMINAL_BENCH` run and executes `engine/WorkerAgent` directly in REMOTE-tool mode: ExecuteSpec is the brain, the Harbor adapter in `~/tbench/es_harbor_agent.py` is the local hands inside the TB container. The keystone fix is in the manual worker dispatch path: `ToolRegistry.isRemoteRun(ctx)` + `dispatchRemote(ctx,name,args)` are consulted by `WorkerAgent.dispatchOne`; `RemoteToolDispatcher` timeout is configurable via `executespec.remote-tool.timeout-ms` (default 600s). DeepSeek first-20 baseline before terminal-mode tuning: 7/20 resolved (35%) for about $0.09; 80-floor terminal tuning reached 12/20 (60%) for about $0.40. The 100-floor + terminal-finalizer run also reached 12/20 (60%) for $0.400126 in 47m52s: `openssl-selfsigned-cert` and `sanitize-git-repo` flipped to pass, while `largest-eigenval` and `query-optimize` regressed on verifier/performance thresholds. Current comparable runs should use DeepSeek, the first-20 slice, an effective 120-iteration floor, terminal-artifact checkpoints at about iterations 16 and 32, a restricted terminal finalizer at iteration 64 even when shell calls keep counting as progress, a restricted wall-clock finalizer before failure, a forced terminal finalizer after the second text-only stop, a 1410s server-side wall clock below Harbor's 1500s agent timeout with a 90s buffer for an in-flight turn/finalizer, and prompt policy that inspects `/tests`, treats exact visible assertions as byte-for-byte artifact contracts, implements detection-first no-op handling for clean transform inputs, cleans helper artifacts from deliverable directories, sweeps named error patterns, benchmarks against golden/reference thresholds, and stops modifying a passing candidate.
-
-### Project workbench (`project/` + companions)
-
-Per-project workspace at `workspace/projects/<projectId>/` (codemaps/, architecture.md, summary.md, docs/, .git) owned by `ProjectWorkspaceService` with atomic writes + Redis-backed lock. Disk is ephemeral on Cloud Run / GCE; DB blobs are authoritative.
-
-3-step architecture pipeline (`codeintel/`): per-repo `CodeMapGenerator` (idempotent by SHA) → `RepoArchitectureGenerator` (per-repo HLD/LLD, PLANNING tier) → `ArchitectureDocGenerator` (cross-repo synthesis, PLANNING tier). `StalenessService` keeps the dashboard "STALE" badge honest via Redis-backed cache. `POST /api/projects/{id}/repos/{repoId}/architecture` and `GET /api/projects/{id}/architecture/diff?from=&to=` (returns both authorized map bodies for the primary client-side LCS content diff plus GitHub source-file correlation).
-
-Always-on RAG: Tika `DocumentExtractor` + 500/50-token `ChunkingService` + governed OpenAI `EmbeddingService` (`text-embedding-3-small`) + JDBC `ChunkStore` over pgvector. Embedding is a dedicated capability independent of the project's code-generation provider, but remains subject to current key-source and org provider policy; unavailable OpenAI capability degrades honestly to lexical retrieval and OWN_KEYS never falls through to a platform key. `ProjectDocumentService` + `/api/projects/{id}/documents` handle upload + async index (UPLOADED → EXTRACTING → EMBEDDING → READY/FAILED). `RetrievalService.retrieve(projectId, query, k, cap)` is wired into planner and chat.
-
-Generated project-doc calls use compact `project-doc:<uuid>` execution-context correlation ids.
-The web transport retains its 30-second default while synchronous architecture generation uses a
-5-minute endpoint deadline and per-repository regeneration/project-doc generation use 3 minutes.
-Run Timeline omits missing/malformed timestamps, Compare History renders the two authorized
-architecture bodies as the primary content diff, and `/provider-keys` exposes OpenRouter as an
-organization-scoped credential with a route to org settings.
-
-Project memory (`memory/`): every completed project-scoped run appends a digest to `project_run_ledger` via `RunLedgerAgent`; `MemoryCompactionService` rewrites a versioned `project_memory_snapshot` every 10 runs. `ProjectMemoryProvider.buildPlannerContext(projectId)` feeds `{{PROJECT_MEMORY}}` into the planner prompt.
-
-Project chat (`memory/ProjectChatService`): compaction (summarise older N messages, keep last 6 verbatim) + reset + per-bubble copy + branch override on launch. Async-dispatched apply-suggestion uses a dedicated `applyExecutor` (4 threads) so the worker loop does not burn a Tomcat handler thread. `memory/chattools/ProjectChatTools` retains the complete implementation library, but every chat model receives only pure `PROJECT_READ` callbacks: repo/run/PR/memory/architecture reads, generated-document reads, tech-debt summaries, and exact repository search. Semantic code/document search is classified as paid analysis and is not model-bound until it has its own scoped protocol. Explicit architecture generation, document generation, and Code Review use the separate V292 confirmation endpoints. V292 binds actor/org/project/action/exact-route/target/budget into hashed, expiring, one-shot authority consumed before side effects. Action routes honor org matrix overrides and cannot adapt/fail over, including async Code Review; unavailable routes return 503. Shared caps are architecture 1m tokens/$10/64 calls, docs 200k/$3/2, and review 300k/$5/2. These controls are explicit actions, not chat-model-generated proposals.
-
-Run chat (`chat/ChatService`, the live post-run copilot — `agent/ConversationAgent` is the legacy path): terminal-runs-only Q&A over the run workspace + validation-report block, history on `pipeline_run.chat_history_json` (cap 50). Routes through `LlmRouter` (LIGHTWEIGHT tier) with a manual tool loop (cap `MAX_TOOL_ROUNDS=4`) and a **read-only** tool set `chat/RunChatTools` (`list_run_files` / `read_run_file` capped 8k chars / `search_run_files` regex content search, reusing the worker `tool/SearchFilesTool`) so the copilot grounds suggestions in the actual generated code — strictly advisory, NO write/shell/push/re-run tool; code changes flow through "Iterate as new run" / "Apply to Run" which keep their own gates (RL-2026-05-047).
-
-Multi-repo PR creation: `ScmPushService.pushMultiRepo` handles per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`. PRs persisted to `pull_request_record` (V169 added `project_id` + `kind`; V170 added `ci_auto_fix_attempts`; V186 added `ci_status` columns). Webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `PullRequestSnapshot` carries `headSha` so PR refresh polls CI check-runs alongside merge state.
-
-Tech debt (`project/techdebt/`): rolls up `validation_report.issues_json` into category / severity / file hotspots / dimension trend. Surfaced on the project Overview tab. The "Fix" button per category dispatches a patch-mode run via `TechDebtFixService` (autofix Phase 2).
-
-### Models, routing, cost
-
-YAML is the **single source of truth** for every model identifier / context-window / max-output-tokens / pricing rate / display label / fallback chain / free-tier lock / agent→tier map / provider-default model. `ModelRegistry` reads `application.yml model-matrix.*`. `ModelContextWindowMap` was deleted; `ModelController.MODEL_LABELS` reads `display-label` from YAML; frontend `PricingTable` reads `chainTier` via new DTO fields on `PricingRow`.
-
-**Per-org matrix override (F3, ENTERPRISE — V205):** an Enterprise org admin can pin a different model for any `(provider, tier)` cell via `PUT /api/org/me/model-matrix`; unset cells fall back to the YAML defaults. Stored sparsely as JSON on `Org.model_overrides_json`, resolved once per run in `RunOrchestrator` and bound to the pipeline thread via `RunModelOverrides` (ThreadLocal); `ModelResolver.lookupModel` (the chokepoint every tier-routed agent funnels through — worker via `SequentialExecutor.tierConfigFor`, planner, reviewer, …) returns the override when present. `OrgModelOverrideService` validates each cell against the registered matrix (OpenRouter via `OpenRouterModelMapper`'s allow-list) and is lenient on read.
-
-Agent tier mapping (`application.yml`):
-
-| Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
-| ----------- | --------------------------- | -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3.5-flash`        | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
-| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-flash-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
-| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, SpecChatService, ConversationAgent, TestReportGenerator |
-
-Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable per project. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on every call for all 3 providers.
-
-Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING. **2026-05-16:** Gemini WORKHORSE itself moved Pro → Flash for the same reason — the WorkerAgent's per-turn system prompt + tool schemas drift across calls, missing every implicit-cache hit on Pro (verified empirically: 108k input tokens for a single LOW-complexity task, `cache_read_input_tokens=0`). Flash's 1024 threshold actually catches. **2026-05-21 (RL-2026-05-010):** Gemini PLANNING also moved Pro → `gemini-3.5-flash` (the eval-best Gemini — ties Sonnet at verifiedScore 94 on the HIGH band, cheaper than Pro). All Gemini tiers now run Flash-class models; `gemini-3-pro-preview` is no longer tier-routed (it survives only as the `GeminiNativeToolClient` default-model constant).
-
-Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open 60s) on the legacy router; the V2 `LlmRouter` is direct-dispatch with per-provider failover via the YAML `failover-order:` chain. Since RL-2026-05-029 it also does a **bounded same-provider retry** (up to 4 attempts, exponential backoff 2s/4s/8s) on transient errors (5xx / connection reset / I/O timeout / 429 via `isTransientError`) before giving up — same provider, no mid-run model switch, so per-provider numbers stay honest and a customer run survives a transient upstream blip (permanent 4xx still fail fast).
-
-### Observability
-
-Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP). `executespec.v2.*` custom metrics for `run.{outcome,latency}`, `planner.{latency,tasks}`, `task.{status,latency,smoketest}`, `worker.{iterations,outcome,toolcall}`, `llm.latency`, `reviewer.verdict`, `context.{save,save.bytes}`. Dump endpoint `/api/v2/test/metrics`. Actuator at `/actuator/prometheus`. **W0 telemetry (RL-2026-06-011 / RL-2026-06-043 / RL-2026-06-044, vix-leverage):** `RunCostTracker` tracks **reasoning tokens** per run + per task (`Snapshot.reasoningTokens` — Gemini `thinking_tokens` / OpenAI-DeepSeek `reasoning_tokens`). `RunEvent` now carries an additive event envelope (`schemaVersion=1`, `data={...}`) while preserving the legacy string `payload`; `TOKEN_USAGE` includes typed cost/cache/reasoning fields, `TOOL_CALL` includes typed remote-tool call fields, `TASK_WAVE_PLAN` exposes the configured bounded safe-parallelism plan in advisory mode, and `GOAL_DECISION` / `CONTINUATION_DECISION` expose task-boundary goal state plus next-action advice without log scraping. `GOAL_DECISION` also carries `recommendedNextStep`, structured task wall-clock, clear environment-block, unsafe-continuation, and low-completion-confidence signatures, and RunCostTracker cost/token/cache/reasoning evidence through SSE, durable task JSON, the run-detail API, the IDE Steps tab, and run-scoped agent-session action events; positive `execution.continuation.max-total-cost-usd`, `max-total-tokens`, or `max-task-wall-clock-ms` values can stop as waste guard before proof of completion, while `max-no-progress-iterations`, `max-false-done-claims`, `max-repeated-failures`, and `max-edit-churn` set the no-diff, false-completion, repeated tool/command/validation failure, and repeated same-file mutation thresholds recorded in goal evidence. Continuation decisions include the applied `execution.continuation.*` limits in live SSE data, durable task JSON, and active run-scoped `agent_action_event` mirrors; the executor persists the durable task JSON before emitting live decision events so `RUN_DETAIL` refreshes read the new proof/proposal; they also record the semantic or complexity-fallback task category, applied category-specific quality threshold, global fallback threshold, resolved category threshold map, and approvalRequiredReason when STOP_BLOCKED needs approval because benchmark confidence or spend confirmation is missing. Automatic selected-candidate reruns emit typed `CONTINUATION_ACTION` events with `status=EXECUTED`, approved blocked continuations emit the same event with `status=APPROVED`, limit-blocked recommendations emit typed `CONTINUATION_ACTION_SKIPPED` events, and all action rows are appended to `TaskSummary.continuationActions` for reloadable task evidence. Validation reports expose `verificationLedger[]` and conservative `runGoalDecision` proof on `/api/runs/{id}/report`, the run-result Evidence tab renders both, and saved reports publish `RUN_VALIDATION_EVIDENCE` with the same proof into active run-scoped agent sessions for reloadable web/CLI/VS Code final evidence summaries. `RunStepUsageRecorder` writes every successful LLM call to `run_step_usage` (V243) with run/task/provider/model/input/output/cache/reasoning/cost/call-index plus exact producer attribution (`agentRole`, `stepId`, `retryOf`) from `LlmRequest`; same-provider retries and cross-provider failover rows point back to the original role/step. `/api/runs/{id}/cost` also exposes `schemaVersion`, `source`, `cacheReadTokens`, `cacheWriteTokens`, `reasoningTokens`, and `calls` for live V2 runs. Provider raw-usage capture and typed `tool_result` / `step` events are the remaining W0 follow-up phases.
-
-Run-scoped agent sessions also persist advisory task-wave plans as `RUN_TASK_WAVE_PLAN` action events so web/CLI/VS Code clients can reload bounded safe-parallelism evidence after the run SSE stream is gone.
-
-`execution.continuation.parallel-read-tools-enabled` defaults to true and gates the worker's automatic read-only tool-batch parallelism. Pure same-turn read batches (`readFile` / `searchFiles` / `listFiles` / `gitStatus` / `gitDiff`) emit server and legacy `LOG` SSE start/done lines with call labels and per-call `ok`/`err` results; mutating, remote, partial, or timed-out batches fall back to sequential dispatch.
-
-`execution.continuation.parallel-provider-evaluation-enabled` defaults to true and gates bounded parallel model/provider candidate evaluation inside `ModelProviderCandidateService`; it uses `execution.continuation.max-parallel-tasks` as the cap, logs start labels and done result labels, preserves deterministic model-order output, and records whether each candidate was evaluated in the bounded parallel batch or sequentially in the candidate reasons.
-
-`ModelProviderCandidateService` also reads the latest DONE `benchmark_run` rows fail-soft and converts each provider/model resolved rate (`resolved_tasks / total_tasks`) into a benchmark quality prior only when the run reaches `execution.continuation.benchmark-min-sample-tasks` (default 20) and the suite is compatible with the task category. Terminal-Bench backs `TERMINAL_TASK` / `BENCHMARK_PATCH`; SWE-bench backs bug/test/project patch categories; ProgramBench backs bug/test/benchmark patch categories. Smaller or incompatible benchmark rows remain visible in candidate reasons but do not drive quality, so unbenchmarked, under-benchmarked, or unrelated-suite models are not treated as fully known. This informs step-up / step-down / change-provider advice without letting benchmark data override the quality-first ranking policy or mutate a run by itself. `ModelProviderScore.benchmarkQualityPriorAvailable` is true only when a candidate has such usable benchmark evidence.
-
-`execution.continuation.acting.enabled` defaults true, so selected-candidate `STEP_UP_MODEL`, `STEP_DOWN_MODEL`, and `CHANGE_PROVIDER` decisions rerun the same task once automatically inside configured provider-switch/model-step ceilings. On primary build-smoke failure, the executor now asks continuation policy before spending the old same-provider build-error retry; if a selected different provider/model is available within limits, that stronger rerun happens immediately. If the selected upgrade is blocked only by benchmark-confidence or confirmation policy, the task is marked `PARTIAL`, the `STOP_BLOCKED` proposal is persisted for approval, and the weak same-provider retry is skipped. Otherwise the legacy same-provider retry continues. The executor passes already-consumed provider-switch / model-step counters, provider-breakdown evidence, and `AvailableProviderResolver` key/org-policy availability into the advisor before each decision; post-review continuation does the same from `RunOrchestrator`. Candidate scoring keeps unavailable providers visible but forces them below threshold, so automatic upgrades cannot select a provider with no usable key or disallowed org policy. Validated ENTERPRISE per-run provider/model pins set `routePinned=true`; automatic step-up, step-down, or provider-change proposals then stop as `STOP_BLOCKED` with `blockedAutomaticContinuationReason=ROUTE_PINNED` instead of silently overriding the user's pinned route. The typed/persisted continuation policy includes those counters plus `providerBehaviorPoor`, so later decisions know when escalation budget is exhausted and when a provider switch is being considered because the current route broke down. Advisor-backed policy data also carries compact ranking evidence (`rankingPolicy`, `rankingQualityTieBand`, `rankingReasons`, top eligible candidates, and top rejected-below-threshold candidates) so the quality > cost > latency decision can be audited after reload; quality wins outside `execution.continuation.quality-tie-band` (default 1.0), while cost then latency break near-quality ties. Approved blocked-continuation retries seed the same counters from the stored proposed action before the retry runs, append an `APPROVED` row to `agent_task.continuation_actions_json` only after the retry is accepted, and therefore do not reset the escalation budget or lose the approval trail. `execution.continuation.require-benchmark-prior-for-automatic-continuation` defaults true, so automatic selection first prefers benchmark-backed candidates; if no benchmark-backed candidate fits, the otherwise-selected candidate without a usable benchmark quality prior is blocked as `STOP_BLOCKED` and kept visible for approval instead of being auto-spent. If server config `require-confirmation-before-expensive-continuation=true` or per-run `RunRequest.requireConfirmationBeforeExpensiveContinuation=true`, the policy also blocks as `STOP_BLOCKED` but keeps the proposed selected candidate visible for approval. The web Compose advanced options expose that per-run flag as "Confirm model upgrades" and send it on `POST /api/runs`. Web Compose also exposes `RunRequest.requireBenchmarkPriorForAutomaticContinuation` as "Require benchmark evidence"; disabling it permits an unbenchmarked selected candidate to auto-run for that submitted run while still respecting provider availability and escalation ceilings. When an automatic `STEP_UP_MODEL` or `CHANGE_PROVIDER` rerun succeeds or completes with warning, the final BUILD-mode reviewer uses that action's provider/model; failed actions, normal task tiering, and `STEP_DOWN_MODEL` do not promote the reviewer.
-
-`execution.continuation.max-stale-explanations` defaults to 2 and feeds `GOAL_DECISION` evidence as `staleExplanationCount=current/max`, covering repeated assistant explanations that arrive without new file-write or validation proof.
-Approved blocked-continuation retries set `ExecutionRequest.userConfirmedExpensiveContinuation=true` plus the approved action/provider/model scope for the resumed executor pass. The confirmation bypass is exact-match only: it applies to the stored `STEP_UP_MODEL` / `CHANGE_PROVIDER` / `STEP_DOWN_MODEL` proposal and selected provider/model, not to a later different candidate in the same retry. Task-boundary, `POST_REVIEW`, and `POST_VALIDATION_REPORT` approvals all run the exact approved route through the same reversible checkpoint → worker → read-only reviewer → deterministic validation → accept/rollback lifecycle; none keeps a lighter mutation path. The immutable approval action is cross-checked against exact fenced physical worker/reviewer attempt evidence before attribution or publication. Approved retries snapshot `RunCostTracker` around the worker retry, attribute the delta to the target task via `RunTokenAttributor.attributeWorkerAdditionalTask`, and add reviewer usage from the physical attempt ledger, so upgrade spend is visible in run totals and phase/task rows. The IDE run-detail Steps tab renders advisor-backed continuation ranking evidence beside each task when present: ranking rule, quality tie band, benchmark-confidence mode, top provider/model candidates, quality/cost/latency metrics, benchmark-prior marker, rejected-below-quality-threshold count, and the blocked-upgrade approval reason when user approval is required. This is the operator-facing view of the quality > cost > latency ordering persisted in `TaskSummary.continuationDecision.policy`.
-Soft-completed edits also feed `completionConfidenceLow=true` when the worker changed files but did not cleanly prove completion; those task decisions remain progressing but set `anotherModelProviderMightHelp=true` so the benchmark/confirmation-guarded continuation advisor can step up.
-Final validation-ledger proof treats reviewer `WARN` / `FAIL` rows as reviewer low-quality failure with `anotherModelProviderMightHelp=true`, so unresolved review becomes an explicit escalation signal.
-`execution.continuation.post-review.enabled` defaults true and lets `RunOrchestrator` act after BUILD-mode reviewer low-quality evidence (`UNRESOLVED_ISSUES`, `REVIEW_FAILED`, or reviewer exception). It emits a post-review `CONTINUATION_DECISION` for the latest usable worker task, then automatically executes only `STEP_UP_MODEL` / `CHANGE_PROVIDER` decisions that survive the same benchmark-prior and confirmation guards as task-boundary continuation. The selected action resets that task to `PENDING`, reruns it through `SequentialExecutor.execute(..., ResumeRequest)`, seeds already-used provider-switch / model-step counters including the selected post-review action, persists the new task result, runs lint, re-runs the BUILD-mode reviewer on the updated workspace, and attributes the second worker/reviewer token deltas. The second worker pass writes only the target task row from its task snapshot instead of redistributing across synthetic skipped resume outcomes. The second reviewer pass uses additive phase attribution so `pipeline_run.reviewer_*_tokens` reflects first review + post-review review while run totals only receive the new delta once.
-Reviewer exceptions are materialized as `ReviewerResult.Overall.REVIEW_FAILED`, so terminal status and validation evidence preserve `REVIEWER_FAILED` instead of falling through to vague no-review or final-build-failed reasons.
-
-Normal worker tool-call logs include `-> OK` / `-> ERR`; repeated-failure evidence groups result-bearing `shell`, `bash`, `buildProject`, and `runTests` failures by stable tool/argument signature, so `execution.continuation.max-repeated-failures` catches the same command or test failing repeatedly even when stderr changes between attempts.
-
-When a terminal waste/failed goal decision still says another model/provider might help, `CONTINUATION_DECISION` now explains when no useful escalation remains within configured limits instead of hiding that stop behind the generic goal reason.
-
-5 published SLOs in [`executespec-docs/backend/operations/slos.md`](../executespec-docs/backend/operations/slos.md): run terminal in 15min ≥95% / verified-score correctness ≥90% / cost estimate within 30% on ≥80% / webhook in 60s ≥99% / hot-path 5xx <0.5%.
-
-### Operator-only Telegram bridge
-
-`chat_id=6475810501` + bot `8489535450`. Push: heartbeat every 600s + on every status-count change. Pull: `getUpdates` polled every 120s, writes to `/tmp/tg-inbox.log`. Used as out-of-band channel for long-running matrix tracking; not a customer-facing integration.
-
-## Code Conventions
-
-- **Base package:** `com.navneet.executespec`
-- **Layering:** controller → service → agent → tool → `LlmRouter`.
-- **DTOs:** Java records where possible. Lombok `@Data` / `@Builder` for JPA entities.
-- **DI:** Constructor injection via Lombok `@RequiredArgsConstructor`. **No** `@Autowired` on fields.
-- **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
-- **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
-- **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V371**, next **V372**, **357 source files** in the current worktree). Applied migrations are immutable. V273–V299 retain the executable-verification, durable route, brownfield source, provider-neutral SCM, code-index, governed data, outbox, scoped-confirmation and activity-audit contracts. V300–V350 are prior forward migrations; V351–V364 add the forward attempt-admission, project-operation, brownfield, validation, and continuation-approval contracts; V365 adds bounded fail-closed stale-receipt recovery; V366 persists exact score-zero causality; V367 binds validation reports to runtime-surface applicability; V368 disables legacy Apply-to-Run until transactional correction is proven; V369 persists crash-recoverable correction authority; V370 corrects correction-attempt digest column types; V371 persists skipped-test counts. Any future consolidation must use a clean-install baseline migration plus forward migrations; never rewrite an applied V-file. Current migration details are in [`executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md).
-
-Production Flyway is strict: `application-prod.yml` disables automatic baselining and out-of-order application. Recovery of an unmanaged database is an explicit operator procedure; do not enable those settings globally.
-
-**V237 adds DeepSeek + Fireworks BYOK key lanes** (`org.deepseek_api_key`, `org.fireworks_api_key`, `app_user.deepseek_api_key`, `app_user.fireworks_api_key`) so direct DeepSeek and Fireworks participate in the same user/org/system key hierarchy as the other providers. **V238 adds benchmark token-tracking columns. V239 defaults on the evidence-safe worker quality gates. V240 creates the CLI/VS Code agent-session protocol tables** (`agent_session`, `agent_turn`, `agent_action_event`, `agent_usage_ledger`) so open-ended conversations stay separate from `pipeline_run` and run credits remain charged only through the existing plan-approval path. **V241 seeds `worker.local-hands.enabled`; V244 flips it default ON** so CLI local execution can be the default while browser/JWT sessions remain rejected for local mode. **V242 adds `app_user.preferred_ai_provider`** plus `/api/auth/me/provider-preference`; web, CLI, and VS Code write the same account preference and use it when a run/chat request omits an explicit provider. **V243 creates `run_step_usage`** for W0 per-call LLM usage; RL-2026-06-044 starts populating its role/step/retry attribution columns. **V245 creates `managed_ai_usage_period`, `managed_ai_usage_event`, and `managed_ai_state_notification`** for AI credits, raw-COGS caps, per-call managed-key debits, step-down/step-up routing state, and notification dedupe. **V246 adds `agent_session.run_id`** so run-scoped web agent sessions survive reloads without relying on a UI-only message prefix. **V247 adds `agent_action_event.action_id`** so planned/action/result events have a stable correlation id across web and terminal clients. **V248 force-sets FREE `tier_config.monthly_run_limit` and `billing_plan.run_limit` to 5** when stale rows still carry any other value, especially the `-1` unlimited sentinel. **V249 seeds `execution.goal-decision.enforcement.enabled` default OFF** so operators can opt in to executor task-boundary aborts after negative goal decisions. **V250 adds `agent_task.goal_doneness_json` and `agent_task.continuation_decision_json`** so run detail clients can show goal state, recommended next step, and next-action advice without scraping SSE logs. **V251 adds `pipeline_run.run_goal_doneness_json`** so final validation-ledger run proof survives reloads on run detail. **V252 adds `agent_task.continuation_actions_json`** so executed/skipped continuation actions survive task-decision overwrites and reloads. **V253 adds `managed_ai_usage_period.purchased_ai_credits`, refreshes active billing-plan/tier rows to Free/Pro/Pro+/BYOK/Team, and seeds AI-credit top-up packages.**
-
-### Patterns: MUST follow
-
-- LLM calls go through `LlmRouter` (native tools or `callText`). Never call providers directly.
-- Run ownership fields (`createdByUserId`, `orgId`, `projectId`) and submit-time continuation policy markers stamped BEFORE async pipeline thread starts (race-condition fix).
-- Gate-loss fallback: `approve()` → if gate missing → auto-fail with message.
-- Sliding-window LLM context: first 2 + last 18 messages.
-- Token-cost control: `readFile` full reads cap at 60KB/2000 lines with **head-first** truncation at a line boundary (output is byte-exact from line 1 so `editFile` can match it; range reads untruncated) — RL-2026-05-062 replaced the old 5KB head+tail-with-a-hole that made `editFile` unable to match any region the model never saw. `shell` / `buildProject` 6k chars inline (`ToolOutput.budget` — full log spilled to disk + a `readFile` path). NOTE: the V2 worker keeps its FULL conversation history (no sliding window); `ToolOutputCompactor` + `WorkerHistoryCompactor` (default OFF, `worker.tool-compactor.enabled` / `worker.history-compaction.enabled`) are the context-compaction levers. The "first 2 + last 18" sliding window applies only to legacy `FallbackLlmRouter` non-tool agents.
-- `JAVA_HOME=/opt/homebrew/opt/openjdk@21` before any Maven command on macOS dev.
-- Payment-webhook signatures verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`).
-- Feature flags via `FeatureFlagService.isEnabled()` — never hardcode toggles.
-- Structured logging with traceId / spanId via Micrometer context propagation (MDC auto-populated).
-- Async work: wrap `Thread.ofVirtual().start()` runnables in `ContextSnapshotFactory.captureAll().wrap(runnable)` so traceId + RequestAttributes survive thread boundaries.
-
-### Patterns: MUST NOT use
-
-- Field injection (`@Autowired` on fields).
-- Raw String for LLM prompts (use prompt files).
-- Direct HTTP calls to LLM providers.
-- Swallowed exceptions (log + rethrow or handle explicitly).
-- Setting run ownership fields AFTER `submitRun()` returns.
-
-## Documentation hygiene (MANDATORY before every commit)
-
-Standing rule from 2026-04-25: every commit must keep the project's documentation surface in lockstep with the code. **Before staging files for any commit, walk this checklist:**
-
-1. **Root CLAUDE.md** if the change affects architecture, API contracts, file locations, agent tiers, status of in-flight work.
-2. **Per-package `CLAUDE.md`** (e.g. `agent/CLAUDE.md`, `state/CLAUDE.md`) when entities, repository methods, agents, or migrations change in that package.
-3. **`executespec-docs/backend/architecture/CODEMAP.md`** when new top-level packages, entities, agents, or DB migrations are added.
-4. **`executespec-docs/backend/reference/document_map.md`** when a doc is added, removed, or moved in the docs repo.
-5. **`executespec-docs/backend/reason-log/2026-07.md`** when an in-flight item changes status or a new decision is recorded.
-6. **`README.md`** if a user-visible feature, environment variable, or build step changed. **`executespec-docs/backend/design/*`** when tokens / theming / a11y commitments change.
-7. **Migration trail** — every new `Vxxx__*.sql` must be cross-linked from the touching package's `CLAUDE.md` + the entity row.
-
-### Current-state corrections (2026-07-11)
-
-- The current worktree migration head is V371; the next allocatable number is V372; the migration directory contains 357 source files. Older migration references in this file are historical unless they explicitly describe their migration contracts.
-- `execution.continuation.require-benchmark-prior-for-automatic-continuation` is false in the active YAML; benchmark-required continuation is an explicit opt-in.
-- Current source-size facts are RunOrchestrator 4,322 lines, `frontend/src/lib/api/core.ts` 1,927 lines, and `frontend/src/signal/pages/ExtraPages.tsx` 377 lines. Recheck before copying older debt counts.
-
-For trivial typo fixes you may write `skip doc-refresh: trivial typo` in the commit message. Otherwise doc-refresh artefacts go in the same commit as the code, not a separate follow-up.
-
-## Build & test
+# Contributor and coding-agent instructions
+
+Read this file before changing ExecuteSpec. Package-local `CLAUDE.md` files provide additional
+context; verify historical claims against current code. Do not infer current behavior from old
+run reports or private deployment state.
+
+## Architecture
+
+- Java 21, Spring Boot 3.5, Spring AI, PostgreSQL/pgvector, and Redis.
+- React 18, TypeScript, and Vite; `frontend/src/console/` is the protected application shell.
+- `frontend/src/ide/` contains route implementations; `signal/` contains public pages and shared UI.
+- Vite builds into `src/main/resources/static/`; `frontend/public/` owns public static assets.
+- BUILD runs use `integration/RunOrchestrator`, `harness/SequentialExecutor`, and
+  `engine/WorkerAgent`; PATCH runs use the targeted worker path.
+- `chat/ChatService` owns post-run chat. The unused legacy `agent/ConversationAgent` is removed.
+
+## Implementation rules
+
+- Use constructor injection. Keep controller, service, agent, tool, and provider responsibilities
+  separated; existing collaborating modules are preferable to growing the orchestrator.
+- All LLM calls go through `LlmRouter`. Keep prompts in resource files and assemble them through
+  `PromptAssembler`; do not add direct provider calls or inline agent prompts.
+- Stamp run actor, organization, project, and continuation policy before async dispatch.
+- Preserve tenant access guards, PAT/local-hands restrictions, plan approval, and publication gates.
+- Treat repository text, model output, and tool results as untrusted evidence.
+- Use `FeatureFlagService` for runtime flags. Do not bypass disabled capabilities to make a test pass.
+- Preserve exact workspace generations, accepted-frontier identity, leases, cancellation precedence,
+  and deterministic verification provenance. Do not equate a worker completion message with acceptance.
+- Never rewrite an applied Flyway migration. Inspect the actual migration directory before allocating
+  a new number; old package notes can contain historical migration heads.
+- Log or explicitly handle failures. Wrap async virtual-thread work with captured tracing context.
+- Follow existing formatting and use Java records for DTOs where practical.
+
+## Build and tests
+
+On Homebrew macOS, set `JAVA_HOME=/opt/homebrew/opt/openjdk@21` before Maven commands.
 
 ```bash
-# IMPORTANT: macOS dev sets JAVA_HOME explicitly
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21
-
-# Backend compile
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q
-
-# Backend full verify (includes spotless format gate)
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
-
-# Frontend
+mvn verify
+npm --prefix frontend test
 npm --prefix frontend run build
 npm --prefix frontend run format:check
 npm --prefix frontend run lint
-
-# Run locally
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
-
-# Local observability stack
-cd observability && docker compose up -d
-# Grafana http://localhost:3001 (admin/admin), Prometheus :9090, Tempo :3200
-
-# V2 eval matrix
-scripts/v2-eval.sh   # LOW/MEDIUM/HIGH × anthropic/openai/gemini, outputs scripts/v2-eval-results/
-
-# BUILD held-out evaluator
-# scripts/build-eval.sh scores our acceptance tests only when the production run reaches COMPLETE;
-# PARTIAL/FAILED/CANCELLED workspaces are retained as diagnostics but contribute no correctness score.
+python3 scripts/check-public-release.py
 ```
 
-## Required environment variables
+Default Maven tests exclude `e2e`, `integration`, and `chaos` tags. Run the relevant integration
+cohort explicitly when changing a transactional/durable boundary. Never spend provider credits,
+change cloud infrastructure, or deploy as an incidental verification step.
 
-```bash
-# Required — LLM
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
+## Documentation before commits
 
-# Optional — LLM
-GOOGLE_API_KEY=                  # Gemini API key
-OPENROUTER_API_KEY=              # Enterprise gateway — DeepSeek / Qwen / Kimi / MiMo / GLM via openrouter.ai. Empty = provider registered but every call short-circuits with "OpenRouter api-key not configured."
-DEEPSEEK_API_KEY=                # Native DeepSeek (api.deepseek.com). Empty = provider disabled.
-FIREWORKS_API_KEY=               # Fireworks AI OpenAI-wire route for Chinese open models. Empty = provider disabled; live slug/latency smoke requires a real key.
+Keep documentation in the same commit as the behavior it describes:
 
-# Optional — Integrations
-# (GITHUB_PAT removed 2026-05-23 — there is no system GitHub PAT; every GitHub op uses the caller's own PAT)
-SLACK_CLIENT_ID= / SLACK_CLIENT_SECRET= / SLACK_SIGNING_SECRET=
-DASHBOARD_URL=
+1. Update README for user-visible setup, capabilities, or environment changes.
+2. Update package-local notes for changed contracts, entities, agents, or migrations.
+3. Update root contributor context when architecture or canonical paths change.
+4. Cross-link new migrations from their owning package documentation.
+5. Record material decisions and qualification limits in the relevant maintained documentation;
+   internal historical records may remain in the separate private documentation repository.
 
-# Optional — OAuth2 login
-GOOGLE_OAUTH_CLIENT_ID= / GOOGLE_OAUTH_CLIENT_SECRET=
-GITHUB_OAUTH_CLIENT_ID= / GITHUB_OAUTH_CLIENT_SECRET=
+Batch related code, documentation, and test changes into the fewest practical commits and CI runs.
+Do not mix generated captures, private audit results, or deployment artifacts into source commits.
 
-# Optional — Billing
-RAZORPAY_KEY_ID= / RAZORPAY_KEY_SECRET=
-STRIPE_SECRET_KEY= / STRIPE_WEBHOOK_SECRET= / STRIPE_PUBLISHABLE_KEY=
-STRIPE_TEAM_MONTHLY_PRICE_ID= / STRIPE_ENTERPRISE_PRICE_ID=
-BILLING_DEFAULT_GATEWAY=stripe   # prod default (dev defaults to razorpay)
-BILLING_STRIPE_ENABLED=true
+## Public-repository hygiene
 
-# Optional — Infrastructure
-REDIS_HOST=                      # default localhost
-
-# Optional — Observability
-OTEL_SAMPLING_PROBABILITY=1.0
-OTEL_METRICS_ENABLED=false
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
-```
-
-## API contracts
-
-### Run lifecycle
-
-| Method | Path                                  | Description                                                                                                                                                       |
-| ------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/runs`                           | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`, optional `requireConfirmationBeforeExpensiveContinuation`, optional `requireBenchmarkPriorForAutomaticContinuation`, optional `modelName` (ENTERPRISE per-run model pin, Beta — overrides org matrix + YAML via `RunModelOverrides.withRunPin`). |
-| GET    | `/api/runs`                           | List runs (paginated, filtered by visibility + tier).                                                                                                             |
-| GET    | `/api/runs/{id}`                      | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs).                                                               |
-| POST   | `/api/runs/{id}/approve`              | Atomic plan-gate APPROVE/REJECT; body `{approved, creditsConfirmed?, planFingerprint?, breakingChangeAck?, breakingChangeReportDigest?}`. A supplied plan fingerprint must match; omission is recorded absent/null and ENFORCED RequirementIR requires one. Typed `BREAKING` acknowledgement is stored and cross-bound in the canonical receipt. |
-| POST   | `/api/runs/{id}/pause`                | PAUSED (V168, flag `v2.pause.enabled`, default OFF).                                                                                                              |
-| POST   | `/api/runs/{id}/resume`               | Same-JVM only; workspace must exist.                                                                                                                              |
-| DELETE | `/api/runs/{id}`                      | Cancel — `RunOrchestrator.cancel(runId)`. Signals plan gate, interrupts pipeline future, closes opened PRs.                                                       |
-| POST   | `/api/runs/{id}/archive`              | Archive.                                                                                                                                                          |
-| POST   | `/api/runs/{id}/tasks/{taskId}/retry` | Retry one failed task. Requires `requireBuildVerification=true` on retry attempt. Does NOT auto-push — use the `Update PR` button on `InlineRunDetail` if needed. |
-| POST   | `/api/runs/{id}/tasks/{taskId}/continuation/approve` | Approve a blocked continuation proposal; queues the same task with the stored selected provider/model from `continuationDecision.selectedCandidate`. Returns 409 unless the task has `STOP_BLOCKED` from either explicit spend confirmation or benchmark-confidence confirmation. Response includes `postReview`; when true, the approved retry also reruns reviewer + validation before terminal status. |
-| GET    | `/api/runs/{id}/events`               | SSE event stream (scoped token). `RunEvent` keeps legacy `payload` and adds `schemaVersion=1` + typed `data`; advisory task waves use `TASK_WAVE_PLAN`; goal/continuation decisions use `GOAL_DECISION` and `CONTINUATION_DECISION`; automatic selected-candidate continuation reruns use `CONTINUATION_ACTION`, while limit-blocked rerun recommendations use `CONTINUATION_ACTION_SKIPPED`. Goal/continuation decision/action events also trigger a fresh `RUN_DETAIL` push so the Steps tab sees persisted upgrade proposals live. |
-| GET    | `/api/runs/{id}/sse-token`            | Get scoped SSE token (5-min TTL).                                                                                                                                 |
-| GET    | `/api/runs/{id}/event-log`            | Persisted run-event replay (24h Redis `sse:replay:{id}`) — backs the IDE run-detail **Logs** tab (RL-2026-05-046). Run-read guarded.                              |
-| POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                           |
-| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                          |
-| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot; V2 live responses include cache/reasoning/call fields and `schemaVersion=1`.                                                           |
-| POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                           |
-| POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                     |
-| POST   | `/api/repos/{repoId}/webhook`         | Install pull_request webhook with caller's PAT.                                                                                                                   |
-
-### Validation report + scoring
-
-| Method | Path                          | Description                     |
-| ------ | ----------------------------- | ------------------------------- |
-| GET    | `/api/runs/{id}/report`       | Get validation report, including `verificationEvidence[]` so the UI can separate deterministic checks, LLM assessments, and the internal score summary. |
-| GET    | `/api/runs/{id}/report/pdf`   | Download report as PDF.         |
-| POST   | `/api/runs/{id}/report/share` | Generate share link.            |
-| GET    | `/api/reports/shared/{token}` | Public shared report (no auth). |
-| POST   | `/api/admin/validation-reports/backfill-verified-score` | SUPER_ADMIN one-shot backfill for existing reports. Optional body `{runId?, limit?, dryRun?}` recomputes both `verifiedScore` and `rubricScore`; use `dryRun=true` first. |
-
-### Preview + deploy
-
-| Method | Path                           | Description                                                                            |
-| ------ | ------------------------------ | -------------------------------------------------------------------------------------- |
-| POST   | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker, 5-min TTL).                                        |
-| DELETE | `/api/runs/{id}/preview/stop`  | Stop preview.                                                                          |
-| POST   | `/api/deployments`             | Deploy to Cloud Run (permanent).                                                       |
-| POST   | `/api/runs/{id}/push-github`   | Push to GitHub (single-repo; multi-repo branches into `ScmPushService.pushMultiRepo`). |
-
-### Project workspace
-
-| Method | Path                                                                         | Description                                                        |
-| ------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| GET    | `/api/projects/{id}/dashboard`                                               | Aggregated metrics, recent runs/PRs, arch-doc status.              |
-| GET    | `/api/projects/{id}/memory` + `/memory/ledger`                               | Project memory snapshot + full ledger.                             |
-| GET    | `/api/projects/{id}/scores`                                                  | Score-trend feed.                                                  |
-| GET    | `/api/projects/{id}/workspace-health`                                        | Per-repo SHA drift + webhook + open-PR rollup.                     |
-| GET    | `/api/projects/{id}/architecture` + `/versions` + `/diff?from=&to=`          | Latest arch / all versions / source-file changes between versions. |
-| POST   | `/api/projects/{id}/architecture/generate`                                   | Regenerate codemaps + arch doc.                                    |
-| GET    | `/api/projects/{id}/repos/{repoId}/architecture`                             | Per-repo HLD/LLD.                                                  |
-| POST   | `/api/projects/{id}/repos/{repoId}/regenerate-architecture`                  | Per-repo codemap + arch regen (Task #82 — split out of the now metadata-only `POST /api/repos/{repoId}/sync`; synchronous, write-gated, non-transactional). |
-| POST   | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` + `GET .../download` | Generated Docs.                                                    |
-| GET    | `/api/projects/{id}/tech-debt?since=<days>`                                  | Issues-by-category / severity / file hotspots.                     |
-| POST   | `/api/projects/{id}/analyse?branch=<name>`                                   | Per-branch arch refresh using caller's PAT.                        |
-| GET    | `/api/projects/{id}/estimate?requirement=<text>`                             | Heuristic p25/p75 task + cost estimate from project history.       |
-| POST   | `/api/projects/{id}/prs/refresh`                                             | Poll GitHub + post-merge cascade + CI check-runs.                  |
-| GET    | `/api/projects/{id}/templates` + POST                                        | Spec templates (project + org-scoped).                             |
-| POST   | `/webhooks/github`                                                           | PR + check_run webhook (HMAC SHA-256).                             |
-
-### PR Review + Code Review (V172)
-
-| Method | Path                                                                                             | Description                                                                        |
-| ------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| POST   | `/api/pr-reviews`                                                                                | Submit PR review (PRO+); body `{projectId, repoFullName, prNumber}`. 202 + QUEUED. |
-| GET    | `/api/pr-reviews/{id}` + `/api/projects/{id}/pr-reviews` + by-PR query                           | Read endpoints.                                                                    |
-| POST   | `/api/code-reviews`                                                                              | Submit whole-repo scan (PRO+).                                                     |
-| GET    | `/api/code-reviews/{id}` + `/report` (markdown) + `/api/projects/{id}/code-reviews/latest?repo=` | Read endpoints.                                                                    |
-
-### External project sharing (V175 + V198)
-
-| Method | Path                                                                                  | Description                                                                                                                                                                                                                                |
-| ------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/projects/{id}/invites` + GET + DELETE                                           | Cross-org `ProjectMember` invite by email. **V198 (2026-05-16):** create now requires tier PRO+ AND ORG_ADMIN-of-own-org (or SUPER_ADMIN) AND `org.external_sharing_enabled=true`. PROJECT_ADMIN alone is no longer enough. |
-| GET    | `/api/invites/preview?token=` + POST `/api/invites/accept?token=`                     | Accept invite (email-match required).                                                                                                                                                                                                       |
-| POST   | `/api/projects/{id}/share-links` + GET + DELETE                                       | Public read-only share links (tier-gated). Unchanged by V198 — gates the cross-org `ProjectMember` path, not the public-link path.                                                                                                          |
-| GET    | `/api/shared/{token}/{meta,project,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints.                                                                                                                                                                                                                      |
-| PUT    | `/api/org/me/settings/external-sharing`                                               | **V198** — toggle the per-org flag. Body `{enabled: bool}`. ORG_ADMIN-of-own-org or SUPER_ADMIN only. Emits `ORG_EXTERNAL_SHARING_CHANGED` audit row.                                                                                       |
-| GET    | `/api/org/me/model-matrix`                                                            | **F3** — effective model matrix (defaults + this org's overrides + picker options + `modelLabels`). Any org admin (read-only grid for non-ENTERPRISE).                                                                                                       |
-| PUT    | `/api/org/me/model-matrix`                                                            | **F3 (V205)** — replace the org's `(provider:tier)→model` overrides (sparse; `{}` clears). ENTERPRISE-only (403 otherwise); each cell validated against the registered matrix.                                                               |
-
-### Auth + org
-
-| Method | Path                                                                        | Description                             |
-| ------ | --------------------------------------------------------------------------- | --------------------------------------- |
-| POST   | `/api/auth/register` / `/login` / `/refresh` / `/logout`                    | JWT auth.                               |
-| POST   | `/api/auth/forgot-password` / `/reset-password` / GET `/verify-email`       | Account recovery.                       |
-| GET    | `/api/auth/oauth2/init?surface=<x>` / `/authorize` / `/callback/{provider}` | OAuth2 (Google + GitHub).               |
-| GET    | `/api/auth/me/permissions`                                                  | Tier-based permissions.                 |
-| GET    | `/api/auth/me/data-export`                                                  | GDPR ZIP (manifest + payload + README). |
-| POST/GET/DELETE | `/api/auth/me/tokens` (+ `/{tokenId}`)                             | Personal Access Tokens for CLI / VS Code / CI (V215). Create returns the `es_pat_…` plaintext once; list is secret-free; delete revokes. |
-| POST   | `/api/org` / `/api/org/invite`                                              | Org creation/conversion + invitations.  |
-
-### Billing
-
-| Method | Path                                              | Description                                              |
-| ------ | ------------------------------------------------- | -------------------------------------------------------- |
-| GET    | `/api/billing/plans`                              | Yields YAML-driven pricing rows.                         |
-| POST   | `/api/billing/subscribe`                          | Routed to Razorpay or Stripe via `PaymentGatewayRouter`. |
-| POST   | `/api/billing/topup/purchase`                     | Buy managed AI-credit top-ups.                           |
-| GET    | `/api/billing/payment-history`                    | Org-scoped payment history.                              |
-| POST   | `/api/webhooks/razorpay` + `/api/webhooks/stripe` | Webhook events (HMAC verified, no auth).                 |
-
-### Admin
-
-| Method | Path                                                      | Description                                            |
-| ------ | --------------------------------------------------------- | ------------------------------------------------------ |
-| GET    | `/api/admin/payment-audit` + `/export`                    | Payment audit log + CSV (SUPER_ADMIN).                 |
-| GET    | `/api/admin/webhook-events`                               | Webhook event log.                                     |
-| GET    | `/api/admin/tiers` + PUT `/{tier}`                        | Tier lifecycle (LISTED/HIDDEN/SUNSETTING).             |
-| POST   | `/api/admin/executions/reconcile`                         | Mark orphaned non-terminal ExecutionRuns FAILED.       |
-| POST   | `/api/admin/swebench/run` + `/api/admin/programbench/run` | Bench-mode submission.                                 |
-| POST   | `/api/admin/eval/v2/run`                                  | Tier-eval-v2 — production-shaped per-tier × provider eval (`tiers`, `providers` params). |
-| POST   | `/api/admin/projects/{id}/migrate-codemaps`               | Migrate legacy codemaps into `.executespec/codemaps/`. |
-
-### Enterprise readiness — `.executespec/` folder, contracts, standards, ADRs, activity
-
-| Method              | Path                                                                                           | Description                                                          |
-| ------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| GET                 | `/api/projects/{id}/activity`                                                                  | Project activity feed (partitioned-by-month).                        |
-| POST                | `/api/projects/{id}/export`                                                                    | ZIP bundle of every `.executespec/` artefact + DB-only counterparts. |
-| POST                | `/api/projects/{id}/check-drift` + per-repo + per-contract                                     | Cross-repo contract drift detection.                                 |
-| POST                | `/api/projects/{id}/contracts/{contractId}/{refresh-from-source,dismiss-drift}`                | Drift workflow.                                                      |
-| GET / POST / DELETE | `/api/projects/{id}/contracts/{contractId}/consumers/{...}`                                    | Consumer pinning.                                                    |
-| GET + POST          | `/api/projects/{id}/repos/{repoId}/contract-coverage` + `/rescan`                              | Coverage rollup.                                                     |
-| POST                | `/api/projects/{id}/standards/violations/{id}/override` + `/standards/{id}/exception` + DELETE | Standards override + standing exception (≥30-char rationale).        |
-| GET                 | `/api/projects/{id}/standards/report?orgId=&sinceDays=`                                        | Standards compliance report.                                         |
-
-### Notifications + flags
-
-| Method | Path                                                                          | Description                       |
-| ------ | ----------------------------------------------------------------------------- | --------------------------------- |
-| GET    | `/api/notifications` + `/unread-count` + POST `/{id}/read` + POST `/read-all` | In-app notifications.             |
-| GET    | `/api/models/available`                                                       | Model matrix (YAML-derived).      |
-| GET    | `/api/admin/feature-flags` + PUT `/{key}`                                    | Feature flag admin (SUPER_ADMIN). |
-
-## Key file locations
-
-| Purpose                         | Path                                                                                                                                                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                         |
-| Customer BUILD admission        | [`run/CustomerRunSubmissionService.java`](src/main/java/com/navneet/executespec/run/CustomerRunSubmissionService.java) — shared REST, confirmed Web Agent, fork, and unified Execution View admission boundary                                                                 |
-| Plan-gate decision              | [`integration/PlanGateDecisionService.java`](src/main/java/com/navneet/executespec/integration/PlanGateDecisionService.java) + `PlanGateDecisionEvidence` + `PlanGateDecisionAdmission` + `DecisionEvidenceV1` + `DecisionRequestBytesV1`                                                                                  |
-| Plan-gate continuation          | [`integration/PlanGateResumeDispatcher.java`](src/main/java/com/navneet/executespec/integration/PlanGateResumeDispatcher.java) + `PlanGateResumeStore`                                                                                                          |
-| Sequential executor             | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)                                                                                           |
-| Worker agent                    | [`engine/WorkerAgent.java`](src/main/java/com/navneet/executespec/engine/WorkerAgent.java) (moved from `agent/` — Phase 4)                                                                            |
-| Outline planner                 | [`agent/OutlinePlannerAgent.java`](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)                                                                                             |
-| Smart classifier                | [`agent/SmartClassifierAgent.java`](src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java)                                                                                           |
-| Reviewer                        | [`reviewer/ReviewerAgent.java`](src/main/java/com/navneet/executespec/reviewer/ReviewerAgent.java)                                                                                                   |
-| Patch-mode agent                | [`engine/CodeGenEngineImpl.java`](src/main/java/com/navneet/executespec/engine/CodeGenEngineImpl.java) — direct PATCH worker facade                                                                                  |
-| LLM router (V2)                 | [`agent/LlmRouter.java`](src/main/java/com/navneet/executespec/agent/LlmRouter.java) + `OpenAiNativeToolClient` + `GeminiNativeToolClient`                                                           |
-| Tool registry                   | [`tool/ToolRegistry.java`](src/main/java/com/navneet/executespec/tool/ToolRegistry.java) + `tool/*` (11 tools + `CompleteTaskTool`)                                                                  |
-| Context store                   | [`context/ContextStore.java`](src/main/java/com/navneet/executespec/context/ContextStore.java)                                                                                                       |
-| Cost tracker                    | [`cost/RunCostTracker.java`](src/main/java/com/navneet/executespec/cost/RunCostTracker.java)                                                                                                         |
-| State store                     | [`state/StateStore.java`](src/main/java/com/navneet/executespec/state/StateStore.java)                                                                                                               |
-| Startup resumer                 | [`recovery/StartupRunResumer.java`](src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java)                                                                                           |
-| Finding patch submitter         | [`finding/FindingPatchSubmitter.java`](src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java)                                                                                     |
-| Model registry                  | [`router/ModelRegistry.java`](src/main/java/com/navneet/executespec/router/ModelRegistry.java)                                                                                                       |
-| Validation report               | [`report/ValidationReportService.java`](src/main/java/com/navneet/executespec/report/ValidationReportService.java) + `ValidationReportGenerator`                                                     |
-| Project architecture            | [`codeintel/ProjectArchitectureService.java`](src/main/java/com/navneet/executespec/codeintel/ProjectArchitectureService.java)                                                                       |
-| Repository intelligence port    | [`repositoryintel/`](src/main/java/com/navneet/executespec/repositoryintel/) — typed actor/host-tenant/project/repository/snapshot-bound contracts, access-checked canonical code-index-clone handle, registered conservative native search adapter, and provider-free reads of persisted CODEMAP plus per-repo ARCHITECTURE. CODEMAP is exact-SHA/current-handle pinned deterministic evidence except excluded model-generated Purpose lines; ARCHITECTURE is model-derived (0.65/UNKNOWN) and exact-SHA/codemap chained. Documents, ADR, AST, semantic and pipeline consumers remain open; no quality claim. |
-| Repository explorer contract    | [`repositoryexplorer/`](src/main/java/com/navneet/executespec/repositoryexplorer/) — provider-free selection policy plus bounded snapshot-validated evidence bundles over `repositoryintel`; no provider or pipeline integration and no quality proof yet                         |
-| Project memory                  | [`memory/RunLedgerAgent.java`](src/main/java/com/navneet/executespec/memory/RunLedgerAgent.java) + `MemoryCompactionService` + `ProjectMemoryProvider`                                               |
-| GitHub integration              | [`repo/GitHubRepoService.java`](src/main/java/com/navneet/executespec/repo/GitHubRepoService.java) + `BitbucketRepoService`                                                                          |
-| Multi-repo push                 | [`integration/scm/ScmPushService.java`](src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java)                                                                                   |
-| SWE-bench adapter               | [`swebench/`](src/main/java/com/navneet/executespec/swebench/)                                                                                                                                       |
-| ProgramBench adapter            | [`programbench/`](src/main/java/com/navneet/executespec/programbench/)                                                                                                                               |
-| Terminal-Bench adapter          | [`terminalbench/`](src/main/java/com/navneet/executespec/terminalbench/) — operator-only Harbor launcher for remote-brain/local-hands TB runs                                                        |
-| Security config                 | [`auth/security/SecurityConfig.java`](src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) + [`auth/oauth/CookieOAuth2AuthorizationRequestRepository.java`](src/main/java/com/navneet/executespec/auth/oauth/CookieOAuth2AuthorizationRequestRepository.java) |
-| Billing service                 | [`billing/service/BillingService.java`](src/main/java/com/navneet/executespec/billing/service/BillingService.java) + `RunTopupService` + `ManagedAiUsageService` / `ManagedAiTierResolver` + `gateway/PaymentGatewayRouter`                                                  |
-| Feature flags                   | [`config/featureflag/FeatureFlagService.java`](src/main/java/com/navneet/executespec/config/featureflag/FeatureFlagService.java)                                                                     |
-| Feature-flag snapshot parity    | `scripts/compare-feature-flag-snapshots.mjs` + its JSON allowlist — read-only snapshot comparison; live local/dev parity remains unproven until authenticated snapshots are captured and compared                                                                     |
-| Rate limiting                   | [`ratelimit/RateLimitFilter.java`](src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java)                                                                                             |
-| Sharing                         | [`sharing/`](src/main/java/com/navneet/executespec/sharing/)                                                                                                                                         |
-| PR Review agent                 | [`prreview/`](src/main/java/com/navneet/executespec/prreview/)                                                                                                                                       |
-| Code Review agent               | [`codereview/`](src/main/java/com/navneet/executespec/codereview/)                                                                                                                                   |
-| Activity feed                   | [`activity/`](src/main/java/com/navneet/executespec/activity/)                                                                                                                                       |
-| Folder writer (`.executespec/`) | [`folder/ExecutespecFolderWriter.java`](src/main/java/com/navneet/executespec/folder/ExecutespecFolderWriter.java)                                                                                   |
-| Standards / ADR / Invariants    | [`standards/`](src/main/java/com/navneet/executespec/standards/), [`adr/`](src/main/java/com/navneet/executespec/adr/), [`arch/invariants/`](src/main/java/com/navneet/executespec/arch/invariants/) |
-| Cross-repo contracts            | [`contracts/`](src/main/java/com/navneet/executespec/contracts/)                                                                                                                                     |
-| Notification preferences        | [`notification/pref/`](src/main/java/com/navneet/executespec/notification/pref/)                                                                                                                     |
-| GDPR data export                | [`auth/service/UserDataExportService.java`](src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java)                                                                           |
-| Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
-| LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
-| App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V371; next V372; 357 source files; applied V-files immutable)                                                                                                                       |
-| Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
-| Frontend API client             | `frontend/src/lib/api/` (`core.ts` + domain modules)                                                                                                                                                 |
-| Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
-| V2 eval framework               | `scripts/v2-eval.sh` + `scripts/v2-eval-specs/{low,medium,high}.txt`                                                                                                                                 |
-| Tier-eval-v2                    | [`eval/v2/`](src/main/java/com/navneet/executespec/eval/v2/) (`TierEvalRunner` + `TierEvalController` + `cases/`) + `scripts/tier-eval-v2.sh`                                                          |
-
-## Current state
-
-### Working
-
-- V2 BUILD-mode pipeline end-to-end: classify → outline → sequential per-task worker → reviewer → COMPLETE → auto-preview (5-min TTL) → background validation (report + test gen + test exec). Hierarchical planning (LARGE/LEGACY).
-- V2 PATCH-mode pipeline: SWE-bench Lite + ProgramBench bench-mode + 4 customer-facing autofix surfaces (PR Review / TechDebt / CI failure webhook / Code Review severity buckets).
-- Per-run codemap + 3-step project architecture pipeline + Generate Docs.
-- Project memory + project chat with compaction.
-- Always-on RAG over user docs via pgvector + Tika + OpenAI embeddings.
-- External project sharing: cross-org `ProjectMember` invites + public read-only share links (V175). Per-org feature flag `org.external_sharing_enabled` (V198, default false; ORG_ADMIN/SUPER_ADMIN to toggle) gates the cross-org invite surface; share-links are independent.
-- PR Review + Code Review agents with markdown report download (V172).
-- Multi-repo runs: per-repo workspace + per-repo codemap + per-repo PR + cross-link.
-- Tier lifecycle state machine + SUPER_ADMIN tier console.
-- Cost-proportional run credits + voluntary `userCostCap` + BYOK cost-cap exemption + visible `CostProgressBar`.
-- Multi-gateway billing (Razorpay + Stripe) with managed AI-credit top-ups.
-- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, Caddy + Cloudflare Origin Certificate).
-- JWT auth + OAuth2 (Google, GitHub) with RBAC, org management, project scoping.
-- 8-layer security + 3 guardrail levels.
-- Containerized test execution (Docker `--read-only --cap-drop ALL` + memory/CPU limits + env-var whitelist).
-- In-app notifications (run completion + quota warning + gate-opened events).
-- Pause / resume on V2 runs (interrupt + resume-from-disk; flag `v2.pause.enabled`).
-- GDPR data-export endpoint.
-- `AccessGuardCoverageTest` ArchUnit pin — tenant-guard coverage + write-handler-uses-write-guard (RL-2026-05-040); `KNOWN_LEGACY_DRIFT` empty (35/35 cleared).
-- Local Grafana dashboards + GCP Cloud Trace + Cloud Monitoring exporters (`@Profile("gcp")`).
-- Model evaluation framework (`eval/`) + tier-eval-v2 (`eval/v2/`) — production-shaped per-tier (LIGHTWEIGHT / PLANNING / WORKHORSE) × provider eval that drives the live agent prompts + tool schemas through `LlmRouter` and scores tool-call validity, cache hit rate, latency, cost. Admin endpoint `POST /api/admin/eval/v2/run`; CLI wrapper `scripts/tier-eval-v2.sh`.
-
-### In progress / not-yet-merged
-
-- **Agent control plane + managed AI launch work (2026-06-19, branch `codex/agent-control-plane-managed-ai-plan`)** — unified execution plan lives in [`../executespec-docs/backend/plans/agent-control-plane-managed-ai-2026-06-19.md`](../executespec-docs/backend/plans/agent-control-plane-managed-ai-2026-06-19.md) with the root entrypoint [`AGENT_CONTROL_PLANE_MANAGED_AI_PLAN.md`](AGENT_CONTROL_PLANE_MANAGED_AI_PLAN.md). Scope: make the web Console a first-class agent control plane over the existing agent-session protocol, keep CLI/VS Code as local-hands clients, normalize action contracts (`create_cloud_run` as the public run-creation action), add a reloadable agent-turn history endpoint, wire POST-SSE agent streaming into web, and introduce AI credits (`$1.25 = 100 AI credits`) with per-call managed raw-COGS enforcement, model step-up/down, BYOK bypass, and in-app/email notifications on routing-state transitions. Implemented on this branch so far: `create_cloud_run` public action contract, surface-neutral chat prompt wording, `GET /api/agent/sessions/{id}/turns`, `frontend/src/lib/api/agent.ts` with a POST-SSE parser plus route/proposal handlers, protected `/agent` + `/projects/:id/agent` + `/runs/:id/agent` Console routes with reducer state, action cards, local-hands handoff cards, gate rail, managed-AI balance rail, and WEB capabilities, the RL-2026-06-055 route-gated orchestrator decision for `POST /api/orchestrator/turn` + `/api/agent/sessions/{id}/turns/stream`, the RL-2026-06-057 450-case deterministic routing corpus, the RL-2026-06-058 prompt-eval harness plus confirmed `POST /api/orchestrator/turn/confirm` submission gate, the RL-2026-06-059 web agent control-plane UI, the RL-2026-06-060 managed-AI ledger/services/router/API/UI slice, run/project chat new-send migration onto scoped WEB agent sessions while preserving legacy chat history for read continuity, and the RL-2026-06-196 chat-first web-agent redesign (centered conversation, honest "Waiting for you"/"Running" status, a pinned live run card with phase/cost/progress polled from `getRun`+`getLiveCost`, a settings popover holding the de-jargoned internals, and an auto-titled Chats drawer). Managed-AI state is visible in the web agent, billing page, plan gate, compose/provider-model picker, and org settings effective-policy panel; the launch policy remains YAML-configured rather than admin-editable. Terminal/CLI work is separately grouped and must carry `TERM-AUDIT-*` tags (`TERM-AUDIT-SERVER-CONTRACT`, `TERM-AUDIT-SERVER-LOCAL-HANDS`, `TERM-AUDIT-SERVER-BILLING-VIEW`, `TERM-AUDIT-CLIENT-TUI`, `TERM-AUDIT-CLIENT-LOCAL-ACTIONS`, `TERM-AUDIT-CLIENT-STREAMING`) so it can be audited independently from web and managed-AI work. Remaining code gaps: legacy `/api/spec/chat` compatibility path does not yet expose the structured route decision, live provider prompt-eval execution requires a credentialed SUPER_ADMIN/operator smoke, and managed-AI transition email delivery still needs a deployed Gmail OAuth smoke. Coordinate with the standalone `executespec-cli` session by keeping local-only actions out of WEB capabilities and preserving server contracts rather than editing the split client repo here.
-- **Sarvam AI provider (2026-06-21, branch `codex/agent-control-plane-managed-ai-plan`)** — Sarvam added as the 7th `LlmProvider` (OpenAI-wire reuse via `OpenAiNativeToolClient`, base-url `api.sarvam.ai/v1`, Bearer auth; models `sarvam-105b` planning/workhorse + `sarvam-30b` light tier; `managed-ai-enabled:false`, NOT in failover, system-key-only — BYOK columns + migration deferred). Compiles, `FailoverOrderEnumAlignmentTest` green (enum 6→7), live API verified. **Benchmark (2026-06-21):** tier-eval-v2 **9/9 OK (~93/100)**, but **SWE-bench Lite 0/2 resolved** — `sarvam-105b` emits `<tool_call>read` text instead of native tool calls in the exploratory worker loop (Mistral-family quirk) → 0-byte patches. Verdict: viable for the **light/single-shot tier + India-market / sovereign-AI positioning**, NOT a code-gen worker today (blocked pending Sarvam serving fixes; uncertain client-side levers = a `<tool_call>`-text salvage shim or a trimmed worker tool set). Not committed to dev/main.
-- **Terminal-Bench 2.0 remote-worker adapter (RL-2026-06-004, 2026-06-05)** — ExecuteSpec's own `WorkerAgent` now runs on Terminal-Bench via remote-brain/local-hands: server-side worker loop, `TOOL_CALL` SSE, Harbor adapter executes tools in the TB container and returns envelopes through `POST /api/runs/{id}/tool-results`. Operator-only endpoint: `terminalbench/TerminalBenchController` under `/api/v2/test/terminal-bench/start`, `local|dev` profile + SUPER_ADMIN. The keystone bug was that the V2 worker manually dispatches tools, so the remote branch had to be added at `WorkerAgent.dispatchOne` through `ToolRegistry.isRemoteRun/dispatchRemote`; the old `ContextBoundToolCallback` branch alone never exercised remote mode for real worker runs. DeepSeek first-20 baseline: **7/20 resolved (35%) for about $0.09**. 80-floor tuning and the later 100-floor/finalizer run both reached **12/20 resolved (60%)**; the 100-run cost was **$0.400126** over **47m52s** with one Harbor timeout. Client/handoff live in `~/tbench/HANDOFF.md`; keep future TB tests DeepSeek-only unless explicitly broadening provider scope.
-- **In-app benchmark tracking — common / multi-suite layer (`benchmark` branch, 2026-06-09)** — a suite-agnostic in-app layer that **tracks** any benchmark run + submission + events inside ExecuteSpec (in-login `/benchmark` dashboard). ExecuteSpec is the event **sink + display, NOT an orchestrator**: an external verifier/harness (Harbor for Terminal-Bench; SWE-bench + ProgramBench next) publishes the **same** event shapes (`TASK_SCORED {task,attempt,reward,esRunId?,cost}` / `RUN_PROGRESS` / `RUN_DONE` / `SUBMISSION_*`) to one ingest endpoint; ExecuteSpec ingests → stores → re-broadcasts (SSE) → shows. **V236** (`benchmark_run` / `benchmark_task_result` / `benchmark_event`) + `benchmark/BenchmarkTrackingController` (`/api/v2/test/benchmark`, SUPER_ADMIN + `@Profile({"local","dev","benchmark"})`) + `BenchmarkTrackingService` (idempotent task upsert + resolved%/cost aggregation, reuses `sse/SseBroadcaster` keyed by the benchmark-run id). Suite discriminated by `BenchmarkSuite` (String column → new suites need no migration). Named **distinctly** from the SWE-bench *execution* harness `BenchmarkController` to avoid a class/path collision. Phases 1-2 (persistence + ingest/SSE) + **4 (operator `/benchmark` dashboard — IDE-native `frontend/src/ide/IdeBenchmark.tsx`, SUPER_ADMIN, polls list 5s / detail 3s, verified live desktop + mobile)** **done** — compiled + V236 boot-validated against `ddl-auto:validate` locally; **Phase 3 (the `run-tb.sh`/`tb-tracker.py` event hooks that feed it from a live TB run) is the remaining piece to close the loop.** Design: [`../executespec-docs/backend/plans/benchmark-closed-loop-2026-06-09.md`](../executespec-docs/backend/plans/benchmark-closed-loop-2026-06-09.md). RL-2026-06.
-- **Engine extraction Phase 5+6 — `ToolOutputCompactor` + prompt-cache discipline (`feat/benchmark-codegen-harness`, 2026-05-28)** — bulky worker tool output (`readFile` / `searchFiles` / `listFiles` / `shell` / `buildProject` / `runTests`, > 3 KB) is routed through the LIGHTWEIGHT tier (Haiku / Flash) before being appended to the WORKHORSE worker's history; only the summary lands in the decision context. Mirrors Anthropic's Claude Code CLI internal pattern. Skip rules: tool in `{writeFile, editFile, gitCommit, completeTask, gitDiff, gitStatus}` (already short/actionable), most-recent-tool-call (preserve verbatim), output < 3 KB. Fail-safe — any LLM error → keep raw. Default OFF behind `worker.tool-compactor.enabled` (V216 seeds `false`), so production runs are byte-identical until eval data justifies flipping. New `tool/ToolOutputCompactor.java` + `prompts/tool-output-compactor.md` + `application.yml agent-tier-map ToolOutputCompactor: LIGHTWEIGHT`. WorkerAgent integration: post-`ToolResult.Ok` content flows through `maybeCompact` before envelope-ing (null-guarded so existing unit tests pass `null` for the dependency). RL-2026-05-052.
-- **Native DeepSeek client + Qwen3-Coder via OpenRouter (`feat/benchmark-codegen-harness`, 2026-05-28)** — adds `DEEPSEEK` to `LlmProvider` enum + `callDeepSeek` dispatch case in `LlmRouter` (reuses `OpenAiNativeToolClient` plumbing with per-call base-URL pointing at `api.deepseek.com`). Eliminates the ~3-4× routing overhead vs the existing OpenRouter path for the same `deepseek-v4-pro` model — measured 18-min/instance avg on the 2026-05-28 mixed10 eval via OpenRouter vs Anthropic's native ~8-min. Qwen3-Coder added to `OpenRouterModelMapper` allow-list (`qwen3-coder` → `qwen/qwen3-coder`) — quality tied Gemini at 3/10 RESOLVED on mixed10, but at the OpenRouter latency penalty. Native Qwen client deferred. `application.yml`: new `spring.ai.deepseek.{base-url,api-key}` block; new `deepseek-v4-pro-native` matrix entry (provider=deepseek, native pricing $0.27/$0.027/$1.10). Backend awaits user's local DeepSeek key for smoke. RL-2026-05-052.
-- **BUILD-mode TDD-iteration tool — `runWorkspaceTests` (`feat/benchmark-codegen-harness`, 2026-05-28)** — new worker tool wrapping `WorkspaceTestRunner` (resolver-detected pytest / mvn / gradle / npm / cargo / go), exposed so BUILD-mode workers can validate their own tests in-loop before `completeTask` rather than only learning about test failures in the post-completion scoring phase. Distinct from `runTests` (pytest-only, PATCH-mode shaped — takes specific failing-test ids). Flag-gated `worker.build-tdd.enabled` (V217, default OFF) — when off, the tool returns an informative `{available: false}` Ok envelope so the worker can learn it's unusable on this run; when on, runs the whole suite and returns parsed pass/fail counts + verified flag. Goal: +8-12pp on SWE-bench-like sets (largest of the TRANCHE 3 quality levers from the 2026-05-28 roadmap). 6 unit tests pin the gate + envelope shape. RL-2026-05-052. **2026-05-31 (RL-2026-05-059) — WIRED + ON for dev:** `runWorkspaceTests` is auto-bound (`@Component implements Tool`) but was unmentioned in the worker prompt, so the worker never called it. The worker `VERIFY` directive (`SequentialExecutor.SYSTEM_PROMPT_BASE`) now CALLS it before `completeTask` and fixes any test the change broke; **both `worker.build-tdd.enabled` (V217) AND `build.test-exec-gate.enabled` (V209) flipped ON for dev** (prod defaults stay OFF → byte-identical). This is the verification-in-loop lever for the *wrong-half-fix* class that dominates DeepSeek/Gemini/GPT residuals (0 no-edits each; 22–26 real-but-wrong source patches). Round-2 eval is the owed no-regression gate before flipping defaults. **⚠️ 2026-06-01 (RL-2026-05-061) — REVERTED: `runWorkspaceTests`-in-prompt DROPPED + V217/V209 back OFF.** The tool in native-DeepSeek's schema caused reasoning-only no-edit stalls (astropy-14182: verification ON = 0 B no-edit → OFF = 1079 B edit). The GPT win instead came from a symptom-anchored rewrite of `SYSTEM_PROMPT_BASE` points 2+4 (reproduce with the issue's verbatim MWE; "if your edit didn't change the output you're in the wrong place"; match the issue's stated contract) — generic, no new tool, GPT 0/11 → 4/11 on the addressable gap (control: ~3 reliable on re-run + **0 regression** on every provider's passing set → GPT ~19–20; net full-50 still owed). See RL-2026-05-061 + [`../executespec-docs/backend/architecture/CODEMAP.md`](../executespec-docs/backend/architecture/CODEMAP.md) §H (SWE-bench eval-improvement track).
-- **CLI + VS Code clients — ✅ SPLIT OUT to the standalone `executespec-cli` repo (2026-06-07, RL-2026-06-014).** The entire `clients/` workspace (`@executespec/core` + `cli` + `vscode`) **and its `Clients` CI workflow moved out** so the clients version/release independently; **only the server-side OAuth device-login fix and the API endpoints they consume remain in THIS repo.** The history below is retained for context. Originally (`claude/modest-sagan-6Tge7`, 2026-05-26) — thin clients on a **local hands / remote brain** model: the server-side agent loop is unchanged but tool execution is proxied to the user's machine (code + artifacts stay local; nothing published by default). **PAT auth landed** (V215 `personal_access_token`; `POST/GET/DELETE /api/auth/me/tokens`) — purely additive, JWT path untouched. **Node/TS shared core landed** (`clients/core`: typed REST/SSE client, PAT token store, SSE consumer with scoped-token reconnect, local `ToolRuntime` mirroring the server `tool/*` contract). **Backend tool-proxy landed dormant** (`RemoteToolDispatcher` + `RemoteToolController` `POST /api/runs/{id}/tool-results` + `RunEvent.toolCall` + the null/`isRemote`-guarded `ToolRegistry` branch) — inert until a run registers a session, so the default pipeline is byte-identical. **CLI landed** (`clients/cli` — `@executespec/cli`, `executespec`/`es` bins: auth + run submit/watch/list/view/approve/reject/cancel/report + experimental local-hands `run local`). **VS Code extension landed** (`clients/vscode` — native MVP: SecretStorage PAT auth, Runs TreeView, Submit Spec, live OutputChannel stream, plan-gate Approve/Reject modal, **Cancel Run (inline Runs-view action + palette) + cancellable watch** (RL-2026-06-007); esbuild-bundled). Remaining, all flag-gated `LOCAL` mode with zero impact on the default path: the `RunOrchestrator` activation wiring (register/unregister + skip clone + skip auto-push), a rich run-detail webview, and the token-management web UI. RL-2026-05-043. **NOTE (2026-05-30):** `clients/core` + `clients/cli` now **build + run clean locally** (`npm install` + `tsc`; `executespec`/`es` verified via `npm link`) — the original reasoned-not-compiled caveat is cleared for those two (and the VS Code esbuild bundle now builds locally too — `dist/extension.js` ~31kb, RL-2026-06-007). Each client folder now carries its own `CODEMAP.md` + `ARCHITECTURE.md` (`clients/{cli,vscode}/`), and the folders are **slated to split into individual repos**. Build/verify steps remain in [`clients/VERIFY.md`](clients/VERIFY.md). **CLI robustness hardening (2026-06-07, RL-2026-06-005/006, pushed):** stdout/stderr split, SIGINT→server-cancel (exit 130), run-outcome exit codes (0/1/3), `--format text|json|stream-json` (NDJSON), `run submit -` stdin, `run attach` (event-log backfill), PAT pre-flight + enum-flag validation, structured result envelope, `--version` from `package.json`; core gained an `Idempotency-Key` on `submitRun` + a default per-request HTTP timeout, and the **server-side dedupe landed** (`run/RunIdempotencyService` — Redis `run:idem:{userId}:{key}`, 24h, fail-open — consulted by `RunController.submit` *before* the quota/usage increment, so a retried submit can't duplicate or double-charge a run). The **`run local` shell-permission gate also landed** (`ToolRuntime` is now fail-closed — `shell`/`buildProject`/`runTests`/`gitCommit` denied without an approval policy; `createInteractivePermissions`/`allowAllPermissions` added, RL-2026-06-006); the local-hands handshake is now explicit: `RunController` rejects `localExecution=true` while `worker.local-hands.enabled` is OFF, and accepted submit summaries echo `localExecutionAccepted=true` (V241, RL-2026-06-033). **CLI rich chat TUI (2026-06-07, RL-2026-06-008):** bare `executespec` on a TTY launches an **Ink** (React-for-CLIs) chat UI (`clients/cli/src/tui/chat.tsx` — `<Static>` transcript + live streaming region + status line + `ink-text-input`; Ctrl-C cancels the turn/exits) over `core.ChatSession`/`POST /api/spec/chat`; `--plain` or a non-TTY falls back to the readline REPL. Adds `ink`/`react`/`ink-text-input` deps; tested via `ink-testing-library`. Needs `spec.chat.enabled` (V229) ON for real chat. **Onboarding + chat-experience round (2026-06-07, RL-2026-06-014, not pushed):** (1) the **OAuth device-login path is fixed** — Google/GitHub now carry the `/cli-login` device-auth return URL across the provider round-trip via new `auth/oauth/OAuthRedirectCookieFilter` (a short-lived `SameSite=Lax` `es_oauth_redirect` cookie, `/cli-login`-only) → `OAuthSuccessHandler` (reads+clears, appends `&redirect=` to `/auth/callback`) → `AuthCallbackPage` (honours it); the email+password path already preserved it. Without this, OAuth sign-in from the CLI hung (landed on `/home`, never reached Authorize). `OAuthRedirectCookieFilterTest` (5). Local-only: `app.mail.base-url`→`:8080` in gitignored `application-local.yml` so OAuth lands on the backend-served origin, not Vite `:5173`. (2) **auto-login on first run** (`interactiveChat` in `clients/cli/src/index.ts`) — bare `executespec` on a TTY with no token opens the browser sign-in then enters chat. (3) **inline run streaming** (`chat.tsx`) — a chat-submitted run streams plan/tasks/files/score in the TUI with an inline `[y/N]` gate via `core.streamRunEvents` + a terminal summary (`chat-run-stream.test.mjs`). (4) a **welcome screen** (gradient banner + signed-in line + tips + footer, zero new deps). CLI suite 14/14. Remaining toward a full Gemini/Claude-Code feel: the live local-hands e2e and richer markdown/diff rendering in `executespec-cli`.
-  Current endpoint shape (RL-2026-06-040 follow-up): CLI and VS Code chat now prefer `POST /api/agent/sessions/{id}/turns/stream`, which records durable turns and usage in `agent_usage_ledger`; `/api/spec/chat` remains only as a compatibility fallback for older servers. **RL-2026-06-035:** when the session carries a `projectId`, `SpecChatService` binds the existing project/code tool surface (`ProjectChatTools`) alongside run-control tools, so common chat can answer grounded project/code questions instead of only submitting or managing runs. Duplicate tool names are filtered; `list_recent_runs` scopes to the linked project when present. **RL-2026-06-036:** provider selection is now cross-surface and account-scoped through `app_user.preferred_ai_provider`; web, CLI, and VS Code update the same preference and absent provider inputs resolve through it. **RL-2026-06-038:** CLI-approved read-only folder scans carry `EXECUTESPEC_LOCAL_CONTEXT: approved_read_only=true`; `SpecChatService` must treat that as real local evidence and must not answer "I can't inspect" when the snapshot is present. **RL-2026-06-039:** `/api/runs/{id}/tool-results` normalizes local-hands tool-result envelopes server-side; malformed client replies become bounded `INTERNAL` errors instead of arbitrary JSON entering the worker context. Direct SpecChat answers are capped at 8,192 output tokens and forced synthesis at 4,096; provider length truncation is surfaced explicitly instead of presenting partial code as complete.
-- **PR #170 (open against `dev`, 2026-05-24)** — codemap/arch regenerate-loop fix (`.executespec/`-only diffs no longer force regen) + Sync connection-leak fix (`syncRepo` is metadata-only + non-`@Transactional`; heavy regen moved to the new explicit `POST /api/projects/{id}/repos/{repoId}/regenerate-architecture`) + repo-card Language/Size/PR-link. RL-2026-05-025 + RL-2026-05-026.
-- **dev → main: in sync (2026-05-24)** — the V199→V203 honesty-pass release (PRs #155/#156) and every subsequent fix were promoted to `main` (latest via PR #169); `origin/dev` is 0 commits ahead of `origin/main`. No promotion pending. (Includes the planner over-decomposition relaxation, RL-2026-05-011.)
-- **`feature/programbench-benchmark`** — V2/V3 unification pass (88+18 file moves, 25 class renames) + ProgramBench adapter + step-2 wire-in into V2 worker stack. Validated locally across 3 providers (OpenAI / Anthropic / Gemini) on a Python single-shot spec; pipeline healthy. PR open against dev.
-- **`feature/swebench-harness`** (this branch, 2026-05-24) — clean-slate **blind** SWE-bench harness (new `benchmark/` package) that runs the REAL production pipeline in **PATCH** run-mode, blind (issue-only spec; hidden tests + gold `test_patch` applied externally at scoring). **Supersedes the PR #88 oracle adapter below** (which injected the gold test into the prompt → non-publishable; its 67%/60% numbers are **discarded**). Also lands two production-relevant fixes: `LlmRouter` bounded same-provider transient retry (RL-2026-05-029) + PATCH test-verification gate scoped by run source (RL-2026-05-028). Empirical (blind, small-N): Lite Hard-5 — Anthropic 4/4, Gemini 4/4, OpenAI 2/4; uplift study ~7% single-shot baseline → 67% with the system. Validated locally on Lite + Live × 3 providers; not merged. RL-2026-05-028 + RL-2026-05-029.
-- **`feature/swebench-adapter`** (PR #88, NOT merged — **superseded** by `feature/swebench-harness` above) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Its 67%/60% matrix numbers were measured **oracle-mode** (gold test injected into the prompt) and are **discarded** — the harness branch re-measures blind. The 4 autofix surfaces it introduced are live and unaffected.
-- **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `../executespec-docs/backend/reason-log/2026-05.md` and per-package `CLAUDE.md` files.
-- Mid-task checkpoint replay + per-provider mid-LLM-call abort + cross-JVM workspace shipping via GCS — all scoped + bounded; today's pause is "interrupt + resume-from-disk" semantics. Tracked in [`../executespec-docs/backend/reason-log/2026-05.md`](../executespec-docs/backend/reason-log/2026-05.md).
-- V2 batch execution — retired in ExecuteSpec 2.0; BATCH approvals return HTTP 410 while historical V61/V117 data remains read-compatible.
-
-### Known tech debt
-
-> **Full register: [`../executespec-docs/backend/reference/tech-debt.md`](../executespec-docs/backend/reference/tech-debt.md)** (audited 2026-05-24 — backend + frontend, severity-ranked). The highlights below are the items most likely to bite next.
-
-- ✅ ~~`/api/v2/test/**` unauthenticated in prod~~ — **fixed 2026-05-24** (RL-2026-05-027, PR #170). The nine `test/*Controller`s (Planner/Router/Executor/Worker/Reviewer/NativeTools/ToolRegistry/ContextStore/Metrics) are now `SUPER_ADMIN`-gated in `SecurityConfig` (was `permitAll()` — an unauthenticated LLM-pipeline surface).
-- **God classes** — `RunOrchestrator.java` remains 4,084 LOC despite the existing collaborator seams; the decomposition is functional but not complete. Frontend coupling remains concentrated in `frontend/src/lib/api/core.ts` (1,927 LOC), remaining direct admin/report seams, and broad end-to-end coverage gaps. Billing and post-review quality boundaries have been moved into focused modules, but the core file still owns many unrelated DTOs and compatibility contracts.
-- **Frontend: residual coupling and bundle-size debt** — vendor and route-level code splitting are active (`vite.config.ts` `manualChunks` plus `React.lazy`), and the Vitest suite currently passes 40 files / 190 tests. Remaining debt is concentrated in the shared API core, duplicate direct admin fetches, and broad end-to-end browser coverage; billing plan transport is now consolidated in `frontend/src/lib/api/billing.ts`.
-- ~~**Bug #1c (router strict-provider bypass)**~~ — **mostly mitigated** (corrected 2026-05-24). `ModelResolver` now gates adaptive routing behind `!strict && featureFlagService.isEnabled("routing.adaptive-routing.enabled")` ([line 84-88](src/main/java/com/navneet/executespec/router/ModelResolver.java)), flag default OFF — so `-Dexecutespec.strict-provider=true` DOES block the switch now. Residual: still silent when the flag is ON; no per-org opt-out.
-- ~~**Planner model sourced from run model, not tier**~~ — FIXED / stale note (RL-2026-05-015). Planner/worker/reviewer all resolve via `ModelResolver` (worker through `SequentialExecutor.tierConfigFor`); YAML-matrix + F3 per-org overrides take effect.
-- ~~**10 legacy access-guard sites**~~ — **resolved** (corrected 2026-05-24). `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` is now an empty, closed set (35/35 cleared); any new violator fails the build.
-- **JAVADOC.md is stale** — head reference corrected V202→V208 (2026-05-24), but a full rewrite is still queued; the authoritative surface lives in CLAUDE.md / ARCHITECTURE.md / per-package `CLAUDE.md`.
-
-### Current release-slice corrections (2026-07-11)
-
-- `tool/RepositorySearchService` keeps content-SHA fingerprints for working-tree freshness and now classifies deterministic symbol hits as definitions, imports, test references, call sites, or ordinary references. This is still syntax/heuristic evidence, not a language-aware relationship graph; the full relationship-index gate remains open.
-- `SubagentExecutionServiceTest` covers interruption of an in-flight sibling after a child failure; single-child provider calls still rely on existing turn/cost/HTTP bounds rather than an independent subagent wall-clock timeout.
+- Never commit credentials, service-account files, state/plan files, local configuration, or auth responses.
+- Keep `.codex-work/`, `.claude/`, generated reports, and run workspaces local.
+- Use explicit synthetic values in security tests; narrowly scope any scanner exceptions.
+- Deleting a secret from the current tree does not remove it from history. Report it privately and
+  revoke/rotate it before treating publication as safe.
+- Preserve migration history and executable tests when removing code. Prove that a candidate is
+  unused; Spring annotations, reflection, callbacks, and route registration can be runtime entrypoints.

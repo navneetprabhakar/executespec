@@ -23,6 +23,14 @@
   <name>executespec</name>
   <description>Spec-driven AI coding platform — spec in, multi-repo PR out, with a verified score</description>
 
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
   <properties>
     <java.version>21</java.version>
     <spring-ai.version>1.1.6</spring-ai.version>

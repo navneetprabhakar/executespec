@@ -444,7 +444,7 @@ public class ModelRegistry {
 
   /**
    * Returns the workhorse model for a given provider from the matrix. Useful for agents that need
-   * to reference the current workhorse model (e.g. ConversationAgent building suggestion plans).
+   * to reference the current workhorse model for cost estimates and run context.
    */
   public String workhouseModelFor(String provider) {
     if (matrixProps.getProviders() == null || provider == null) return null;

@@ -371,8 +371,8 @@ class LlmRouterTest {
         "claude-sonnet-4-6",
         List.of(new UserMessage("stable system context")),
         "run-cache",
-        "ConversationAgent",
-        "suggestion-plan",
+        "TextSeamTest",
+        "cache-test",
         128,
         LlmRequest.PromptCacheStrategy.SYSTEM_ONLY);
 
@@ -398,7 +398,7 @@ class LlmRouterTest {
         "claude-sonnet-4-6",
         List.of(new UserMessage("no cache")),
         "run-cache-none",
-        "ConversationAgent",
+        "TextSeamTest",
         "test",
         128,
         LlmRequest.PromptCacheStrategy.NONE);
