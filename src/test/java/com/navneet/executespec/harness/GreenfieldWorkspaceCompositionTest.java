@@ -228,6 +228,13 @@ class GreenfieldWorkspaceCompositionTest {
             + "assert.equal(slugify('  Hello, World!  '), 'hello-world');\n"
             + "assert.equal(slugify('---'), '');\n");
 
+    Files.writeString(
+        root.resolve("src/slug.test.mjs"),
+        "import test from 'node:test'; import assert from 'node:assert/strict';\n"
+            + "import {slugify} from './slug.mjs';\n"
+            + "test('slug behavior', () => { assert.equal(slugify('Hello World'), 'hello-world');"
+            + " assert.equal(slugify('---'), ''); });\n");
+
     assertThat(run(root, contract.buildCommand().command())).isZero();
     assertThat(run(root, contract.testCommand().command())).isZero();
     assertThat(run(root, "node held_out_test.mjs")).isZero();

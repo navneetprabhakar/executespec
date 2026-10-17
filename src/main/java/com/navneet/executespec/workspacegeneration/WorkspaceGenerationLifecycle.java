@@ -37,6 +37,17 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class WorkspaceGenerationLifecycle {
 
+  public AcceptedWorkspaceFrontier acceptedFrontier(String runId, int targetTaskIndex) {
+    PipelineRun run = runs.findById(runId).orElseThrow();
+    if (run.getAcceptedGenerationAttemptId() == null
+        || run.getAcceptedTaskIndex() == null
+        || targetTaskIndex > run.getAcceptedTaskIndex()) return null;
+    return new AcceptedWorkspaceFrontier(
+        run.getAcceptedGenerationAttemptId(),
+        run.getAcceptedTaskIndex(),
+        run.getAcceptedWorkspaceGeneration());
+  }
+
   private static final String SHA_256 = "[0-9a-f]{64}";
 
   private final WorkspaceGenerationAttemptRepository attempts;
@@ -121,7 +132,12 @@ public class WorkspaceGenerationLifecycle {
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
       transaction.executeWithoutResult(
           ignored -> {
-            seedOrAssertFrontier(runId, admitted.getTaskIndex(), beforeGeneration);
+            if (admitted.getAttemptKind() == WorkspaceGenerationKind.CORRECTION) {
+              WorkspaceGenerationFrontierPolicy.assertCorrection(
+                  admitted, beforeGeneration, runs.findById(runId).orElseThrow());
+            } else {
+              seedOrAssertFrontier(runId, admitted.getTaskIndex(), beforeGeneration);
+            }
             requireCas(
                 attempts.completePreparation(
                     attemptId,
@@ -481,17 +497,7 @@ public class WorkspaceGenerationLifecycle {
             Instant.now()),
         "WORKSPACE_GENERATION_ACCEPT_CAS_FAILED");
     requireCas(
-        runMutations.advanceAcceptedWorkspaceFrontier(
-            attempt.getRunId(),
-            attempt.getBeforeGeneration(),
-            attempt.getTaskIndex() - 1,
-            current,
-            attempt.getTaskIndex(),
-            attempt.getId(),
-            attempt.getCheckpointKind(),
-            attempt.getCheckpointKey(),
-            attempt.getCheckpointDigest(),
-            attempt.getCheckpointCompletedAt()),
+        WorkspaceGenerationFrontierPolicy.advance(runMutations, attempt, current),
         "WORKSPACE_GENERATION_FRONTIER_CAS_FAILED");
   }
 

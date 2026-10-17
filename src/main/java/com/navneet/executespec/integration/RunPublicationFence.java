@@ -26,8 +26,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Deliberately narrow: it fences only runs dispatched by the Execution-View solution path
  * ({@code EXECUTION_VIEW_APPROVED}). Ordinary customer runs have no parent attempt to be superseded
- * by and are unaffected. It also fails OPEN on a repository error — a database blip must not stop a
- * legitimate run from publishing its work, and the paths this protects are already the exception.
+ * by and are unaffected. Publication fails closed when the parent identity cannot be verified. A
+ * later retry can publish after database recovery; an unverified attempt must not create an
+ * external artifact.
  */
 @Service
 @RequiredArgsConstructor
@@ -45,24 +46,38 @@ public class RunPublicationFence {
    * @return true when this run may still publish; false when it is a superseded or abandoned
    *     Execution-View attempt
    */
+  @org.springframework.transaction.annotation.Transactional(readOnly = true)
   public boolean mayPublish(PipelineRun run) {
-    if (run == null) return false;
+    if (run == null
+        || java.util.Set.of("CANCELLED", "PAUSED").contains(String.valueOf(run.getStatus())))
+      return false;
     if (!EXECUTION_VIEW_SOURCE.equalsIgnoreCase(String.valueOf(run.getSourceType()))) {
       return true;
     }
     ExecutionSolution solution;
+    String parentStatus;
     try {
       solution = solutionRepo.findFirstByPipelineRunId(run.getRunId()).orElse(null);
+      parentStatus =
+          solution == null || solution.getExecutionRun() == null
+              ? null
+              : solution.getExecutionRun().getStatus();
     } catch (Exception e) {
       log.warn(
-          "run={} publication fence unavailable, allowing push: {}", run.getRunId(), e.toString());
-      return true;
+          "run={} publication fence unavailable, refusing push: {}", run.getRunId(), e.toString());
+      return false;
     }
     if (solution == null) {
       log.warn(
           "run={} publication refused — no Execution-View solution still names this attempt"
               + " (superseded by a retry, or the solution row is gone)",
           run.getRunId());
+      return false;
+    }
+    if (parentStatus == null
+        || java.util.Set.of("PAUSED", "ABORTED", "CANCELLED", "FAILED")
+            .contains(parentStatus.toUpperCase(java.util.Locale.ROOT))) {
+      log.warn("run={} publication refused — parent execution is not active", run.getRunId());
       return false;
     }
     if (SKIPPED.equalsIgnoreCase(String.valueOf(solution.getStatus()))) {

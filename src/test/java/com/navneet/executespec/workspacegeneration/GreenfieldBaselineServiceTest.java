@@ -20,6 +20,42 @@ class GreenfieldBaselineServiceTest {
   private final GreenfieldBaselineService service = new GreenfieldBaselineService();
 
   @Test
+  void laterFeatureAndDocumentationTasksReuseTheQualifiedBootstrap() throws Exception {
+    PlannedTask scaffold = task("Bootstrap Python library", List.of("main.py", "requirements.txt"));
+    PlannedTask feature =
+        task("Implement service", List.of()).toBuilder()
+            .id("T2")
+            .touchesFiles(List.of("service.py", "test_service.py"))
+            .build();
+    PlannedTask documentation =
+        task("Update documentation", List.of()).toBuilder()
+            .id("T3")
+            .touchesFiles(List.of("README.md"))
+            .build();
+    Plan approved =
+        Plan.builder()
+            .projectType("python")
+            .runtimeSurface(Plan.RuntimeSurface.LIBRARY)
+            .tasks(List.of(scaffold, feature, documentation))
+            .build();
+    GreenfieldBaselinePlan bootstrap =
+        service.plan(workspace, scaffold, approved, WorkspaceOrigin.GREENFIELD);
+    service.materialize(workspace, bootstrap);
+    Files.writeString(workspace.resolve("main.py"), "def main(): return 1\n");
+    Files.writeString(workspace.resolve("requirements.txt"), "");
+
+    for (PlannedTask next : List.of(feature, documentation)) {
+      GreenfieldBaselinePlan baseline =
+          service.plan(workspace, next, approved, WorkspaceOrigin.GREENFIELD);
+      assertThat(baseline.supported()).isTrue();
+      assertThat(baseline.greenfield()).isFalse();
+      assertThat(baseline.requiredTaskPaths()).isEmpty();
+      assertThat(baseline.filesToCreate()).isEqualTo(bootstrap.filesToCreate());
+      assertThat(service.materialize(workspace, baseline)).isEmpty();
+    }
+  }
+
+  @Test
   void planningIsSideEffectFreeAndPythonMaterializationIsIdempotent() throws Exception {
     PlannedTask task =
         task("Implement Python calculator", List.of("calculator.py", "test_calculator.py"));

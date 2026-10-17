@@ -42,14 +42,16 @@ class ProviderModelCatalogConfigurationTest {
             "kimi-k2.7-code-fw");
 
     assertThat(map(providers.get("fireworks")))
-        .containsEntry("planning", "deepseek-v4-pro-fw")
-        .containsEntry("workhorse", "deepseek-v4-pro-fw")
-        .containsEntry("lightweight", "kimi-k2p6-fw");
-    assertThat(aliases)
-        .containsEntry("gpt-5.5-mini", "gpt-5.6-luna")
-        .containsEntry("deepseek-v4-flash-fw", "kimi-k2p6-fw")
-        .containsEntry("minimax-m3-fw", "glm-5.2-fw")
-        .containsEntry("kimi-k2.7-code-fw", "kimi-k2p6-fw");
+        .containsEntry("planning", "deepseek-v4p1-flash-fw")
+        .containsEntry("workhorse", "deepseek-v4p1-flash-fw")
+        .containsEntry("lightweight", "deepseek-v4p1-flash-fw");
+    assertThat(aliases).containsEntry("gpt-5.5-mini", "gpt-5.6-luna");
+    assertThat(models.keySet())
+        .contains("deepseek-v4p1-flash-fw")
+        .doesNotContain("deepseek-v4-pro-fw", "kimi-k2p6-fw", "glm-5.2-fw", "glm-5.2-fast-fw");
+    assertThat(aliases.keySet())
+        .doesNotContain(
+            "deepseek-v4-flash-fw", "minimax-m3-fw", "minimax-m2.7-fw", "kimi-k2.7-code-fw");
 
     for (String conservativelyPricedModel :
         new String[] {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "qwen3.7-plus", "grok-4.5"}) {

@@ -94,6 +94,29 @@ class OutlinePlannerSingleShotSurfaceTest {
   }
 
   @Test
+  void excludedSurfacesDoNotReclassifyPositiveLibraryWebOrApiRequests() {
+    assertThat(SingleShotSurfaceClassifier.infer("No authentication, build a REST API."))
+        .isEqualTo(Plan.RuntimeSurface.HTTP);
+    assertThat(
+            SingleShotSurfaceClassifier.infer(
+                "Create a minimal Python library. This is a library, not an HTTP service or a"
+                    + " CLI."))
+        .isEqualTo(Plan.RuntimeSurface.LIBRARY);
+    assertThat(SingleShotSurfaceClassifier.infer("Build a REST API without a CLI or library."))
+        .isEqualTo(Plan.RuntimeSurface.HTTP);
+    assertThat(SingleShotSurfaceClassifier.infer("Build a website. No backend API or CLI."))
+        .isEqualTo(Plan.RuntimeSurface.STATIC_WEB);
+    assertThat(SingleShotSurfaceClassifier.infer("Not an HTTP server, but a terminal CLI."))
+        .isEqualTo(Plan.RuntimeSurface.CLI);
+    assertThat(SingleShotSurfaceClassifier.infer("Not only a CLI but also a reusable library."))
+        .isEqualTo(Plan.RuntimeSurface.CLI);
+    assertThat(
+            SingleShotSurfaceClassifier.projectType(
+                "Build a Node.js library, not Python or FastAPI.", Plan.RuntimeSurface.LIBRARY))
+        .isEqualTo("node-backend");
+  }
+
+  @Test
   void multiEndpointSingleShotPlanPreservesEveryExactHttpOperation() {
     String request =
         """

@@ -99,7 +99,8 @@ final class WorkspaceGenerationPostgresFixture {
         contextId,
         operationId,
         operationToken,
-        operationLease);
+        operationLease,
+        null);
   }
 
   static OperationBinding insertPreparedExact(
@@ -149,7 +150,47 @@ final class WorkspaceGenerationPostgresFixture {
         "ctx-" + UUID.randomUUID(),
         "op-" + UUID.randomUUID(),
         UUID.randomUUID(),
-        Duration.ofMinutes(10));
+        Duration.ofMinutes(10),
+        null);
+  }
+
+  static OperationBinding insertPreparedCorrection(
+      JdbcTemplate jdbc,
+      UUID attemptId,
+      String runId,
+      String taskId,
+      int taskIndex,
+      int attemptNumber,
+      UUID workspaceToken,
+      AcceptedWorkspaceFrontier frontier,
+      String contract) {
+    return insertPreparedExact(
+        jdbc,
+        attemptId,
+        runId,
+        taskId,
+        taskIndex,
+        attemptNumber,
+        "/tmp/run-v374",
+        workspaceToken,
+        frontier.generation(),
+        "[]",
+        "d".repeat(64),
+        contract,
+        "{}",
+        "8".repeat(64),
+        "GCS",
+        "gs://bucket/run-v374-next.zip",
+        "7".repeat(64),
+        "fixture-generation",
+        1024,
+        "fixture-crc",
+        "fixture-etag",
+        "ctx-" + UUID.randomUUID(),
+        "op-" + UUID.randomUUID(),
+        UUID.randomUUID(),
+        Duration.ofMinutes(10),
+        frontier);
   }
 
   private static OperationBinding insertPreparedExact(
@@ -177,7 +218,8 @@ final class WorkspaceGenerationPostgresFixture {
       String contextId,
       String operationId,
       UUID operationToken,
-      Duration operationLease) {
+      Duration operationLease,
+      AcceptedWorkspaceFrontier frontier) {
     jdbc.update(
         "INSERT INTO llm_execution_context("
             + "id,context_type,feature,source_type,source_id,correlation_id,scope_mode,isolation_key,"
@@ -205,21 +247,26 @@ final class WorkspaceGenerationPostgresFixture {
         "INSERT INTO workspace_generation_attempt("
             + "id,run_id,task_id,task_index,attempt_number,attempt_kind,state,workspace_root,"
             + "authority_digest,task_contract_digest,build_protocol_version,"
-            + "verification_command_protocol_version,created_at,updated_at)"
-            + " VALUES (?,?,?,?,?,'BUILD_TASK','ADMITTED',?,?,?,"
+            + "verification_command_protocol_version,created_at,updated_at,"
+            + "base_frontier_attempt_id,frontier_task_index,base_frontier_generation)"
+            + " VALUES (?,?,?,?,?,?,'ADMITTED',?,?,?,"
             + "(SELECT build_protocol_version FROM pipeline_run WHERE run_id=?),"
             + "(SELECT CASE WHEN build_protocol_version='SHARED_KERNEL_V2' THEN 2 ELSE 1 END"
-            + " FROM pipeline_run WHERE run_id=?),NOW(),NOW())",
+            + " FROM pipeline_run WHERE run_id=?),NOW(),NOW(),?,?,?)",
         attemptId,
         runId,
         taskId,
         taskIndex,
         attemptNumber,
+        frontier == null ? "BUILD_TASK" : "CORRECTION",
         workspaceRoot,
         authorityDigest,
         taskContractDigest,
         runId,
-        runId);
+        runId,
+        frontier == null ? null : frontier.attemptId(),
+        frontier == null ? null : frontier.taskIndex(),
+        frontier == null ? null : frontier.generation());
     jdbc.update(
         "UPDATE workspace_generation_attempt SET state='OPERATION_CLAIMED',"
             + "llm_operation_id=?,llm_attempt_number=1,llm_lease_token=?::uuid,updated_at=NOW()"

@@ -220,6 +220,10 @@ public record ExecutionContext(
         acceptance);
   }
 
+  public void assertVerificationSandboxLive() {
+    if (verificationSandboxAuthority != null) verificationSandboxAuthority.assertLive();
+  }
+
   public void assertWorkspaceGenerationDispatch(
       WorkspaceGenerationDispatchAuthority.Phase requiredPhase) {
     if (workspaceGenerationDispatchAuthority == null) {

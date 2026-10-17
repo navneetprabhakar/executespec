@@ -14,14 +14,50 @@ import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
-
 /** Resolves the application root inside a restored run workspace. */
 @Component
-@RequiredArgsConstructor
 class PreviewWorkspaceResolver {
 
   private final RunRepoSnapshotRepository snapshotRepository;
+  private final com.navneet.executespec.integration.CorrectionWorkspaceTransaction generations;
+
+  PreviewWorkspaceResolver(RunRepoSnapshotRepository snapshots) {
+    this(snapshots, new com.navneet.executespec.integration.CorrectionWorkspaceTransaction());
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  PreviewWorkspaceResolver(
+      RunRepoSnapshotRepository snapshots,
+      com.navneet.executespec.integration.CorrectionWorkspaceTransaction generations) {
+    this.snapshotRepository = snapshots;
+    this.generations = generations;
+  }
+
+  BoundWorkspace resolveBound(String runId, Path restoredRunRoot) {
+    String before = generations.captureGeneration(restoredRunRoot);
+    List<RunRepoSnapshot> snapshots = snapshotRepository.findByRunId(runId);
+    Path application =
+        snapshots.isEmpty() ? restoredRunRoot : resolveLinkedRepository(restoredRunRoot, snapshots);
+    String applicationGeneration = generations.captureGeneration(application);
+    Path staged = stage(runId + "-" + java.util.UUID.randomUUID(), restoredRunRoot, application);
+    if (!applicationGeneration.equals(generations.captureGeneration(staged))
+        || !before.equals(generations.captureGeneration(restoredRunRoot))) {
+      deleteTree(staged);
+      throw new PreviewException("Preview source changed while staging the build context.");
+    }
+    return new BoundWorkspace(staged, before);
+  }
+
+  boolean matchesGeneration(Path root, String generation) {
+    if (generation == null) return false;
+    return generation.equals(generations.captureGeneration(root));
+  }
+
+  void discard(Path workspace) {
+    deleteTree(workspace);
+  }
+
+  record BoundWorkspace(Path workspace, String generation) {}
 
   Path resolve(String runId, Path restoredRunRoot) {
     List<RunRepoSnapshot> snapshots = snapshotRepository.findByRunId(runId);

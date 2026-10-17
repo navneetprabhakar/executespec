@@ -9,7 +9,7 @@ final class SingleShotSurfaceClassifier {
 
   /** Explicit backend/API language wins; otherwise ordinary web-app language means a browser UI. */
   static Plan.RuntimeSurface infer(String spec) {
-    String text = spec == null ? "" : spec.toLowerCase(Locale.ROOT);
+    String text = positiveConstraints(spec);
     // A CLI request often includes a negative server constraint ("do not create an HTTP
     // server"). Classify the requested positive surface before scanning broad backend words so
     // that the negated constraint cannot turn a command-line deliverable into an HTTP project.
@@ -41,7 +41,7 @@ final class SingleShotSurfaceClassifier {
   }
 
   static String projectType(String spec, Plan.RuntimeSurface surface) {
-    String text = spec == null ? "" : spec.toLowerCase(Locale.ROOT);
+    String text = positiveConstraints(spec);
     if (text.contains("fastapi") || text.matches("(?s).*\\bpython\\b.*")) return "python";
     if (text.contains("spring boot") || text.contains("springboot")) return "java-spring-boot";
     if (text.contains("express") || text.contains("node.js") || text.contains("nodejs")) {
@@ -49,6 +49,17 @@ final class SingleShotSurfaceClassifier {
     }
     if (text.contains("react") || text.contains("vite")) return "node-frontend";
     return projectType(surface);
+  }
+
+  /** Ignore explicitly excluded surfaces/frameworks; contrast clauses restore positive intent. */
+  private static String positiveConstraints(String spec) {
+    String text = spec == null ? "" : spec.toLowerCase(Locale.ROOT);
+    return text.replaceAll(
+        "\\b(?:not(?!\\s+(?:only|just)\\b)|never|without|no|isn't|don't|doesn't)\\b"
+            + "(?:(?!\\b(?:but|instead|however)\\b"
+            + "|,\\s*(?:build|create|implement|provide|expose|write|develop|generate)\\b)"
+            + "[^.!?;\\n])*",
+        " ");
   }
 
   static String taskConstraint(Plan.RuntimeSurface surface) {

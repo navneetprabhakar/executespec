@@ -22,6 +22,7 @@ public class VerificationSandboxAuthority {
   private final String generation;
   private final WorkspaceGenerationDispatchAuthority.Phase phase;
   private final Path workspaceRoot;
+  private final java.util.function.Consumer<VerificationSandboxAuthority> liveFence;
   private final AtomicLong commandSequence = new AtomicLong();
 
   VerificationSandboxAuthority(
@@ -32,13 +33,18 @@ public class VerificationSandboxAuthority {
       String generation,
       WorkspaceGenerationDispatchAuthority.Phase phase,
       Path workspaceRoot) {
-    this.capabilityId = capabilityId;
-    this.sandboxId = sandboxId;
-    this.runId = runId;
-    this.attemptId = attemptId;
-    this.generation = generation;
-    this.phase = phase;
-    this.workspaceRoot = workspaceRoot;
+    this(
+        capabilityId,
+        sandboxId,
+        runId,
+        attemptId,
+        generation,
+        phase,
+        workspaceRoot,
+        ignored -> {
+          throw new SandboxCommandRoutingService.VerificationSandboxException(
+              "VERIFICATION_SANDBOX_AUTHORITY_UNBOUND");
+        });
   }
 
   VerificationSandboxAuthority(
@@ -49,6 +55,29 @@ public class VerificationSandboxAuthority {
       WorkspaceGenerationDispatchAuthority.Phase phase,
       Path workspaceRoot) {
     this(capabilityId, sandboxId, runId, null, generation, phase, workspaceRoot);
+  }
+
+  VerificationSandboxAuthority(
+      UUID capabilityId,
+      UUID sandboxId,
+      String runId,
+      UUID attemptId,
+      String generation,
+      WorkspaceGenerationDispatchAuthority.Phase phase,
+      Path workspaceRoot,
+      java.util.function.Consumer<VerificationSandboxAuthority> liveFence) {
+    this.capabilityId = capabilityId;
+    this.sandboxId = sandboxId;
+    this.runId = runId;
+    this.attemptId = attemptId;
+    this.generation = generation;
+    this.phase = phase;
+    this.workspaceRoot = workspaceRoot;
+    this.liveFence = java.util.Objects.requireNonNull(liveFence);
+  }
+
+  public void assertLive() {
+    liveFence.accept(this);
   }
 
   UUID capabilityId() {

@@ -11,6 +11,17 @@ spring:
     password: ${POSTGRES_PASSWORD:postgres}
   jpa:
     show-sql: false
+  ai:
+    # Router-owned native clients and AgentModelConfig create only configured provider clients.
+    # Disable unrelated Spring AI auto-configured capabilities in this isolated fixture.
+    model:
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
 
 agent:
   workspace: ./workspace-e2e     # isolated from normal ./workspace
@@ -38,6 +49,10 @@ agent:
 # PipelineE2ETest pins DEEPSEEK/deepseek-v4-flash-native and a $0.10 RunRequest cap in its
 # test-context-only reserved submit endpoint. Do not add placeholder provider keys here: live
 # dispatch requires -Plive-llm-test plus an exact provider/model/run budget-ledger reservation.
+
+# Qualification exercises BUILD acceptance, not cloud deployment or automatic preview.
+preview:
+  enabled: false
 
 logging:
   level:

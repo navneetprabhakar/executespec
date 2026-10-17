@@ -48,6 +48,7 @@ class BenchmarkBlindSpecTest {
 
   private static BenchmarkGenerationService service() {
     return new BenchmarkGenerationService(
+        org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class),
         new SwebenchProperties(),
         mock(SwebenchInstanceLoader.class),
         mock(SwebenchContainerStore.class),

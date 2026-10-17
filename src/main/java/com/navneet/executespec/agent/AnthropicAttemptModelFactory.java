@@ -11,9 +11,14 @@ import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import lombok.RequiredArgsConstructor;
+
 /** Builds one bounded, non-retrying Spring Anthropic model for one admitted physical attempt. */
 @Component
+@RequiredArgsConstructor
 public class AnthropicAttemptModelFactory {
+
+  private final AnthropicWorkspaceHeaders workspaceHeaders;
 
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(30);
   private static final RetryTemplate SINGLE_ATTEMPT =
@@ -40,7 +45,8 @@ public class AnthropicAttemptModelFactory {
             .build();
     JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
     requestFactory.setReadTimeout(readTimeout);
-    RestClient.Builder restClient = RestClient.builder().requestFactory(requestFactory);
+    RestClient.Builder restClient =
+        workspaceHeaders.apply(RestClient.builder().requestFactory(requestFactory), apiKey);
     AnthropicApi api =
         AnthropicApi.builder()
             .apiKey(apiKey)

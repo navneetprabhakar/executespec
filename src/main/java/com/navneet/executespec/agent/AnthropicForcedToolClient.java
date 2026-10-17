@@ -58,6 +58,7 @@ import lombok.extern.slf4j.Slf4j;
 public class AnthropicForcedToolClient {
 
   private final ObjectMapper objectMapper;
+  private final AnthropicWorkspaceHeaders workspaceHeaders;
 
   /**
    * RR-1180 fallback HTTP read ceiling when the caller does not (yet) forward a live worker
@@ -258,7 +259,8 @@ public class AnthropicForcedToolClient {
       AnthropicApi api =
           AnthropicApi.builder()
               .apiKey(key)
-              .restClientBuilder(boundedRestClientBuilder(readTimeoutSeconds))
+              .restClientBuilder(
+                  workspaceHeaders.apply(boundedRestClientBuilder(readTimeoutSeconds), key))
               .build();
       signalPhysicalAttemptStarted(physicalAttemptStartedCallback);
       AnthropicApi.ChatCompletionResponse resp = api.chatCompletionEntity(req).getBody();

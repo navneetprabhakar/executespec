@@ -23,8 +23,9 @@ V374 makes one initial BUILD task the unit of mutation authority. V375 preserves
 and rejected-diff evidence independently from first recovery-failure evidence. V376 seeds the
 default-off shared BUILD-loop rollout flag; V377 freezes the schema-v2 task contract, planned
 initial failure, physical route and usage evidence. V378 freezes the initial acceptance probe
-executed after baseline materialization and before provider dispatch; only an observed red result
-admits dispatch. `WorkspaceGenerationLifecycle`
+executed after baseline materialization and before provider dispatch. Historical schema-v2 contracts
+require an observed red result. New schema-v3 contracts also admit an honestly recorded healthy
+baseline; unavailable execution still blocks provider dispatch. `WorkspaceGenerationLifecycle`
 owns `PREPARED → MUTATING → VERIFYING → VERIFIED → CHECKPOINTING → ACCEPTED`; every rejection uses
 `ROLLING_BACK → ROLLED_BACK`, and crash recovery may use `RECOVERY_FAILED → ROLLING_BACK` retries.
 Never infer acceptance from a worker outcome or task status.
@@ -70,7 +71,7 @@ operation independently, and releases workspace authority only after both receip
 The historical terminal-row backfill transactionally suspends the V384 resolved-attempt guard,
 performs the enrichment under the migration table lock, and reinstalls the expanded V399 guard
 before commit; `FlywayMigrationInventoryTest` pins that ordering.
-`WorkspaceGenerationSchemaAttestor` independently verifies migration V400 and all 62 load-bearing
+`WorkspaceGenerationSchemaAttestor` independently verifies migration V403 and all 64 load-bearing
 PostgreSQL indexes/triggers before protocol-v2 admission.
 `BuildEnvironmentPlanResolver` derives deterministic, network-denied reconstruction commands from
 accepted Node, Python, Maven, Gradle, Go, and Rust manifests plus a digest-pinned runtime image.
@@ -334,3 +335,39 @@ their exhaustive crash-state tests.
   persisted-origin precedence, exact durable update cardinality, and iteration non-reclassification.
 - `DeterministicFailureDeltaTest` + `WorkerAutoVerifyProgressTest`: stable normalized comparison of
   consecutive verifier evidence and first-edit comparison against the V378 red state.
+
+## BUILD contract repair (2026-10-17)
+
+`TaskAcceptanceKind` freezes bootstrap/change/repair/non-code intent in schema-v3 policy digests.
+The immutable GREENFIELD origin bootstraps only the first planned task. Later tasks reuse its
+frozen verifier bytes, resolve commands against the existing workspace, and keep their own required
+artifacts. `BuildPlanCapabilityPolicy` rejects unsupported shared-kernel plans before the plan gate.
+Supported bootstrap qualification remains Python and non-HTTP Node JavaScript; this change does
+not qualify additional runtime adapters.
+
+`BuildCorrectionScope` freezes all accepted-prefix required artifacts plus endpoint expectations for
+schema-v3 corrections. Legacy corrections retain the accepted-prefix artifacts and require the full
+workspace test suite, without claiming schema-v3 runtime proof.
+[ V401 ](../../../../../resources/db/migration/V401__bind_build_corrections_to_accepted_prefix.sql)
+adds `WorkspaceGenerationAttempt.baseFrontierAttemptId`, `frontierTaskIndex`, and
+`baseFrontierGeneration`. Correction admission rechecks that exact prefix after resolving its
+contract. `WorkspaceGenerationFrontierPolicy` uses a separate exact compare-and-set to replace the
+accepted generation without moving the task index backwards or inventing another completed task.
+The database requires the exact passing receipt and completed checkpoint for that replacement.
+Existing LLM/workspace lease, WORKING, cancellation, rollback, and terminal-convergence fences remain.
+
+Frozen verification replaces provisional goal/continuation decisions after acceptance or rejection.
+Unavailable infrastructure yields STOP_BLOCKED; a product rejection can request one bounded retry.
+The Node baseline executes maintained node:test tests and requires positive pass counts; path
+existence and all-skipped output cannot prove behavior. npm inference requires a real build script.
+`BootstrapArtifactIntegrity` keeps verifier files immutable without following repository symlinks.
+
+Local regression coverage includes `BuildPlanAcceptanceFlowTest` (three real-command Python tasks,
+Node wrong-behavior and all-skipped rejection), the coordinator/decision cohorts, and real PostgreSQL
+prefix replacement/stale-prefix refusal. These are deterministic contract proofs; live provider
+end-to-end qualification remains a separate credentialed test.
+
+Ignored-artifact cleanup removes cache-local `.gitignore` files last, deepest first. Pytest creates
+a self-ignoring cache: deleting its rule file first would make later cache entries appear to change
+classification. Each deletion still rechecks current Git classification and workspace authority;
+external rule changes remain a hard refusal. Regression coverage includes both cases.

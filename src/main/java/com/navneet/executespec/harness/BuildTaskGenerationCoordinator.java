@@ -150,20 +150,37 @@ public class BuildTaskGenerationCoordinator {
     requireServerOwnedWorkspace(request.localHandsMode());
     String runId = request.runContext().runId();
     boolean sharedLoopEnabled = protocolVersions.requireExecutable(runId).sharedKernel();
+    var correctionFrontier = continuation ? generations.acceptedFrontier(runId, taskIndex) : null;
     GreenfieldBaselinePlan baseline =
         sharedLoopEnabled
             ? greenfieldBaselines.plan(
                 request.runContext().workspaceRoot(), task, plan, request.workspaceOrigin())
             : null;
+    if (baseline != null && correctionFrontier != null) {
+      baseline =
+          com.navneet.executespec.workspacegeneration.BuildCorrectionScope.baseline(
+              baseline, plan, correctionFrontier.taskIndex());
+    }
     if (baseline != null && !baseline.supported()) {
       throw new IllegalStateException(
           "GREENFIELD_RUNTIME_UNSUPPORTED: deterministic BUILD baseline could not be resolved");
     }
     TaskAcceptanceContract contract =
         sharedLoopEnabled
-            ? contracts.resolveFailureFirst(
-                task, plan, taskIndex, request.runContext().workspaceRoot(), baseline)
-            : contracts.resolve(task, taskIndex);
+            ? (correctionFrontier == null
+                ? contracts.resolveFailureFirst(
+                    task, plan, taskIndex, request.runContext().workspaceRoot(), baseline)
+                : contracts.resolveCorrection(
+                    task,
+                    plan,
+                    taskIndex,
+                    request.runContext().workspaceRoot(),
+                    baseline,
+                    correctionFrontier.taskIndex()))
+            : (correctionFrontier == null
+                ? contracts.resolve(task, taskIndex)
+                : contracts.resolveLegacyCorrection(
+                    task, plan, taskIndex, correctionFrontier.taskIndex()));
     String authorityDigest =
         contracts.authorityDigest(plan, request.originalGoal(), request.workspaceSummary());
     String contractJson = sharedLoopEnabled ? contracts.canonicalContract(contract) : null;
@@ -190,7 +207,8 @@ public class BuildTaskGenerationCoordinator {
                     ? (authorizedTerminal
                         ? BuildContinuationAdmissionService.AdmissionKind.AUTHORIZED_TERMINAL
                         : BuildContinuationAdmissionService.AdmissionKind.AUTOMATIC_CONTINUATION)
-                    : BuildContinuationAdmissionService.AdmissionKind.INITIAL),
+                    : BuildContinuationAdmissionService.AdmissionKind.INITIAL,
+                correctionFrontier),
             request.runContext());
     BuildContinuationAdmissionService.Admission admission = claimedAdmission.admission();
     if (!admission.admitted()) {
@@ -275,7 +293,7 @@ public class BuildTaskGenerationCoordinator {
             requestedModel,
             null,
             initialFailure.code());
-        if (!initialFailure.observed()) {
+        if (!initialFailure.admits(contract)) {
           throw new InitialFailureUnavailableException(initialFailure);
         }
         operationContext =
@@ -295,6 +313,29 @@ public class BuildTaskGenerationCoordinator {
         operationContext =
             operationContext.withBuildAcceptance(
                 new BuildAcceptanceExecutionContext("", null, false, true));
+      }
+      if (continuation) {
+        mutationAuthority.assertDispatch(
+            runId, task.id(), WorkspaceGenerationDispatchAuthority.Phase.MUTATION);
+        var action = admissions.recordDispatch(prepared.attemptId());
+        if (action != null) {
+          broadcaster.emit(
+              runId,
+              RunEvent.continuationAction(
+                  runId,
+                  task.id(),
+                  "Continuation worker dispatched",
+                  action.path("decision").asText(),
+                  requestedProvider,
+                  requestedModel,
+                  action.path("reason").asText(),
+                  action.path("attempt").asInt(),
+                  1,
+                  action.path("limitName").asText(),
+                  action.path("usedLimit").asInt(),
+                  action.path("maxLimit").asInt(),
+                  "EXECUTED"));
+        }
       }
       TaskOutcome outcome = dispatch.apply(operationContext);
       if (sharedLoopEnabled) {
@@ -389,7 +430,7 @@ public class BuildTaskGenerationCoordinator {
             "TASK_VERIFICATION_REJECTED",
             reason);
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
-        return BuildTaskAcceptanceOutcomes.rejected(outcome, reason);
+        return BuildTaskAcceptanceOutcomes.rejected(outcome, reason, verification);
       }
 
       generations.beginCheckpoint(prepared);
@@ -461,7 +502,7 @@ SERVER-OWNED BUILD ACCEPTANCE CONTRACT (immutable for this task)
 Contract digest: %s
 Runtime surface: %s
 Required proof strength: %s
-Initial failing evidence: %s
+Initial baseline evidence: %s
 Required paths: %s
 Frozen build command: %s
 Frozen test command: %s
@@ -485,7 +526,7 @@ succeeds. Planner text cannot replace or weaken these checks.
                 contract.buildCommand() == null ? "UNAVAILABLE" : contract.buildCommand().command(),
                 contract.testCommand() == null ? "UNAVAILABLE" : contract.testCommand().command());
     DeterministicFailureDelta.Snapshot snapshot =
-        initialFailure.observed()
+        initialFailure.observed() || initialFailure.total() > 0
             ? DeterministicFailureDelta.snapshot(
                 initialFailure.passed(),
                 initialFailure.failed(),

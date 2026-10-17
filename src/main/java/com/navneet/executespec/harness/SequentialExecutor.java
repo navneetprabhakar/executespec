@@ -886,7 +886,7 @@ to boot — skip it for those.""";
     String runId = req.runContext().runId();
     ResumeAction resumeAction =
         resume == null
-            ? new ResumeAction(ResumeKind.RUN_FRESH, null, null)
+            ? new ResumeAction(ResumeKind.RUN_FRESH, null)
             : resolveResumeAction(runId, task.id(), resume, req.runContext().workspaceRoot());
     if (resumeAction.kind() == ResumeKind.SKIP_TERMINAL) {
       log.info(
@@ -901,34 +901,9 @@ to boot — skip it for those.""";
     java.util.function.Function<ExecutionContext, TaskOutcome> dispatch =
         generationContext -> {
           TaskOutcome outcome;
-          if (resumeAction.kind() == ResumeKind.RESUME_FROM_SNAPSHOT) {
-            log.info(
-                "Executor RESUME task={} from snapshot iter={}",
-                task.id(),
-                resumeAction.snapshot() == null ? "n/a" : resumeAction.snapshot().iteration());
-            outcome =
-                executeOne(
-                    task,
-                    plan,
-                    req,
-                    isFinalTask,
-                    resumeAction.snapshot(),
-                    approvedRoute,
-                    runJournal,
-                    generationContext);
-          } else {
-            outcome =
-                executeOne(
-                    task,
-                    plan,
-                    req,
-                    isFinalTask,
-                    null,
-                    approvedRoute,
-                    runJournal,
-                    generationContext);
-          }
-          throwIfCancellationRequested(runId, task.id());
+          outcome =
+              executeOne(
+                  task, plan, req, isFinalTask, null, approvedRoute, runJournal, generationContext);
           return outcome;
         };
     if (buildTaskGenerations == null) {
@@ -960,6 +935,10 @@ to boot — skip it for those.""";
                 dispatch,
                 taskStatus)
             : buildTaskGenerations.execute(taskIndex, task, plan, req, dispatch, taskStatus);
+    if (outcome.goalDonenessDecision() != null && outcome.continuationDecision() != null) {
+      emitGoalAndContinuationDecision(
+          runId, task, outcome.goalDonenessDecision(), outcome.continuationDecision());
+    }
     if (resume != null) return outcome;
     return maybeActOnContinuation(task, plan, req, isFinalTask, outcome);
   }
@@ -1092,21 +1071,17 @@ to boot — skip it for those.""";
   }
 
   /** Result of the per-task resume decision in the loop above. */
-  private record ResumeAction(
-      ResumeKind kind,
-      String persistedStatus,
-      com.navneet.executespec.context.SavedContext snapshot) {}
+  private record ResumeAction(ResumeKind kind, String persistedStatus) {}
 
   private enum ResumeKind {
     SKIP_TERMINAL,
-    RESUME_FROM_SNAPSHOT,
     RUN_FRESH
   }
 
   /**
    * Decide what the executor should do with a given task on a resume pass. Reads the persisted
-   * {@link com.navneet.executespec.state.entity.AgentTask} status; loads a Redis snapshot iff the
-   * task is the resume target.
+   * {@link com.navneet.executespec.state.entity.AgentTask} status. Fresh BUILD attempts discard
+   * snapshots whose edits may have been rolled back.
    */
   private ResumeAction resolveResumeAction(
       String runId, String taskId, ResumeRequest resume, java.nio.file.Path workspaceRoot) {
@@ -1151,33 +1126,29 @@ to boot — skip it for those.""";
     // the resume target (auto-detect path). Once we've passed the target, everything else runs
     // fresh.
     if (target == null) {
-      if (isTerminal) return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted, null);
-      // First non-terminal: this is our resume target. Below logic loads the snapshot.
+      if (isTerminal) return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted);
+      // First non-terminal: this is our resume target. Below logic starts a fresh attempt.
       isResumeTarget = true;
     }
 
     // An explicitly targeted retry/continuation must reach the BUILD supervisor, which owns the
     // transactional terminal-task reopen. Untargeted crash recovery still skips terminal rows.
     if (isTerminal && !isResumeTarget) {
-      return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted, null);
+      return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted);
     }
-    if (isTerminal) return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
+    if (isTerminal) return new ResumeAction(ResumeKind.RUN_FRESH, persisted);
     if (!isResumeTarget) {
-      return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
+      return new ResumeAction(ResumeKind.RUN_FRESH, persisted);
     }
 
-    // Resume target — try Redis first, then the workspace-local durable checkpoint. The workspace
-    // root is not part of the Redis key, but it is required for disk fallback after a JVM restart.
-    com.navneet.executespec.tool.ExecutionContext ctx = resumeContext(runId, taskId, workspaceRoot);
-    com.navneet.executespec.context.SavedContext snap = contextStore.load(ctx).orElse(null);
-    if (snap == null) {
-      log.info(
-          "Executor RESUME run={} task={} no snapshot — running fresh (likely <5 iters at crash)",
-          runId,
-          taskId);
-      return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
+    if (contextStore != null) {
+      contextStore.delete(resumeContext(runId, taskId, workspaceRoot));
     }
-    return new ResumeAction(ResumeKind.RESUME_FROM_SNAPSHOT, persisted, snap);
+    log.info(
+        "BUILD resume run={} task={} starts a fresh attempt from the accepted frontier",
+        runId,
+        taskId);
+    return new ResumeAction(ResumeKind.RUN_FRESH, persisted);
   }
 
   /** Builds the context used by resume resolution, preserving the disk handoff boundary. */
@@ -1328,10 +1299,11 @@ to boot — skip it for those.""";
             maxContinuationReruns(),
             actionLimit.limitName(),
             actionLimit.usedAfterReserve(),
-            actionLimit.maxAllowed()));
+            actionLimit.maxAllowed(),
+            "RESERVED"));
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), summary));
     appendContinuationActionHistory(
-        runId, task.id(), decision, candidate, actionLimit, "EXECUTED", reason);
+        runId, task.id(), decision, candidate, actionLimit, "RESERVED", reason);
 
     // A different provider/model gets the current workspace plus a compact deterministic dossier,
     // never the previous model's full transcript. Replaying that transcript across models grows
@@ -1350,7 +1322,9 @@ to boot — skip it for those.""";
                   candidate.model(),
                   decision.decision().name(),
                   reason,
-                  outcome.smokeTestOutput());
+                  outcome.acceptanceDiagnostics() == null
+                      ? outcome.smokeTestOutput()
+                      : outcome.acceptanceDiagnostics());
           return new ProviderModelOverride(
               candidate.provider(), candidate.model(), decision.decision(), recoveryNote);
         };
@@ -1387,6 +1361,11 @@ to boot — skip it for those.""";
                     task.id(),
                     status,
                     statusReason));
+    if (rerunOutcome.goalDonenessDecision() != null
+        && rerunOutcome.continuationDecision() != null) {
+      emitGoalAndContinuationDecision(
+          runId, task, rerunOutcome.goalDonenessDecision(), rerunOutcome.continuationDecision());
+    }
     return BuildContinuationOutcomes.merge(outcome, rerunOutcome, decision, candidate);
   }
 
@@ -1541,6 +1520,8 @@ to boot — skip it for those.""";
     try {
       ObjectNode action = objectMapper.createObjectNode();
       action.put("status", status == null || status.isBlank() ? "UNKNOWN" : status);
+      if ("RESERVED".equals(status))
+        action.put("reservationId", java.util.UUID.randomUUID().toString());
       action.put("decision", decision.decision().name());
       action.put("provider", candidate.provider());
       action.put("model", candidate.model());
@@ -1556,8 +1537,12 @@ to boot — skip it for those.""";
         // the append is recovery-generation fenced. Without this, findByIdForUpdate threw
         // TransactionRequiredException (swallowed) and the audit row was silently dropped while SSE
         // claimed the action occurred.
-        taskStatusPersistenceService.appendContinuationAction(
-            runId, taskIdShort, actionJson, expectedRecoveryAttempt);
+        var written =
+            taskStatusPersistenceService.appendContinuationAction(
+                runId, taskIdShort, actionJson, expectedRecoveryAttempt);
+        if ("RESERVED".equals(status) && written != TaskStatusPersistenceService.Result.UPDATED) {
+          throw new IllegalStateException("CONTINUATION_RESERVATION_NOT_DURABLE:" + written);
+        }
         return;
       }
       // Test/bounded-constructor path (no transactional service): mocked repos tolerate the inline
@@ -1576,6 +1561,8 @@ to boot — skip it for those.""";
       taskRepo.saveAndFlush(task);
     } catch (Exception ex) {
       log.warn("appendContinuationActionHistory: {} failed: {}", key, ex.getMessage(), ex);
+      if ("RESERVED".equals(status))
+        throw new IllegalStateException("CONTINUATION_RESERVATION_NOT_DURABLE", ex);
     }
   }
 
@@ -1635,28 +1622,44 @@ to boot — skip it for those.""";
 
   /**
    * RR-1563 — seed the escalation counters with the amounts already consumed, reconstructed from
-   * durable per-task history by {@link ContinuationEscalationBudget}. {@code putIfAbsent} keeps an
-   * explicit approval-path seed winning.
+   * durable per-task history by {@link ContinuationEscalationBudget}. Explicit approval seeds and
+   * durable history merge by maximum so neither can restore a smaller consumed budget.
    */
   private void seedConsumedContinuationCountersFromDurableState(String runId) {
-    ContinuationEscalationBudget.Consumed consumed =
-        ContinuationEscalationBudget.reconstruct(taskRepo, objectMapper, runId);
+    var consumed = ContinuationEscalationBudget.reconstruct(taskRepo, objectMapper, runId);
     consumed
         .stepUpsByTask()
         .forEach(
-            (shortId, n) ->
-                continuationModelStepUpsPerTask.putIfAbsent(
-                    continuationTaskKey(runId, shortId), new AtomicInteger(n)));
+            (task, count) ->
+                raiseConsumedCounter(
+                    continuationModelStepUpsPerTask, continuationTaskKey(runId, task), count));
     consumed
         .stepDownsByTask()
         .forEach(
-            (shortId, n) ->
-                continuationModelStepDownsPerTask.putIfAbsent(
-                    continuationTaskKey(runId, shortId), new AtomicInteger(n)));
-    if (consumed.providerSwitches() > 0) {
-      continuationProviderSwitchesPerRun.putIfAbsent(
-          runId, new AtomicInteger(consumed.providerSwitches()));
-    }
+            (task, count) ->
+                raiseConsumedCounter(
+                    continuationModelStepDownsPerTask, continuationTaskKey(runId, task), count));
+    consumed
+        .sameProviderRetriesByTask()
+        .forEach(
+            (task, count) ->
+                raiseConsumedCounter(
+                    continuationSameProviderRetriesPerTask,
+                    continuationTaskKey(runId, task),
+                    count));
+    raiseConsumedCounter(continuationProviderSwitchesPerRun, runId, consumed.providerSwitches());
+  }
+
+  private static void raiseConsumedCounter(
+      ConcurrentMap<String, AtomicInteger> counters, String key, int consumed) {
+    if (consumed <= 0) return;
+    counters.compute(
+        key,
+        (ignored, current) -> {
+          if (current == null) return new AtomicInteger(consumed);
+          current.accumulateAndGet(consumed, Math::max);
+          return current;
+        });
   }
 
   private int providerSwitchesUsed(String runId) {
@@ -2340,7 +2343,9 @@ to boot — skip it for those.""";
     WorkerResult retry;
     if (featureFlagService != null && featureFlagService.isEnabled(FLAG_RETRY_CONTEXT_RETENTION)) {
       java.util.Optional<com.navneet.executespec.context.SavedContext> snapshot =
-          contextStore == null ? java.util.Optional.empty() : contextStore.load(taskCtx);
+          contextStore == null
+              ? java.util.Optional.empty()
+              : contextStore.loadForWorkspaceAttempt(taskCtx);
       if (snapshot.isPresent()) {
         log.info(
             "Executor task={} retry CONTEXT-RETAINED from snapshot (iter={})",
@@ -2681,7 +2686,6 @@ to boot — skip it for those.""";
             dispatchedProvider,
             dispatchedModel,
             providerBehaviorPoor(workerResult, failureReason));
-    emitGoalAndContinuationDecision(runId, task, decision, continuationDecision);
     return new GoalTaskDecision(decision, continuationDecision);
   }
 
@@ -2757,13 +2761,11 @@ to boot — skip it for those.""";
     if (BuildContinuationOutcomes.approvalBlocked(continuationDecision)) {
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
-      emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
       return preRetryContinuationOutcome(
           task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
     }
     if (!actionableContinuationDecision(continuationDecision)) {
       if (buildTaskGenerations != null) {
-        emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
         return preRetryContinuationOutcome(
             task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
       }
@@ -2772,7 +2774,6 @@ to boot — skip it for those.""";
     ModelProviderScore candidate = continuationDecision.selectedCandidate().orElse(null);
     if (candidate == null || sameProviderModel(candidate, cfg.provider, cfg.model)) {
       if (buildTaskGenerations != null) {
-        emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
         return preRetryContinuationOutcome(
             task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);
       }
@@ -2781,7 +2782,6 @@ to boot — skip it for those.""";
     if (!continuationActionCapacityAvailable(runId, task.id(), continuationDecision.decision())) {
       return null;
     }
-    emitGoalAndContinuationDecision(runId, task, goalDecision, continuationDecision);
     TaskOutcome preRetryOutcome =
         preRetryContinuationOutcome(
             task, taskStart, primary, smoke, cfg, goalDecision, continuationDecision);

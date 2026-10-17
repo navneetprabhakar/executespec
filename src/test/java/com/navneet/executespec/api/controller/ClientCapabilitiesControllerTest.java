@@ -50,7 +50,7 @@ class ClientCapabilitiesControllerTest {
             .capabilities(requestWithAuthSource(JwtAuthenticationFilter.AUTH_SOURCE_PAT));
 
     assertThat(response.contractVersion()).isEqualTo("agent-protocol-v2");
-    assertThat(response.localHands().enabled()).isTrue();
+    assertThat(response.localHands().enabled()).isFalse();
     assertThat(response.localHands().requiredAuthSource()).isEqualTo("PAT");
     assertThat(response.endpoints()).containsKey("agentTurns");
     assertThat(response.eventContracts().typedEventsSupported()).isTrue();
@@ -93,7 +93,7 @@ class ClientCapabilitiesControllerTest {
 
   // RR-646 — a PAT caller with local-hands enabled is the only case that may submit local hands.
   @Test
-  void patCallerCanSubmitLocalHandsWhenEnabled() {
+  void patTransportFlagDoesNotAdvertiseUnimplementedBuildAcceptance() {
     FeatureFlagService flags = mock(FeatureFlagService.class);
     when(flags.isEnabled("worker.local-hands.enabled")).thenReturn(true);
 
@@ -103,7 +103,7 @@ class ClientCapabilitiesControllerTest {
 
     assertThat(response.authSource()).isEqualTo("PAT");
     assertThat(response.localHands().currentAuthSourceAllowed()).isTrue();
-    assertThat(response.localHands().currentRequestCanSubmitLocalHands()).isTrue();
+    assertThat(response.localHands().currentRequestCanSubmitLocalHands()).isFalse();
   }
 
   // RR-646 — a JWT/browser caller must NOT be told the current request can submit local hands,

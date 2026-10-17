@@ -1,5 +1,14 @@
 # Contributing
 
+## Document behavioral contracts
+
+Update the [BUILD contract](docs/architecture/build-path-contract.md) and owning package notes when
+changing acceptance, recovery, verification leases, report provenance or publication. Keep API/user
+instructions aligned with capability discovery. Record test commands and their scope; distinguish
+fixture success from production qualification. Historical release evidence is not a current source
+attestation. Check documentation changes with `git diff --check` and
+`python3 scripts/check-public-release.py`; rerun code tests when behavior changes.
+
 ExecuteSpec is an experimental codebase. Prefer focused changes with a concrete behavior and clear
 verification over broad refactors or new orchestration layers.
 

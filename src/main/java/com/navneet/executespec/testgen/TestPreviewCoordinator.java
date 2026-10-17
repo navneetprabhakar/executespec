@@ -230,9 +230,20 @@ public class TestPreviewCoordinator {
                           RunEvent.log(
                               runId, null, "[TestExec] Starting test execution against preview"));
 
+                      var testedPreview = previewService().getStatus(runId);
                       TestExecutionSummary summary =
                           testExecutionService.executeTests(
-                              runId, state.getTestPlanId(), state.getPreviewUrl());
+                              runId, state.getTestPlanId(), state.getPreviewUrl(), testedPreview);
+                      var currentPreview = previewService().getStatus(runId);
+                      if (summary.isExecutionProven()
+                          && (testedPreview == null
+                              || !testedPreview.sameArtifactAs(currentPreview)
+                              || currentPreview.isExpired())) {
+                        summary =
+                            TestExecutionSummary.unavailable(
+                                summary.getExecutionId(),
+                                "preview artifact changed or expired during test execution");
+                      }
 
                       if (summary.isAllConnectionRefused()) {
                         broadcaster.emit(
@@ -247,7 +258,6 @@ public class TestPreviewCoordinator {
                       // Generate report with fix suggestions
                       testReportGenerator.generateAndEmit(
                           runId, state.getTestPlanId(), summary, state.getPreviewUrl());
-
                       eventPublisher.publishEvent(
                           new TestExecutionCompletedEvent(runId, state.getTestPlanId(), summary));
 

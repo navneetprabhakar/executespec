@@ -918,6 +918,10 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * had its 6-file budget burned on routes from one repo, leaving the assessor unable to confirm
    * spec items in the others ("ai.py router exists but content unread, cannot confirm" × N).
    */
+  private static String normalizeTreePath(String line) {
+    return line.replaceFirst("^\\[DIR\\]\\s*", "").replaceFirst("^[│├└\\s─]+", "").trim();
+  }
+
   private List<String> inferKeyFilePaths(String fileTree) {
     if (fileTree == null || fileTree.isBlank()) return List.of();
     // Allow a broader extension set so shell, SQL, and config-as-code projects aren't
@@ -943,7 +947,7 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
         fileTree
             .lines()
             .map(String::trim)
-            .map(l -> l.replaceAll("^[\\[DIR\\]│├└\\s─]+", "").trim())
+            .map(AccuracyAssessmentService::normalizeTreePath)
             .filter(l -> !l.isBlank())
             .filter(l -> ext.matcher(l).matches())
             .filter(l -> !exclude.matcher(l).matches())
@@ -1003,7 +1007,7 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     return fileTree
         .lines()
         .map(String::trim)
-        .map(l -> l.replaceAll("^[\\[DIR\\]│├└\\s─]+", "").trim())
+        .map(AccuracyAssessmentService::normalizeTreePath)
         .filter(l -> !l.isBlank())
         .filter(l -> sourceExtension.matcher(l).matches())
         .filter(l -> !excludedTree.matcher(l).matches())
@@ -1027,13 +1031,14 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
                 + "\\.pytest_cache|\\.mypy_cache|\\.tox|\\.nyc_output)(?:/|$)");
     java.util.regex.Pattern configName =
         java.util.regex.Pattern.compile(
-            "(?i)(?:^|/)(?:Dockerfile(?:\\.[^/]+)?|compose[^/]*\\.ya?ml|"
+            "(?i)(?:^|/)(?:README(?:\\.(?:md|markdown|rst|txt))?|requirements[^/]*\\.txt|"
+                + "Dockerfile(?:\\.[^/]+)?|compose[^/]*\\.ya?ml|"
                 + "[^/]+\\.(?:ya?ml|json|toml|properties|xml))$");
 
     return fileTree
         .lines()
         .map(String::trim)
-        .map(l -> l.replaceAll("^[\\[DIR\\]│├└\\s─]+", "").trim())
+        .map(AccuracyAssessmentService::normalizeTreePath)
         .filter(l -> !l.isBlank())
         .filter(l -> configName.matcher(l).find())
         .filter(l -> !excludedTree.matcher(l).find())

@@ -109,15 +109,18 @@ class RunLlmOperationLifecycleServiceTest {
     ExecutionContext base =
         new ExecutionContext("run-1", "__root__", Path.of("/tmp").toAbsolutePath(), reference);
 
-    var lease = service.claimPatch(base, "run-1", "anthropic", "claude");
+    var lease = service.claimBuildTask(base, "run-1", "T1", 0, "contract|attempt=1");
     ExecutionContext bound = service.bind(base, lease);
 
     assertThat(bound.llmExecutionOperationAuthority()).isNotNull();
+    assertThat(bound.taskId()).isEqualTo("T1");
+    assertThat(bound.workspaceRoot()).isEqualTo(base.workspaceRoot());
+    assertThat(bound.llmExecutionContextId()).isEqualTo(base.llmExecutionContextId());
     ArgumentCaptor<LlmExecutionOperationDescriptor> descriptor =
         ArgumentCaptor.forClass(LlmExecutionOperationDescriptor.class);
     verify(operations)
         .claimOrResume(eq(reference), descriptor.capture(), anyString(), eq(Duration.ofHours(4)));
-    assertThat(descriptor.getValue().operationKey()).isEqualTo("pipeline-run:run-1:patch");
+    assertThat(descriptor.getValue().operationKey()).isEqualTo("pipeline-run:run-1:build-task:T1");
   }
 
   @Test
@@ -161,6 +164,7 @@ class RunLlmOperationLifecycleServiceTest {
     var lease = service.beginBuildTaskAttempt(base, "run-1", "T1", 0, "contract|attempt=2");
 
     assertThat(lease.context().llmExecutionOperationAuthority()).isNotNull();
+    assertThat(lease.context().taskId()).isEqualTo("T1");
     verify(operations)
         .beginNewInvocation(eq(reference), any(), anyString(), eq(Duration.ofHours(4)));
     verify(operations, never()).claimOrResume(any(), any(), anyString(), any());

@@ -83,6 +83,15 @@ public class HeadlessTestExecutor {
       return terminate(runId, plan, TestPlanStatus.STALE, executionId, bindingProblem);
     }
 
+    String sourceGeneration = admissionService.currentWorkspaceGeneration(runId);
+    if (sourceGeneration == null) {
+      return terminate(
+          runId,
+          plan,
+          TestPlanStatus.STALE,
+          executionId,
+          "canonical source generation is unavailable");
+    }
     Instant start = Instant.now();
     try {
       // RR-1582 — clear any report left behind by an earlier attempt before launching this one.
@@ -171,6 +180,14 @@ public class HeadlessTestExecutor {
         return terminate(runId, plan, TestPlanStatus.STALE, executionId, drift);
       }
 
+      if (!sourceGeneration.equals(admissionService.currentWorkspaceGeneration(runId))) {
+        return terminate(
+            runId,
+            plan,
+            TestPlanStatus.STALE,
+            executionId,
+            "canonical source generation changed during execution");
+      }
       testResultRepository.saveAll(results);
 
       long durationMs = java.time.Duration.between(start, Instant.now()).toMillis();
@@ -211,6 +228,8 @@ public class HeadlessTestExecutor {
           .executionDurationMs(durationMs)
           .executionVerified(Boolean.TRUE)
           .executionId(executionId)
+          .workspaceGeneration(sourceGeneration)
+          .executionStartedAt(start)
           .evidenceScope(TestExecutionSummary.EvidenceScope.WORKSPACE_TEST_SUITE)
           .build();
 

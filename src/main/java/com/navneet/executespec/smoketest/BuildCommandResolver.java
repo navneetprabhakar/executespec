@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.springframework.stereotype.Component;
 
 import lombok.extern.slf4j.Slf4j;
@@ -154,8 +156,23 @@ public class BuildCommandResolver {
               "inferred:expo-rn"));
     }
     if (exists(workspaceRoot, "package.json")) {
-      // Prefer "build" script if defined; otherwise tsc as a TypeScript project sanity check.
-      return Optional.of(build("npm run build --if-present", 240, "inferred:npm"));
+      // An optional missing script exits zero without checking source. Absence is unavailable
+      // verification, not a successful build. Qualified dependency-free Node uses its bootstrap.
+      try {
+        String script =
+            new ObjectMapper()
+                .readTree(workspaceRoot.resolve("package.json").toFile())
+                .path("scripts")
+                .path("build")
+                .asText("");
+        if (!script.isBlank()) {
+          return Optional.of(build("npm run build", 240, "inferred:npm"));
+        }
+      } catch (IOException invalidManifest) {
+        log.warn(
+            "Cannot resolve npm build from package.json in {}", workspaceRoot, invalidManifest);
+      }
+      return Optional.empty();
     }
     if (exists(workspaceRoot, "pyproject.toml")
         || exists(workspaceRoot, "setup.py")

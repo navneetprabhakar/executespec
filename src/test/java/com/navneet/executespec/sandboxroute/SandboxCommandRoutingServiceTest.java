@@ -72,6 +72,16 @@ class SandboxCommandRoutingServiceTest {
     flags = mock(FeatureFlagService.class);
     runs = mock(PipelineRunRepository.class);
     commandJournal = mock(SandboxCommandJournalStore.class);
+    when(store.tryAcquire(any(UUID.class), anyString(), any(Duration.class)))
+        .thenAnswer(
+            call ->
+                Optional.of(
+                    new RunSandbox.Lease(
+                        call.getArgument(0),
+                        call.getArgument(1),
+                        1L,
+                        Instant.now().plusSeconds(600))));
+    when(store.heartbeat(any(), any())).thenReturn(true);
     properties = new SandboxProperties();
     properties.setWorkspaceRoot(sandboxRoot.toString());
     properties.setImage(
@@ -240,6 +250,54 @@ class SandboxCommandRoutingServiceTest {
   }
 
   @Test
+  void reviewSessionRenewsBeforeAnyCommandAndRefusesPermanentLeaseLoss() {
+    routingOn();
+    RunSandbox sandbox = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    var run = admissibleRun();
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(lifecycle.create(any(), any())).thenReturn(sandbox);
+    var authority =
+        routing.openVerification(
+            "run-1",
+            "a".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+    verify(store).tryAcquire(eq(sandbox.id()), anyString(), any());
+    routing.renewVerificationSessions();
+    verify(store).heartbeat(any(), any());
+    authority.assertLive();
+
+    when(store.heartbeat(any(), any())).thenReturn(false);
+    routing.renewVerificationSessions();
+    org.assertj.core.api.Assertions.assertThatThrownBy(authority::assertLive)
+        .hasMessageContaining("LEASE_LOST");
+    when(store.heartbeat(any(), any())).thenReturn(true);
+    org.assertj.core.api.Assertions.assertThatThrownBy(authority::assertLive)
+        .hasMessageContaining("LEASE_LOST");
+    verify(store, org.mockito.Mockito.times(1)).tryAcquire(eq(sandbox.id()), anyString(), any());
+    verify(dispatcher, never()).exec(any(), any(), any());
+  }
+
+  @Test
+  void closedReviewSessionIsNotRenewedAndItsCapabilityCannotBeUsed() {
+    routingOn();
+    RunSandbox sandbox = sandbox(SandboxState.REQUESTED, SandboxPurpose.VERIFICATION);
+    var run = admissibleRun();
+    when(runs.findById("run-1")).thenReturn(Optional.of(run));
+    when(lifecycle.create(any(), any())).thenReturn(sandbox);
+    var authority =
+        routing.openVerification(
+            "run-1",
+            "a".repeat(64),
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.Phase
+                .VERIFICATION);
+    routing.closeVerification(authority);
+    routing.renewVerificationSessions();
+    org.assertj.core.api.Assertions.assertThatThrownBy(authority::assertLive)
+        .hasMessageContaining("AUTHORITY_STALE");
+  }
+
+  @Test
   void verificationAdmissionUsesASeparatePurposeAndSandboxOwnedWorkspace() {
     routingOn();
     PipelineRun run = admissibleRun();
@@ -388,6 +446,8 @@ class SandboxCommandRoutingServiceTest {
             real.phase(),
             real.workspaceRoot());
 
+    org.assertj.core.api.Assertions.assertThatThrownBy(forged::assertLive)
+        .hasMessageContaining("AUTHORITY_UNBOUND");
     SandboxExecResult result =
         routing.executeVerification(forged, List.of("mvn", "test"), Duration.ofMinutes(1));
 

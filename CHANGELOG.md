@@ -7,7 +7,29 @@ The pre-1.0 development history (the v2.5.x line that ran from 2026-04-04 throug
 
 ---
 
-## [Unreleased] — work on `dev` since 1.0.0-M1 (range 2026-05-02 → 2026-06-16)
+## [Unreleased] — BUILD contract repair (2026-10-17)
+
+These are local working-tree changes, not a released or deployed version. Backend version remains
+`2.0.0`. See the [BUILD contract](docs/architecture/build-path-contract.md) for implementation and
+verification limits.
+
+- Added schema-3 one-time bootstrap/task purposes and cumulative accepted-prefix verification.
+- Bound correction replacement, ordered concrete-test evidence and immutable recovery policy through
+  forward migrations V401–V403; source inventory is V403 / 389 files, next V404.
+- Extended verification leases across model calls, reads and commands with a dedicated heartbeat and
+  permanent fencing after ownership loss. Kept local-hands BUILD unavailable pending client receipts.
+- Preserved continuation settlement/counters, physical-attempt context, preview identity and
+  parent/generation publication boundaries.
+- Repaired bounded DeepSeek reasoning controls across native/aggregator transports, Anthropic
+  platform-workspace headers, assessment filename/config evidence and Fireworks registered routes.
+- Synchronized contributor, architecture, API, user, operator and qualification documentation.
+
+Frozen-source backend verification passed 7,291 tests with zero failures/errors/skips. The separate
+final PostgreSQL lease/journal cohort passed 2/2. Selected-route Python fixtures passed across six
+providers; this does not qualify all models, production, remote SCM or deployment. No release
+identity or deployment was changed.
+
+## Historical dev checkpoint — 2026-05-02 to 2026-06-16
 
 Twenty-one additive migrations landed on `dev` (V166 → V186) plus a multi-track feature push around the V2 patch-mode pipeline, four customer-facing autofix surfaces, and the structural fixes that came out of the 2026-05-08 SWE-bench Lite eval. The 2026-05-19 **honesty pass** (`feature/honesty-pass-2026-05-19`, V199 → V202) follows up with scoring, quota, reviewer, and eval changes.
 

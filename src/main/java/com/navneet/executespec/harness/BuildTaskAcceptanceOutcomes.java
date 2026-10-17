@@ -3,6 +3,7 @@ package com.navneet.executespec.harness;
 import com.navneet.executespec.agent.PlannedTask;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
+import com.navneet.executespec.workspacegeneration.WorkspaceGenerationLifecycle;
 
 import org.slf4j.Logger;
 
@@ -20,10 +21,6 @@ final class BuildTaskAcceptanceOutcomes {
   }
 
   static TaskOutcome accepted(PlannedTask task, TaskOutcome source) {
-    if (source != null
-        && (source.status() == TaskOutcome.Status.SUCCESS
-            || source.status() == TaskOutcome.Status.SUCCESS_AFTER_RETRY)
-        && Boolean.TRUE.equals(source.smokeTestPassed())) return source;
     boolean retried = source != null && source.retryAttempted();
     return TaskOutcome.builder()
         .taskId(source == null ? task.id() : source.taskId())
@@ -39,10 +36,29 @@ final class BuildTaskAcceptanceOutcomes {
         .toolCallsDispatched(source == null ? 0 : source.toolCallsDispatched())
         .dispatchedProvider(source == null ? null : source.dispatchedProvider())
         .dispatchedModel(source == null ? null : source.dispatchedModel())
+        .goalDonenessDecision(
+            BuildAcceptanceDecisions.goal(source, true, false, "Frozen task acceptance passed"))
+        .continuationDecision(
+            BuildAcceptanceDecisions.continuation(true, false, "Frozen task acceptance passed"))
         .build();
   }
 
   static TaskOutcome rejected(TaskOutcome outcome, String reason) {
+    return rejected(outcome, reason, null);
+  }
+
+  static TaskOutcome rejected(
+      TaskOutcome outcome, String reason, WorkspaceGenerationLifecycle.Verification verification) {
+    boolean unavailable = verification != null && "UNAVAILABLE".equals(verification.outcome());
+    String failure =
+        verification == null
+            ? reason
+            : reason
+                + "; category="
+                + verification.failureCategory()
+                + (verification.environmentCode() == null
+                    ? ""
+                    : "; code=" + verification.environmentCode());
     return TaskOutcome.builder()
         .taskId(outcome.taskId())
         .taskTitle(outcome.taskTitle())
@@ -58,11 +74,12 @@ final class BuildTaskAcceptanceOutcomes {
         .toolCallsDispatched(outcome.toolCallsDispatched())
         .dispatchedProvider(outcome.dispatchedProvider())
         .dispatchedModel(outcome.dispatchedModel())
-        .goalDonenessDecision(outcome.goalDonenessDecision())
-        .continuationDecision(outcome.continuationDecision())
+        .goalDonenessDecision(BuildAcceptanceDecisions.goal(outcome, false, unavailable, failure))
+        .continuationDecision(BuildAcceptanceDecisions.continuation(false, unavailable, failure))
         .continuationAction(outcome.continuationAction())
         .continuationActionProvider(outcome.continuationActionProvider())
         .continuationActionModel(outcome.continuationActionModel())
+        .acceptanceDiagnostics(BuildAcceptanceDiagnostics.from(verification))
         .build();
   }
 

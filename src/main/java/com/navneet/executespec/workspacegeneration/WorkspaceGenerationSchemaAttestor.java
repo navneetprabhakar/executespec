@@ -18,9 +18,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class WorkspaceGenerationSchemaAttestor {
 
-  private static final int REQUIRED_MIGRATION = 400;
+  private static final int REQUIRED_MIGRATION = 403;
   private static final List<ExpectedArtifact> EXPECTED =
       List.of(
+          new ExpectedArtifact("TRIGGER", "workspace_correction_frontier_binding"),
+          new ExpectedArtifact("TRIGGER", "pipeline_run_build_execution_policy_immutable"),
           new ExpectedArtifact("INDEX", "uq_workspace_generation_attempt_active_run"),
           new ExpectedArtifact("TRIGGER", "workspace_generation_attempt_admission"),
           new ExpectedArtifact("TRIGGER", "workspace_generation_attempt_predispatch_transition"),

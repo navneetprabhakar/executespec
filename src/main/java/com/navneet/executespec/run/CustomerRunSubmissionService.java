@@ -272,6 +272,12 @@ public class CustomerRunSubmissionService {
           "Local-hands execution requires a CLI or VS Code Personal Access Token session; web UI"
               + " runs execute remotely.");
     }
+    if (command.localExecution()) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Local BUILD requires generation-bound verification receipts that this client protocol"
+              + " does not yet provide. Submit a remote BUILD run instead.");
+    }
   }
 
   private CodeBoundary authorizeCodeBoundary(

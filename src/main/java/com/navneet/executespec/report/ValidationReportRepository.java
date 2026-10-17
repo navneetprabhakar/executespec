@@ -17,6 +17,10 @@ public interface ValidationReportRepository extends JpaRepository<ValidationRepo
 
   Optional<ValidationReport> findByRunId(String runId);
 
+  @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+  @Query("select v from ValidationReport v where v.runId = :runId")
+  Optional<ValidationReport> findByRunIdForUpdate(@Param("runId") String runId);
+
   Optional<ValidationReport> findByShareTokenHash(String shareTokenHash);
 
   /**

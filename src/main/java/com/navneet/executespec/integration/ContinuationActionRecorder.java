@@ -20,7 +20,8 @@ public class ContinuationActionRecorder {
   private final AgentTaskRepository taskRepository;
   private final ObjectMapper objectMapper;
 
-  public void recordExecuted(
+  @org.springframework.transaction.annotation.Transactional
+  public void recordReserved(
       AgentTask task,
       String decision,
       String provider,
@@ -31,11 +32,13 @@ public class ContinuationActionRecorder {
       int maxLimit,
       String source) {
     if (task == null || decision == null) return;
+    task = taskRepository.findByIdForUpdate(task.getTaskId()).orElseThrow();
     try {
       ArrayNode actions =
           CorrectionActionJson.read(objectMapper, task.getContinuationActionsJson());
       ObjectNode action = actions.addObject();
-      action.put("status", "EXECUTED");
+      action.put("status", "RESERVED");
+      action.put("reservationId", java.util.UUID.randomUUID().toString());
       action.put("decision", decision);
       action.put("provider", provider);
       action.put("model", model);
@@ -52,6 +55,7 @@ public class ContinuationActionRecorder {
           "continuation action history append failed for task {}: {}",
           task.getTaskId(),
           failure.getMessage());
+      throw new IllegalStateException("CONTINUATION_RESERVATION_NOT_DURABLE", failure);
     }
   }
 }

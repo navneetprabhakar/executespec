@@ -25,6 +25,8 @@ import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.JwtUtil;
+import com.navneet.executespec.execution.model.GoalDonenessState;
+import com.navneet.executespec.execution.model.RunContinuationDecision;
 import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.report.model.ValidationReportDTO;
 import com.navneet.executespec.run.CustomerRunSubmissionService;
@@ -51,9 +53,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * Authenticated V2 lifecycle tests.
  *
- * <p>The three provider-backed scenarios are fail-closed: each Maven invocation must select exactly
+ * <p>The four provider-backed scenarios are fail-closed: each Maven invocation must select exactly
  * one scenario, preselect its run UUID, enable the live-LLM test mode, and supply a budget-ledger
- * reservation matching {@code DEEPSEEK/deepseek-v4-flash-native/<run UUID>}. The test-only reserved
+ * reservation matching its selected provider, model, and run UUID. The test-only reserved
  * submission endpoint binds that UUID before asynchronous planning can dispatch. Without every
  * guard, the live scenario is skipped and {@link
  * com.navneet.executespec.agent.ProviderDispatchAuthorization} still rejects provider transport.
@@ -70,6 +72,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 class PipelineE2ETest {
 
+  static final org.testcontainers.containers.GenericContainer<?> REDIS =
+      new org.testcontainers.containers.GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
   static final PostgreSQLContainer<?> POSTGRES =
       new PostgreSQLContainer<>("pgvector/pgvector:pg16")
           .withDatabaseName("executespec_pipeline_e2e")
@@ -81,6 +86,7 @@ class PipelineE2ETest {
     // @Container callback is guaranteed to run. Start this disposable singleton explicitly so
     // getJdbcUrl() can never observe an unstarted container.
     POSTGRES.start();
+    REDIS.start();
   }
 
   @DynamicPropertySource
@@ -88,17 +94,63 @@ class PipelineE2ETest {
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
+    registry.add("spring.data.redis.host", REDIS::getHost);
+    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+    registry.add(
+        "executespec.sandbox.image",
+        () ->
+            System.getenv()
+                .getOrDefault(
+                    "EXECUTESPEC_E2E_SANDBOX_IMAGE", "docker.io/library/debian:stable-slim"));
+    registry.add(
+        "executespec.sandbox.workspace-root",
+        () -> Path.of("test-sandboxes-e2e").toAbsolutePath().toString());
+    registry.add(
+        "executespec.sandbox.runtime-uid",
+        () -> System.getenv().getOrDefault("EXECUTESPEC_E2E_RUNTIME_UID", "65532"));
+    registry.add(
+        "executespec.sandbox.runtime-gid",
+        () -> System.getenv().getOrDefault("EXECUTESPEC_E2E_RUNTIME_GID", "65532"));
   }
 
-  private static final String PROVIDER = "DEEPSEEK";
-  private static final String MODEL = "deepseek-v4-flash-native";
-  private static final double COST_CAP_USD = 0.10;
+  private static final PipelineE2ERoute ROUTE = PipelineE2ERoute.from(System.getenv());
+  private static final String PROVIDER = ROUTE.provider();
+  private static final String MODEL = ROUTE.model();
+  private static final double COST_CAP_USD = PipelineE2ERoute.costCap(System.getenv());
   private static final Duration PLAN_TIMEOUT = Duration.ofMinutes(4);
   private static final Duration WORK_TIMEOUT = Duration.ofMinutes(10);
   private static final Duration SETTLE_TIMEOUT = Duration.ofMinutes(2);
   private static final String SIMPLE_TASK =
-      "Create a plain text file called hello.txt in the workspace root. "
-          + "The file must contain exactly one line: Hello World";
+      """
+      Create a minimal Python library: main.py exporting greeting() returning exactly Hello World,
+      test_main.py with maintained pytest tests for that behavior, requirements.txt pinning
+      pytest==8.3.5, and hello.txt containing exactly one line: Hello World. This is a library,
+      not an HTTP service or a CLI. Keep the project small and run its tests before completion.
+      """;
+
+  private static final String BUILD_REGRESSION_TASK =
+      """
+Build a small Python library with three sequential plan tasks: bootstrap the library/tests,
+implement slug behavior including edge cases, then write its README. Use main.py exporting
+slugify(text: str) -> str, requirements.txt pinning pytest==8.3.5, test_main.py and README.md.
+slugify lowercases text, replaces each run of non-ASCII-alphanumeric characters with one
+hyphen, and strips leading/trailing hyphens. Empty or punctuation-only text returns empty.
+Include maintained pytest happy-path and edge-case tests, and run them before completion.
+This is a library, not an HTTP service or CLI application.
+""";
+
+  @Autowired private com.navneet.executespec.config.featureflag.FeatureFlagService flags;
+
+  @Autowired
+  private com.navneet.executespec.sandboxroute.SandboxCommandRoutingService sandboxRouting;
+
+  @Autowired
+  private com.navneet.executespec.workspacegeneration.DisposableVerificationWorkspaceService
+      disposableWorkspaces;
+
+  @Autowired
+  private com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+      generations;
 
   private static final ApprovalRequest APPROVE =
       new ApprovalRequest(true, "Reserved E2E approval", null, null, null, null, null);
@@ -110,6 +162,16 @@ class PipelineE2ETest {
   @Autowired private OrgRepository orgRepository;
   @Autowired private OrgMemberRepository orgMemberRepository;
   @Autowired private JwtUtil jwtUtil;
+  private final com.navneet.executespec.state.StateStore stateStore;
+  private final org.springframework.jdbc.core.JdbcTemplate fixtureJdbc;
+
+  @Autowired
+  PipelineE2ETest(
+      com.navneet.executespec.state.StateStore stateStore,
+      org.springframework.jdbc.core.JdbcTemplate fixtureJdbc) {
+    this.stateStore = stateStore;
+    this.fixtureJdbc = fixtureJdbc;
+  }
 
   private String bearerToken;
   private String actorUserId;
@@ -158,16 +220,44 @@ class PipelineE2ETest {
                 .orgRole("ORG_ADMIN")
                 .build());
     bearerToken = jwtUtil.generateAccessToken(user, member);
+    if (liveFixtureRequested() || Boolean.parseBoolean(System.getenv("E2E_RUNTIME_PREFLIGHT"))) {
+      for (String key :
+          List.of(
+              "sandbox.lifecycle.enabled",
+              "sandbox.runtime.dispatch.enabled",
+              "sandbox.runtime.container-strict-v1.enabled",
+              "sandbox.runtime.toolchain-readiness.enabled")) {
+        flags.update(key, "true", actorUserId);
+      }
+      if ("build".equals(System.getenv("E2E_SCENARIO"))) {
+        flags.update("build.shared-code-change-loop.enabled", "true", actorUserId);
+      }
+      assertThat(sandboxRouting.readiness().enabled())
+          .as("isolated E2E strict runtime readiness")
+          .isTrue();
+    }
   }
 
   @AfterAll
   void cleanWorkspace() throws IOException {
-    org.springframework.util.FileSystemUtils.deleteRecursively(Path.of("test-workspace-e2e"));
+    if (liveFixtureRequested()) {
+      String runId = System.getenv("E2E_RUN_ID");
+      var report =
+          get("/api/runs/" + runId + "/report", com.fasterxml.jackson.databind.JsonNode.class);
+      PipelineE2EEvidence.save(
+          stateStore,
+          runId,
+          report.getStatusCode().is2xxSuccessful() ? report.getBody() : null,
+          get("/api/runs/" + runId, com.fasterxml.jackson.databind.JsonNode.class).getBody(),
+          fixtureJdbc);
+      return; // Retain generated workspaces for independent inspection, including failed runs.
+    }
+    // Provider-free checks create no run workspace. Preserve earlier invocations' diagnostic trees.
   }
 
   @Test
   @DisplayName("V2 happy path: authenticated submit → plan approval → automatic terminal state")
-  void happyPath_autoMergesWithoutLegacyMergeGate() throws IOException {
+  void happyPath_completesWithoutLegacyMergeGate() throws IOException {
     String runId = requireLiveScenario("happy");
     submitReservedRun(runId);
     awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
@@ -184,6 +274,7 @@ class PipelineE2ETest {
     Path artifact = Path.of("test-workspace-e2e", runId, "hello.txt");
     assertThat(artifact).exists().isRegularFile();
     assertThat(Files.readString(artifact)).isIn("Hello World", "Hello World\n", "Hello World\r\n");
+    assertHeldOutPython(runId, "import main; assert main.greeting() == 'Hello World'");
 
     ValidationReportDTO report = awaitReport(runId);
     assertThat(report.filesGenerated()).isGreaterThanOrEqualTo(1);
@@ -191,11 +282,60 @@ class PipelineE2ETest {
     assertThat(report.verificationLedger())
         .anyMatch(evidence -> "DETERMINISTIC".equals(evidence.source()));
     assertThat(report.runGoalDecision()).isNotNull();
-    assertThat(report.runGoalDecision().state().name()).isEqualTo("STOP_DONE");
+    assertThat(report.finalBuildPassed()).isTrue();
+    assertThat(report.testsPassed()).isPositive();
+    assertThat(report.pipelineResult().name()).isIn("PASSED", "PASSED_WITH_FIXES");
+    // Lifecycle success is distinct from the conservative proof state. Workspace-authored tests
+    // cannot manufacture independent functional evidence or erase a disclosed assessment gap.
+    assertThat(report.runGoalDecision().state())
+        .isIn(GoalDonenessState.DONE, GoalDonenessState.UNCERTAIN);
+    if (report.runGoalDecision().state() == GoalDonenessState.DONE) {
+      assertThat(report.runGoalDecision().recommendedDecision())
+          .isEqualTo(RunContinuationDecision.STOP_DONE);
+    } else {
+      assertThat(report.runGoalDecision().incompleteItems()).isNotEmpty();
+      assertThat(report.runGoalDecision().recommendedDecision())
+          .isNotEqualTo(RunContinuationDecision.STOP_DONE);
+    }
 
     // The authenticated compatibility endpoint exists only to return a clear V2 retirement signal.
     assertThat(post("/api/runs/" + runId + "/merge", APPROVE, Void.class).getStatusCode())
         .isEqualTo(HttpStatus.GONE);
+  }
+
+  @Test
+  @DisplayName("Shared BUILD: approve → bootstrap/change/docs → real regression tests → report")
+  void buildPathAcceptsGeneratedLibraryAndIndependentHeldOutBehavior() {
+    String runId = requireLiveScenario("build");
+    submitReservedRun(runId, BUILD_REGRESSION_TASK);
+    awaitStatus(runId, "AWAITING_APPROVAL", PLAN_TIMEOUT);
+    assertThat(post("/api/runs/" + runId + "/approve", APPROVE, Void.class).getStatusCode())
+        .isEqualTo(HttpStatus.OK);
+    assertThat(awaitTerminal(runId, WORK_TIMEOUT)).isEqualTo("COMPLETE");
+    var detail = getDetail(runId);
+    assertThat(detail.getTasks()).isNotEmpty();
+    var report = awaitReport(runId);
+    assertThat(report.verificationLedger()).isNotEmpty();
+    assertHeldOutPython(
+        runId,
+        "import main; assert main.slugify('  Hello, WORLD!! ') == 'hello-world';"
+            + " assert main.slugify('---') == ''; assert main.slugify('a___b') == 'a-b'");
+  }
+
+  private void assertHeldOutPython(String runId, String assertions) {
+    Path workspace = Path.of("test-workspace-e2e", runId).toAbsolutePath();
+    var context = new com.navneet.executespec.tool.ExecutionContext(runId, "held-out", workspace);
+    var execution =
+        disposableWorkspaces.executeAccepted(
+            context,
+            () -> generations.assertAcceptedFrontier(runId, workspace, "E2E_HELD_OUT"),
+            disposable ->
+                sandboxRouting.executeVerification(
+                    disposable.verificationSandboxAuthority(),
+                    List.of("python3", "-c", assertions + "; print('held-out-pass')"),
+                    Duration.ofSeconds(30)));
+    assertThat(execution.value().succeeded()).as(execution.value().toString()).isTrue();
+    assertThat(execution.value().stdout()).contains("held-out-pass");
   }
 
   @Test
@@ -286,7 +426,8 @@ class PipelineE2ETest {
   }
 
   private boolean liveFixtureRequested() {
-    return List.of("happy", "reject", "cancel").contains(System.getenv("E2E_SCENARIO"))
+    return List.of("happy", "reject", "cancel", "build")
+            .contains(String.valueOf(System.getenv("E2E_SCENARIO")))
         && isUuid(System.getenv("E2E_RUN_ID"))
         && Boolean.parseBoolean(System.getProperty("executespec.live-llm.enabled", "false"))
         && Boolean.parseBoolean(System.getProperty("executespec.live-llm.test-mode", "false"))
@@ -303,11 +444,12 @@ class PipelineE2ETest {
   }
 
   private void submitReservedRun(String runId) {
+    submitReservedRun(runId, SIMPLE_TASK);
+  }
+
+  private void submitReservedRun(String runId, String spec) {
     ResponseEntity<RunSummary> response =
-        post(
-            "/api/e2e/reserved-runs/" + runId,
-            new ReservedRunRequest(SIMPLE_TASK),
-            RunSummary.class);
+        post("/api/e2e/reserved-runs/" + runId, new ReservedRunRequest(spec), RunSummary.class);
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
     assertThat(response.getBody()).isNotNull();
     assertThat(response.getBody().runId()).isEqualTo(runId);
@@ -393,6 +535,10 @@ class PipelineE2ETest {
    */
   @TestConfiguration(proxyBeanMethods = false)
   static class ReservedRunSubmissionTestConfiguration {
+    @Bean
+    PipelineE2ETransportEvidence transportEvidence() {
+      return new PipelineE2ETransportEvidence();
+    }
 
     @Bean
     ReservedRunSubmissionController reservedRunSubmissionController(

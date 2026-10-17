@@ -107,7 +107,9 @@ final class ProviderHandoffDossier {
         + ". Reason: "
         + node.path("reason").asText("not recorded")
         + ". Do not repeat the failed approach blindly; inspect the existing workspace and verify"
-        + " the stated failure before editing.";
+        + " the stated failure before editing.\n"
+        + com.navneet.executespec.agent.PromptTrustBoundary.wrap(
+            "FROZEN_ACCEPTANCE_FAILURE", node.path("failure").asText("not recorded"));
   }
 
   static String writeAndReadRecoveryNote(

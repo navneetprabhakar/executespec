@@ -276,3 +276,18 @@ repository containing its own `repos/<name>` directory cannot be reclassified. M
 still fail closed. `WorkspaceFileService` uses the same authority for root base/head diffs and
 status. Preview/Render may read restored Project bytes whose archive omits nested Git; evidence and
 iteration paths separately fail closed when exact Git history is unavailable.
+
+## Source-bound preview evidence
+
+`PreviewWorkspaceResolver.resolveBound` stages a unique build context, verifies its application
+bytes against the canonical source tree, and rechecks the complete source generation after staging.
+`PreviewSession.workspaceGeneration` keeps that original binding through status updates. Existing
+sessions are reusable only for the same canonical generation. A stopped/failed build must unwind
+before another attempt can start, preventing its late status update from relabelling a newer image.
+Functional tests additionally compare the running preview artifact identity before and after the
+runner. The live-preview host-network gate remains OFF; source binding does not relax sandbox egress.
+
+The sandbox image now installs its pinned Python runtime kit globally at image-build time as well
+as retaining the offline wheelhouse. Frozen Python acceptance uses `python3 -m pytest`; cached wheels
+alone do not satisfy that command. `docker/sandbox-toolchain/validate.sh` exercises both the global
+pytest entrypoint and the offline HTTP kit under containment, using the non-root fixture owner uid/gid.

@@ -18,8 +18,64 @@ public record PreviewSession(
     String cloudRunServiceName, // Cloud Run service name (null for Docker mode)
     String imageUri, // Artifact Registry image URI (null for Docker mode)
     String buildOutput, // Docker build output (Cloud Run mode; null for Docker mode)
-    String dockerfile // Generated Dockerfile content (Cloud Run mode; null for Docker mode)
-    ) {
+    String dockerfile, // Generated Dockerfile content (Cloud Run mode; null for Docker mode)
+    String workspaceGeneration) {
+  /** Compatibility for sessions created before exact source binding. */
+  public PreviewSession(
+      String runId,
+      String composeProjectName,
+      PreviewProjectType projectType,
+      PreviewMode previewMode,
+      DatabaseType databaseType,
+      PreviewStatus status,
+      String url,
+      int hostPort,
+      String errorMessage,
+      Instant startedAt,
+      Instant expiresAt,
+      String cloudRunServiceName,
+      String imageUri,
+      String buildOutput,
+      String dockerfile) {
+    this(
+        runId,
+        composeProjectName,
+        projectType,
+        previewMode,
+        databaseType,
+        status,
+        url,
+        hostPort,
+        errorMessage,
+        startedAt,
+        expiresAt,
+        cloudRunServiceName,
+        imageUri,
+        buildOutput,
+        dockerfile,
+        null);
+  }
+
+  public PreviewSession withWorkspaceGeneration(String generation) {
+    return new PreviewSession(
+        runId,
+        composeProjectName,
+        projectType,
+        previewMode,
+        databaseType,
+        status,
+        url,
+        hostPort,
+        errorMessage,
+        startedAt,
+        expiresAt,
+        cloudRunServiceName,
+        imageUri,
+        buildOutput,
+        dockerfile,
+        generation);
+  }
+
   /** Backward-compatible constructor without build diagnostics. */
   public PreviewSession(
       String runId,
@@ -82,6 +138,16 @@ public record PreviewSession(
         null,
         null,
         null);
+  }
+
+  public boolean sameArtifactAs(PreviewSession other) {
+    return other != null
+        && workspaceGeneration != null
+        && java.util.Objects.equals(runId, other.runId)
+        && java.util.Objects.equals(workspaceGeneration, other.workspaceGeneration)
+        && java.util.Objects.equals(startedAt, other.startedAt)
+        && java.util.Objects.equals(imageUri, other.imageUri)
+        && java.util.Objects.equals(url, other.url);
   }
 
   public boolean isExpired() {

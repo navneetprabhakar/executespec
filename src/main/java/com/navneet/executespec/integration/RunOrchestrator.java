@@ -140,6 +140,8 @@ public class RunOrchestrator implements RunControlPort {
   private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
       workspaceGenerationRecovery;
   private final AcceptedGenerationVerificationRunner acceptedVerification;
+  private final BuildExecutionPolicyStore executionPolicies;
+  private final RunCompletionPublisher completionPublisher;
   private final GoalContinuationAdvisor goalContinuationAdvisor;
   private final ReviewerAgent reviewer;
   private final PostEditFormatter postEditFormatter;
@@ -2048,12 +2050,27 @@ public class RunOrchestrator implements RunControlPort {
           return;
         }
         plan = stabilizedPlan.plan();
+        com.navneet.executespec.workspacegeneration.BuildPlanCapabilityPolicy.requireSupported(
+            plan,
+            workspace,
+            workspaceOrigins.load(runId, selectedRepoIds),
+            buildProtocolVersions.requireExecutable(runId));
         boolean needsApproval = !skipApproval && "PRODUCTION".equalsIgnoreCase(executionMode);
         var gatePreparation =
             planGateCoordinator.prepare(needsApproval, runId, runRow.getUserRequest(), plan);
         contextComposer.writeAgentContext(workspace, plan);
         persistEstimate(runId, provider, model, plan, lowComplexityWorkerStartTierOverride);
         designBlock = contextComposer.buildDesignBlock(userRequest, plan);
+        if (!standardsBlock.isBlank()) designBlock += "\n\n" + standardsBlock;
+        designBlock =
+            executionPolicies
+                .freeze(
+                    runId,
+                    designBlock,
+                    requireContinuationConfirmation,
+                    requireContinuationBenchmarkPrior,
+                    lowComplexityWorkerStartTierOverride)
+                .designBlock();
         // Phase 1: book the planner's own delta, not the whole-run snapshot (RR-1561).
         afterPlan = costTracker.snapshot(runId);
         PlannerPhaseAttribution.apply(
@@ -2106,11 +2123,8 @@ public class RunOrchestrator implements RunControlPort {
         if (plan.tasks() == null || plan.tasks().isEmpty()) {
           throw new IllegalStateException("Approved run has an empty persisted plan: " + runId);
         }
-        designBlock = contextComposer.buildDesignBlock(userRequest, plan);
+        designBlock = executionPolicies.require(runId).designBlock();
         afterPlan = costTracker.snapshot(runId);
-      }
-      if (!standardsBlock.isBlank()) {
-        designBlock = designBlock + "\n\n" + standardsBlock;
       }
 
       op = runOperationLifecycle.claimExecution(baseRootCtx, runId, provider, model);
@@ -2552,15 +2566,16 @@ public class RunOrchestrator implements RunControlPort {
       // terminate() flips status + persists the (idempotent) reason.
       String finalStatus = sr.status();
       String finalReason = sr.reason();
-      terminate(
-          runId,
-          finalStatus,
-          finalReason,
-          "overall="
-              + execResult.overall()
-              + (reviewResult != null ? "; review=" + reviewResult.overall() : "")
-              + (finalReason != null ? "; reason=" + finalReason : ""),
-          startedAt);
+      TerminalReceipt terminalReceipt =
+          terminalize(
+              runId,
+              finalStatus,
+              finalReason,
+              "overall="
+                  + execResult.overall()
+                  + (reviewResult != null ? "; review=" + reviewResult.overall() : "")
+                  + (finalReason != null ? "; reason=" + finalReason : ""),
+              startedAt);
       String persistedFinalStatus =
           runRepo.findById(runId).map(PipelineRun::getStatus).orElse(finalStatus);
       log.info(
@@ -2571,100 +2586,106 @@ public class RunOrchestrator implements RunControlPort {
           reviewResult == null ? "n/a" : reviewResult.overall(),
           finalReason);
 
-      // 7b. Auto-push every successful run
-      // Any run that reaches COMPLETE/PARTIAL and targets an EXISTING repo
-      // gets pushed to GitHub automatically. Previously only project-scoped
-      // runs auto-pushed; standalone /api/runs runs required the user to
-      // click "Push & open PR" — a footgun when the run looks complete in
-      // the UI but no PR exists. Manual "Push & open PR" still works as a
-      // re-push. Feature flag `project.runs.auto-push` still gates the
-      // project-scoped path for back-compat; standalone runs are always on.
-      if ("COMPLETE".equals(persistedFinalStatus) || "PARTIAL".equals(persistedFinalStatus)) {
-        boolean shouldPush;
-        if (projectId != null) {
-          shouldPush = featureFlagService.isEnabled("project.runs.auto-push");
-        } else {
-          // Standalone run: push whenever the run targeted an EXISTING repo.
-          PipelineRun r = runRepo.findById(runId).orElse(null);
-          shouldPush =
-              r != null
-                  && "EXISTING".equalsIgnoreCase(r.getRepoMode())
-                  && r.getRepoUrl() != null
-                  && !r.getRepoUrl().isBlank();
-        }
-        // RR-826 — no publication without verification. The COMPLETE/PARTIAL status above is not
-        // enough: a run can terminalize PARTIAL because the deterministic verification never
-        // happened or failed hard (e.g. VALIDATION_REPORT_UNAVAILABLE, FINAL_BUILD_FAILED,
-        // REVIEWER_FAILED, *_ENFORCEMENT_UNAVAILABLE). Auto-publishing those means opening a PR
-        // while saying "we could not verify this run". AutoPushEligibilityPolicy is a DENYLIST of
-        // exactly those unverifiable terminal reasons — measured-but-partial runs (warnings, tests
-        // that ran and partially failed, below-bar-but-measured quality) keep auto-pushing. Only
-        // the automatic push is gated; the workspace, result, and manual push are untouched.
-        if (shouldPush && !AutoPushEligibilityPolicy.allowsAutoPush(finalReason)) {
-          shouldPush = false;
-          log.info(
-              "V2 run={} auto-push skipped — terminal reason {} means the run was not verified"
-                  + " (RR-826); manual push remains available",
-              runId,
-              finalReason);
-        }
-        // RR-234 — staged-PR-before-push consent, now DURABLE and FAIL-CLOSED.
-        //
-        // This gate used to read a Redis-only key whose own contract said a JVM crash loses the
-        // intent and the next attempt resumes default auto-push. That failure mode silently
-        // converts a customer's "do not publish this" into publishing it — the one direction the
-        // gate must never fail in. The consent is now a column stamped atomically with run
-        // creation (V323); the Redis key is still consumed for runs submitted before this change
-        // and for a one-shot manual override.
-        //
-        // If the run row cannot be read at all we do NOT push: without the row we cannot prove
-        // consent was given, and publication is irreversible.
-        if (shouldPush) {
-          PipelineRun policyRow = null;
-          try {
-            policyRow = runRepo.findById(runId).orElse(null);
-          } catch (Exception policyEx) {
-            log.error(
-                "V2 run={} could not load publication policy; refusing auto-push: {}",
+      try {
+        // 7b. Auto-push every successful run
+        // Any run that reaches COMPLETE/PARTIAL and targets an EXISTING repo
+        // gets pushed to GitHub automatically. Previously only project-scoped
+        // runs auto-pushed; standalone /api/runs runs required the user to
+        // click "Push & open PR" — a footgun when the run looks complete in
+        // the UI but no PR exists. Manual "Push & open PR" still works as a
+        // re-push. Feature flag `project.runs.auto-push` still gates the
+        // project-scoped path for back-compat; standalone runs are always on.
+        if ("COMPLETE".equals(persistedFinalStatus) || "PARTIAL".equals(persistedFinalStatus)) {
+          boolean shouldPush;
+          if (projectId != null) {
+            shouldPush = featureFlagService.isEnabled("project.runs.auto-push");
+          } else {
+            // Standalone run: push whenever the run targeted an EXISTING repo.
+            PipelineRun r = runRepo.findById(runId).orElse(null);
+            shouldPush =
+                r != null
+                    && "EXISTING".equalsIgnoreCase(r.getRepoMode())
+                    && r.getRepoUrl() != null
+                    && !r.getRepoUrl().isBlank();
+          }
+          // RR-826 — no publication without verification. The COMPLETE/PARTIAL status above is not
+          // enough: a run can terminalize PARTIAL because the deterministic verification never
+          // happened or failed hard (e.g. VALIDATION_REPORT_UNAVAILABLE, FINAL_BUILD_FAILED,
+          // REVIEWER_FAILED, *_ENFORCEMENT_UNAVAILABLE). Auto-publishing those means opening a PR
+          // while saying "we could not verify this run". AutoPushEligibilityPolicy is a DENYLIST of
+          // exactly those unverifiable terminal reasons — measured-but-partial runs (warnings,
+          // tests
+          // that ran and partially failed, below-bar-but-measured quality) keep auto-pushing. Only
+          // the automatic push is gated; the workspace, result, and manual push are untouched.
+          if (shouldPush && !AutoPushEligibilityPolicy.allowsAutoPush(finalReason)) {
+            shouldPush = false;
+            log.info(
+                "V2 run={} auto-push skipped — terminal reason {} means the run was not verified"
+                    + " (RR-826); manual push remains available",
                 runId,
-                policyEx.getMessage());
+                finalReason);
           }
-          boolean legacyRedisConsent = runSkipPushFlag.consume(runId);
-          if (policyRow == null) {
-            shouldPush = false;
-            log.warn(
-                "V2 run={} auto-push skipped — publication policy unreadable (fail-closed)", runId);
-          } else if (policyRow.isSkipAutoPush() || legacyRedisConsent) {
-            shouldPush = false;
-            log.info("V2 run={} auto-push skipped (customer asked not to publish)", runId);
-          }
-        }
-        if (shouldPush) {
-          try {
-            PipelineRun fresh = runRepo.findById(runId).orElse(null);
-            // RR-1689 — publication authority is bound to the still-current solution attempt.
-            if (fresh != null && publicationFence.mayPublish(fresh)) {
-              com.navneet.executespec.integration.scm.ScmPushService.PushResult pushResult =
-                  scmPushService.push(fresh);
-              if (pushResult.pushed()) {
-                log.info(
-                    "V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
-              } else {
-                log.warn(
-                    "V2 run={} auto-push did not publish status={} code={} gate={}",
-                    runId,
-                    pushResult.status(),
-                    pushResult.code(),
-                    pushResult.blockingGate());
-              }
+          // RR-234 — staged-PR-before-push consent, now DURABLE and FAIL-CLOSED.
+          //
+          // This gate used to read a Redis-only key whose own contract said a JVM crash loses the
+          // intent and the next attempt resumes default auto-push. That failure mode silently
+          // converts a customer's "do not publish this" into publishing it — the one direction the
+          // gate must never fail in. The consent is now a column stamped atomically with run
+          // creation (V323); the Redis key is still consumed for runs submitted before this change
+          // and for a one-shot manual override.
+          //
+          // If the run row cannot be read at all we do NOT push: without the row we cannot prove
+          // consent was given, and publication is irreversible.
+          if (shouldPush) {
+            PipelineRun policyRow = null;
+            try {
+              policyRow = runRepo.findById(runId).orElse(null);
+            } catch (Exception policyEx) {
+              log.error(
+                  "V2 run={} could not load publication policy; refusing auto-push: {}",
+                  runId,
+                  policyEx.getMessage());
             }
-          } catch (Exception pushEx) {
-            log.warn(
-                "V2 run={} auto-push failed (manual push still works): {}",
-                runId,
-                pushEx.getMessage());
+            boolean legacyRedisConsent = runSkipPushFlag.consume(runId);
+            if (policyRow == null) {
+              shouldPush = false;
+              log.warn(
+                  "V2 run={} auto-push skipped — publication policy unreadable (fail-closed)",
+                  runId);
+            } else if (policyRow.isSkipAutoPush() || legacyRedisConsent) {
+              shouldPush = false;
+              log.info("V2 run={} auto-push skipped (customer asked not to publish)", runId);
+            }
+          }
+          if (shouldPush) {
+            try {
+              PipelineRun fresh = runRepo.findById(runId).orElse(null);
+              // RR-1689 — publication authority is bound to the still-current solution attempt.
+              if (fresh != null && publicationFence.mayPublish(fresh)) {
+                com.navneet.executespec.integration.scm.ScmPushService.PushResult pushResult =
+                    scmPushService.push(fresh);
+                if (pushResult.pushed()) {
+                  log.info(
+                      "V2 run={} auto-pushed to SCM (projectScoped={})", runId, projectId != null);
+                } else {
+                  log.warn(
+                      "V2 run={} auto-push did not publish status={} code={} gate={}",
+                      runId,
+                      pushResult.status(),
+                      pushResult.code(),
+                      pushResult.blockingGate());
+                }
+              }
+            } catch (Exception pushEx) {
+              log.warn(
+                  "V2 run={} auto-push failed (manual push still works): {}",
+                  runId,
+                  pushEx.getMessage());
+            }
           }
         }
+      } finally {
+        publishCompletion(terminalReceipt);
       }
     } catch (Exception unexpected) {
       if (Thread.currentThread().isInterrupted() || pool.isShuttingDown()) {
@@ -3183,6 +3204,11 @@ public class RunOrchestrator implements RunControlPort {
   @Override
   public void terminate(
       String runId, String finalStatus, String statusReason, String note, Instant startedAt) {
+    publishCompletion(terminalize(runId, finalStatus, statusReason, note, startedAt));
+  }
+
+  private TerminalReceipt terminalize(
+      String runId, String finalStatus, String statusReason, String note, Instant startedAt) {
     RunCostTracker.Snapshot cost = costTracker.finalizeRun(runId);
     // A phase interrupted before its normal attribution boundary still has immutable physical
     // attempt rows. Reconcile those facts before publishing terminal totals; the operation only
@@ -3281,65 +3307,25 @@ public class RunOrchestrator implements RunControlPort {
     if (terminalClaim > 0 && !"PAUSED".equalsIgnoreCase(actualStatus)) {
       validationKickoff.refreshRunGoalDecisionAfterTerminal(runId);
     }
-    broadcaster.emit(runId, RunEvent.runStatus(runId, actualStatus));
-    broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
-    broadcaster.emit(runId, RunEvent.complete(runId, actualStatus, actualReason));
-    if (!"PAUSED".equals(actualStatus)) {
-      broadcaster.complete(runId);
-    }
-    // V2 run-level metrics are emitted by RunService only. This orchestrator is a
-    // parallel entry path — record run.outcome + run.latency here too so V1-endpoint-
-    // submitted V2 runs are counted.
-    metrics.recordRunOutcome(actualStatus);
-    Instant effectiveStartedAt =
-        startedAt != null
-            ? startedAt
-            : runRepo.findById(runId).map(PipelineRun::getStartedAt).orElse(Instant.now());
-    metrics.recordRunLatency(
-        actualStatus, java.time.Duration.between(effectiveStartedAt, Instant.now()));
-    // v2.5.8 — fire Spring ApplicationEvent so RunCompletionNotifier (in-app
-    // notification), RunQuotaRefundListener (refund on failure), and
-    // WorkspaceGcsUploadListener (archive workspace) all get notified.
-    // V1 PipelineHarness already publishes this; V2 previously did not,
-    // so notifications silently never fired for any V2 run.
-    try {
-      if ("COMPLETE".equalsIgnoreCase(actualStatus) || "PARTIAL".equalsIgnoreCase(actualStatus)) {
-        eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
-      } else if ("FAILED".equalsIgnoreCase(actualStatus)
-          || "CANCELLED".equalsIgnoreCase(actualStatus)) {
-        eventPublisher.publishEvent(
-            new PipelineEvent.RunFailed(runId, note == null ? actualStatus : note));
-      }
-    } catch (Exception eventEx) {
-      log.warn("V2 run={} event publish failed (non-fatal): {}", runId, eventEx.getMessage());
-    }
+    return new TerminalReceipt(runId, actualStatus, actualReason, note, startedAt, cost);
+  }
 
-    // Wave 2.1 — activation funnel step 5. Fires once per user on the
-    // first run that reaches COMPLETE or PARTIAL (terminal-but-usable).
-    // FAILED/CANCELLED don't count as activation signals — a user who
-    // submits 3 runs that all fail hasn't hit the "my code works" moment.
-    if (("COMPLETE".equalsIgnoreCase(actualStatus) || "PARTIAL".equalsIgnoreCase(actualStatus))
-        && !"LOCAL_EXECUTION".equalsIgnoreCase(actualReason)) {
-      try {
-        runRepo
-            .findById(runId)
-            .ifPresent(
-                r -> {
-                  if (r.getCreatedByUserId() != null) {
-                    eventTracking.track(
-                        r.getCreatedByUserId(),
-                        com.navneet.executespec.analytics.EventName.RUN_COMPLETE,
-                        java.util.Map.of(
-                            "terminalStatus", actualStatus,
-                            "statusReason", actualReason == null ? "" : actualReason,
-                            "aiProvider", r.getAiProvider() == null ? "" : r.getAiProvider()));
-                  }
-                });
-      } catch (Exception trackEx) {
-        log.warn(
-            "Activation track RUN_COMPLETE failed for run={}: {}", runId, trackEx.getMessage());
-      }
-    }
+  private record TerminalReceipt(
+      String runId,
+      String status,
+      String reason,
+      String note,
+      Instant startedAt,
+      RunCostTracker.Snapshot cost) {}
+
+  private void publishCompletion(TerminalReceipt terminal) {
+    completionPublisher.publish(
+        terminal.runId(),
+        terminal.status(),
+        terminal.reason(),
+        terminal.note(),
+        terminal.startedAt(),
+        terminal.cost());
   }
 
   // Run-end validation-report kickoff (assemble ReportInput + accuracy + synthesise ReviewIssues +
@@ -3717,9 +3703,10 @@ public class RunOrchestrator implements RunControlPort {
             1,
             limitData.limitName(),
             limitData.used(),
-            limitData.max()));
+            limitData.max(),
+            "RESERVED"));
     broadcaster.emit(runId, RunEvent.log(runId, targetTaskId, summary));
-    continuationActionRecorder.recordExecuted(
+    continuationActionRecorder.recordReserved(
         taskRow.get(),
         decision.decision().name(),
         candidate.provider(),

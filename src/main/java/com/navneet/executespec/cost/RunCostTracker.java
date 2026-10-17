@@ -2,10 +2,8 @@ package com.navneet.executespec.cost;
 
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.navneet.executespec.pricing.ModelPricing;
@@ -33,9 +31,10 @@ import lombok.extern.slf4j.Slf4j;
  * cache_creation_input_tokens} in their response metadata (Anthropic); for others, those fields
  * stay zero and the pricing falls back to the flat input/output rates.
  *
- * <p>{@link #finalizeRun(String)} returns a snapshot and removes the entry, so a completed run's
- * data doesn't leak memory. The tracker is best-effort — lookups against a runId not seen before
- * return an empty snapshot rather than throwing.
+ * <p>{@link #finalizeRun(String)} retains the same run/task populations for 24 hours after the last
+ * late call, preventing asynchronous work from resetting spend floors. Scheduled cleanup removes
+ * inactive terminal populations. The tracker is best-effort — lookups against a runId not seen
+ * before return an empty snapshot rather than throwing.
  */
 @Component
 @Slf4j
@@ -101,14 +100,13 @@ public class RunCostTracker {
   /** Credit multiplier — USD per credit. Matches V1's default (see AgentProperties.Cost). */
   private static final double USD_PER_CREDIT = 5.0;
 
-  private final Map<String, Accumulator> byRun = new ConcurrentHashMap<>();
+  private final RunUsageRegistry<Accumulator> usageRegistry = new RunUsageRegistry<>();
 
-  /**
-   * Per-task accumulator, keyed by {@code runId|taskId}. Populated when the router is given a
-   * task-scoped {@code ExecutionContext}; consumed by the orchestrator to write real per-task token
-   * columns to {@code agent_task} instead of the old equal-split approximation.
-   */
-  private final Map<String, Accumulator> byRunTask = new ConcurrentHashMap<>();
+  /** Retired run and task usage expires together after bounded late work has settled. */
+  @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 3_600_000)
+  void cleanTerminalUsage() {
+    usageRegistry.cleanBefore(java.time.Instant.now().minus(java.time.Duration.ofHours(24)));
+  }
 
   /** Records a single ChatResponse's token usage + cost against {@code runId}. */
   public CallUsage record(String runId, String provider, String model, ChatResponse response) {
@@ -180,7 +178,7 @@ public class RunCostTracker {
             ? providerReportedCost
             : priceCall(provider, model, inTok, outTok, cacheWrite, cacheRead);
 
-    Accumulator acc = byRun.computeIfAbsent(runId, k -> new Accumulator());
+    Accumulator acc = usageRegistry.recordRun(runId, Accumulator::new);
     acc.inputTokens.addAndGet(inTok);
     acc.outputTokens.addAndGet(outTok);
     acc.cacheWriteTokens.addAndGet(cacheWrite);
@@ -190,7 +188,7 @@ public class RunCostTracker {
     acc.reasoningTokens.addAndGet(reasoningTok);
 
     if (taskId != null && !taskId.isBlank()) {
-      Accumulator taskAcc = byRunTask.computeIfAbsent(runId + "|" + taskId, k -> new Accumulator());
+      Accumulator taskAcc = usageRegistry.recordTask(runId, taskId, Accumulator::new);
       taskAcc.inputTokens.addAndGet(inTok);
       taskAcc.outputTokens.addAndGet(outTok);
       taskAcc.cacheWriteTokens.addAndGet(cacheWrite);
@@ -226,7 +224,7 @@ public class RunCostTracker {
 
   /** Current live cost snapshot, or zero-init if unknown. */
   public Snapshot snapshot(String runId) {
-    Accumulator acc = byRun.get(runId);
+    Accumulator acc = usageRegistry.run(runId);
     if (acc == null) return new Snapshot(0, 0, 0, 0, 0.0, 0);
     return acc.toSnapshot();
   }
@@ -236,24 +234,22 @@ public class RunCostTracker {
    * presence check plus {@link #snapshot}, this cannot observe removal between those two reads.
    */
   public java.util.Optional<Snapshot> liveSnapshot(String runId) {
-    Accumulator acc = runId == null ? null : byRun.get(runId);
+    Accumulator acc = runId == null ? null : usageRegistry.run(runId);
     return acc == null ? java.util.Optional.empty() : java.util.Optional.of(acc.toSnapshot());
   }
 
   /** Per-task snapshot, or zero-init if the tracker never saw task-scoped calls. */
   public Snapshot snapshotTask(String runId, String taskId) {
     if (runId == null || taskId == null) return new Snapshot(0, 0, 0, 0, 0.0, 0);
-    Accumulator acc = byRunTask.get(runId + "|" + taskId);
+    Accumulator acc = usageRegistry.task(runId, taskId);
     return acc == null ? new Snapshot(0, 0, 0, 0, 0.0, 0) : acc.toSnapshot();
   }
 
-  /** Returns the final snapshot and clears the per-run entry (plus any per-task entries). */
+  /**
+   * Terminal snapshot; retain the same accumulator for bounded late work and repeated finalization.
+   */
   public Snapshot finalizeRun(String runId) {
-    Accumulator acc = byRun.remove(runId);
-    if (runId != null) {
-      String prefix = runId + "|";
-      byRunTask.keySet().removeIf(k -> k.startsWith(prefix));
-    }
+    Accumulator acc = usageRegistry.retire(runId);
     return acc == null ? new Snapshot(0, 0, 0, 0, 0.0, 0) : acc.toSnapshot();
   }
 

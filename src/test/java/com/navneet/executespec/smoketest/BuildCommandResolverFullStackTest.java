@@ -44,7 +44,7 @@ class BuildCommandResolverFullStackTest {
     assertThat(command.sourceDescription()).isEqualTo("inferred:changed-multi-root");
     assertThat(command.command())
         .contains("cd backend && python3 -m compileall -q .")
-        .contains("cd frontend && npm run build --if-present");
+        .contains("cd frontend && npm run build");
   }
 
   @Test

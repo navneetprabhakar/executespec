@@ -59,6 +59,14 @@ public class TestExecutionService {
 
   /** Run all compiled tests against the preview URL. */
   public TestExecutionSummary executeTests(String runId, Long testPlanId, String previewBaseUrl) {
+    return executeTests(runId, testPlanId, previewBaseUrl, null);
+  }
+
+  public TestExecutionSummary executeTests(
+      String runId,
+      Long testPlanId,
+      String previewBaseUrl,
+      com.navneet.executespec.deployment.preview.PreviewSession preview) {
     String executionId = UUID.randomUUID().toString();
     log.info(
         "[TestExec] Executing tests for run {} against {} (execution {})",
@@ -93,6 +101,20 @@ public class TestExecutionService {
       return staleBinding(runId, plan, executionId, bindingProblem);
     }
 
+    String sourceGeneration = admissionService.currentWorkspaceGeneration(runId);
+    if (sourceGeneration == null
+        || preview == null
+        || !runId.equals(preview.runId())
+        || !previewBaseUrl.equals(preview.url())
+        || !sourceGeneration.equals(preview.workspaceGeneration())
+        || preview.status() != com.navneet.executespec.deployment.preview.PreviewStatus.RUNNING
+        || preview.isExpired()) {
+      return unavailable(
+          runId,
+          plan,
+          executionId,
+          "running preview is not bound to the current canonical source generation");
+    }
     Instant start = Instant.now();
 
     try {
@@ -195,6 +217,10 @@ public class TestExecutionService {
         return staleBinding(runId, plan, executionId, drift);
       }
 
+      if (!sourceGeneration.equals(admissionService.currentWorkspaceGeneration(runId))) {
+        return staleBinding(
+            runId, plan, executionId, "canonical source generation changed during execution");
+      }
       // Check for "Connection refused" pattern — preview crashed
       boolean allConnectionRefused =
           !results.isEmpty()
@@ -236,6 +262,8 @@ public class TestExecutionService {
               .allConnectionRefused(allConnectionRefused)
               .executionVerified(Boolean.TRUE)
               .executionId(executionId)
+              .workspaceGeneration(sourceGeneration)
+              .executionStartedAt(start)
               .evidenceScope(TestExecutionSummary.EvidenceScope.LIVE_PREVIEW_FUNCTIONAL)
               .build();
 

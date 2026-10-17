@@ -80,16 +80,20 @@ class CorrectionValidationAdmission {
    * correction checkpoint or workspace authority.
    */
   ValidationReport regenerateAndAssertAcceptedGeneration(
-      String runId,
+      com.navneet.executespec.tool.ExecutionContext context,
       ExecutionResult execution,
       ReviewerResult review,
       Plan plan,
-      Path workspace,
       String reviewerWorkspaceGeneration) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      throw new IllegalStateException("VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    String runId = context.runId();
+    Path workspace = context.workspaceRoot();
     ValidationReport regenerated =
         validationKickoff
             .generateCorrectionValidationReport(
-                runId, execution, review, plan, reviewerWorkspaceGeneration)
+                context, execution, review, plan, reviewerWorkspaceGeneration)
             .orElseThrow(
                 () ->
                     new IllegalStateException(

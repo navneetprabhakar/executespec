@@ -24,4 +24,5 @@ public record SavedContext(
     int iteration,
     List<Message> history,
     Instant savedAt,
-    int sizeBytes) {}
+    int sizeBytes,
+    java.util.UUID workspaceGenerationAttemptId) {}

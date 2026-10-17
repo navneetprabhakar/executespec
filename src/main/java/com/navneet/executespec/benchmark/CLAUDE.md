@@ -263,3 +263,9 @@ tuple with a persistent trajectory root and prove browser/API reload, backend re
 event-count/SHA parity and zero missing trajectories. A horizontally scaled deployment must mount one
 shared root or replace it with an object-store-backed implementation; node-local directories are not a
 valid multi-JVM contract.
+
+## Provider-default ownership (2026-10-17)
+
+Omitted generation models resolve from `ModelRegistry.planningModelFor`, the same YAML registry
+used by customer BUILD. The removed hardcoded switch could retain dead Fireworks slugs after a
+registry refresh. Unsupported providers still fail closed; explicit model choices are preserved.
