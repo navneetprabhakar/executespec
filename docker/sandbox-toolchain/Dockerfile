@@ -31,6 +31,9 @@ RUN mkdir -p /opt/executespec/runtime/wheels \
     && pip3 download --only-binary=:all: --no-cache-dir \
       --dest /opt/executespec/runtime/wheels \
       --requirement /opt/executespec/runtime/python-http-runtime.lock \
+    && pip3 install --break-system-packages --no-index --no-cache-dir \
+      --find-links=/opt/executespec/runtime/wheels \
+      --requirement /opt/executespec/runtime/python-http-runtime.lock \
     && find /opt/executespec/runtime/wheels -type f -exec chmod 0444 {} + \
     && chmod 0444 /opt/executespec/runtime/python-http-runtime.lock
 COPY python-http-acceptance.sh /opt/executespec/runtime/python-http-acceptance.sh

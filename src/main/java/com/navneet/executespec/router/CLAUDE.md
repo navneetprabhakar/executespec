@@ -84,3 +84,13 @@ All text-only callers now use `LlmRouter.callText` (or `callTextStrict` when cro
 ## YAML consolidation (2026-05-06)
 
 All 8 hardcoded model-mapping sources were collapsed into YAML in 5 commits. `ModelContextWindowMap` deleted. `ModelController.MODEL_LABELS` reads `display-label`. Frontend `PricingTable` reads `chainTier` via new DTO fields on `PricingRow`. See [`docs/reports/model-mapping-audit-2026-05-06.md`](../../../../../../docs/reports/model-mapping-audit-2026-05-06.md) for the audit trail.
+
+## Fireworks callable-route refresh (2026-10-17)
+
+The selected planning/workhorse/lightweight route is `deepseek-v4p1-flash-fw`, mapping to
+`accounts/fireworks/models/deepseek-v4p1-flash`. The old Kimi and GLM Fast requests returned 404
+with model NOT_FOUND despite GLM appearing in the catalogue. Unavailable historical routes and
+redirects are removed from selectable configuration and the mapper; explicit old pins fail before
+transport instead of being silently replaced. Historical saved run labels/costs are not rewritten.
+Current pricing and context come from the Fireworks model page linked in YAML. The bounded
+three-task BUILD fixture passes with this route; catalogue presence alone is not qualification.

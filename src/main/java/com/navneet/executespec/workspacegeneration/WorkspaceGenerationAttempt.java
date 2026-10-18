@@ -54,6 +54,16 @@ public class WorkspaceGenerationAttempt {
   @Column(name = "task_index", nullable = false)
   private Integer taskIndex;
 
+  /** V401: a correction replaces this exact accepted prefix, without erasing its history. */
+  @Column(name = "base_frontier_attempt_id")
+  private UUID baseFrontierAttemptId;
+
+  @Column(name = "frontier_task_index")
+  private Integer frontierTaskIndex;
+
+  @Column(name = "base_frontier_generation", length = 64)
+  private String baseFrontierGeneration;
+
   @Column(name = "attempt_number", nullable = false)
   private Integer attemptNumber;
 

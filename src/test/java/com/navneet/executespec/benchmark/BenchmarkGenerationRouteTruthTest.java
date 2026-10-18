@@ -30,6 +30,7 @@ class BenchmarkGenerationRouteTruthTest {
 
   private BenchmarkGenerationService service() {
     return new BenchmarkGenerationService(
+        org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class),
         mock(SwebenchProperties.class),
         mock(SwebenchInstanceLoader.class),
         mock(SwebenchContainerStore.class),

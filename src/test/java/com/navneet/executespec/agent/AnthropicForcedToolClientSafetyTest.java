@@ -19,7 +19,7 @@ import org.springframework.ai.anthropic.api.AnthropicApi;
 class AnthropicForcedToolClientSafetyTest {
 
   private final AnthropicForcedToolClient client =
-      new AnthropicForcedToolClient(new ObjectMapper());
+      new AnthropicForcedToolClient(new ObjectMapper(), new AnthropicWorkspaceHeaders("", ""));
 
   private static AnthropicApi.ChatCompletionResponse responseWithToolUse(String stopReason) {
     AnthropicApi.ContentBlock toolUse =

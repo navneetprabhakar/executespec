@@ -1738,7 +1738,7 @@ class LlmRouterTest {
         .thenReturn(
             List.of(
                 new String[] {"openrouter", "deepseek-v4-pro"},
-                new String[] {"fireworks", "deepseek-v4-pro-fw"}));
+                new String[] {"fireworks", "deepseek-v4p1-flash-fw"}));
     AtomicInteger nativeFailures = new AtomicInteger();
     when(openai.call(any()))
         .thenAnswer(
@@ -1770,7 +1770,7 @@ class LlmRouterTest {
         .call(
             argThat(
                 request ->
-                    request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
+                    request.model().equals("accounts/fireworks/models/deepseek-v4p1-flash")
                         && request.baseUrl().contains("fireworks")));
   }
 
@@ -1784,7 +1784,7 @@ class LlmRouterTest {
         .thenReturn(
             List.of(
                 new String[] {"openrouter", "deepseek-v4-pro"},
-                new String[] {"fireworks", "deepseek-v4-pro-fw"}));
+                new String[] {"fireworks", "deepseek-v4p1-flash-fw"}));
     when(openai.call(any()))
         .thenAnswer(
             invocation -> {
@@ -1802,7 +1802,7 @@ class LlmRouterTest {
         .call(
             argThat(
                 request ->
-                    request.model().equals("accounts/fireworks/models/deepseek-v4-pro")
+                    request.model().equals("accounts/fireworks/models/deepseek-v4p1-flash")
                         && request.baseUrl().contains("fireworks")));
   }
 
@@ -1893,7 +1893,7 @@ class LlmRouterTest {
             new String[] {"openai", "gpt-x"},
             new String[] {"deepseek", "deepseek-v4-pro-native"},
             new String[] {"openrouter", "glm-5.2"},
-            new String[] {"fireworks", "glm-5.2-fw"})) {
+            new String[] {"fireworks", "deepseek-v4p1-flash-fw"})) {
       router.call(
           req(route[0], route[1]).toBuilder().readTimeoutSeconds(77).strictProvider(true).build());
     }
@@ -1932,6 +1932,24 @@ class LlmRouterTest {
         .isInstanceOf(RuntimeException.class);
     verify(gemini, never())
         .call(any()); // BYOK run never crosses to an unkeyed provider's platform key
+  }
+
+  @Test
+  void lostVerificationSessionRefusesProviderSpend() {
+    build();
+    var authority = mock(com.navneet.executespec.sandboxroute.VerificationSandboxAuthority.class);
+    org.mockito.Mockito.doThrow(new IllegalStateException("VERIFICATION_SANDBOX_LEASE_LOST"))
+        .when(authority)
+        .assertLive();
+    var request = req("openai", "gpt-x");
+    when(authority.runId()).thenReturn(request.context().runId());
+    when(authority.workspaceRoot()).thenReturn(request.context().workspaceRoot());
+    var fenced =
+        request.toBuilder()
+            .context(request.context().withVerificationSandboxAuthority(authority))
+            .build();
+    assertThatThrownBy(() -> router.call(fenced)).hasMessageContaining("LEASE_LOST");
+    verify(openai, never()).call(any());
   }
 
   @Test
@@ -1996,7 +2014,8 @@ class LlmRouterTest {
     when(registry.fallbackChainFor(anyString(), anyString()))
         .thenReturn(
             List.of(
-                new String[] {"openrouter", "glm-5.2"}, new String[] {"fireworks", "glm-5.2-fw"}));
+                new String[] {"openrouter", "glm-5.2"},
+                new String[] {"fireworks", "deepseek-v4p1-flash-fw"}));
     when(openai.call(any())).thenThrow(new RuntimeException("503 service unavailable"));
 
     LlmRequest byokRequest = req("deepseek", "deepseek-v4-pro-native");

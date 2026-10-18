@@ -18,7 +18,8 @@ class AnthropicForcedToolClientProviderStartFenceTest {
 
   @Test
   void invalidLocalToolSchemaFailsBeforeProviderStartSignal() {
-    AnthropicForcedToolClient client = new AnthropicForcedToolClient(new ObjectMapper());
+    AnthropicForcedToolClient client =
+        new AnthropicForcedToolClient(new ObjectMapper(), new AnthropicWorkspaceHeaders("", ""));
     AtomicInteger providerStarted = new AtomicInteger();
 
     AnthropicForcedToolClient.ForcedToolCallOutcome outcome =
@@ -37,7 +38,8 @@ class AnthropicForcedToolClientProviderStartFenceTest {
 
   @Test
   void durableFenceFailurePropagatesAndPreventsForcedTransport() {
-    AnthropicForcedToolClient client = new AnthropicForcedToolClient(new ObjectMapper());
+    AnthropicForcedToolClient client =
+        new AnthropicForcedToolClient(new ObjectMapper(), new AnthropicWorkspaceHeaders("", ""));
     AtomicInteger providerStarted = new AtomicInteger();
 
     assertThatThrownBy(

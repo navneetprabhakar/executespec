@@ -39,6 +39,7 @@ class SequentialExecutorRunJournalTest {
         null,
         null,
         null,
+        null,
         null);
   }
 

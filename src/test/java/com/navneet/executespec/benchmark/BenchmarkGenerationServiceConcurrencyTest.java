@@ -38,6 +38,7 @@ class BenchmarkGenerationServiceConcurrencyTest {
 
   private static BenchmarkGenerationService service(SwebenchProperties props) {
     return new BenchmarkGenerationService(
+        org.mockito.Mockito.mock(com.navneet.executespec.router.ModelRegistry.class),
         props,
         mock(SwebenchInstanceLoader.class),
         mock(SwebenchContainerStore.class),

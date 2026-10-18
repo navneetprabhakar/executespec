@@ -71,6 +71,7 @@ class PublicationExternalEffectStore {
 
   @Transactional
   void markPublicationDispatched(UUID attemptId) {
+    assertCurrentParent("workspace_publication_attempt", attemptId);
     int updated =
         jdbc.update(
             """
@@ -177,6 +178,7 @@ class PublicationExternalEffectStore {
 
   @Transactional
   void markRepositoryProvisionDispatched(UUID provisionId) {
+    assertCurrentParent("workspace_publication_repository_provision", provisionId);
     int updated =
         jdbc.update(
             "UPDATE workspace_publication_repository_provision SET state='DISPATCHED',"
@@ -297,6 +299,56 @@ class PublicationExternalEffectStore {
         || lease.ownerToken() == null
         || lease.authority() != RunWorkspaceAuthorityService.Authority.PUBLICATION) {
       throw new IllegalStateException("PUBLICATION_SETTLEMENT_AUTHORITY_MISSING");
+    }
+  }
+
+  private void assertCurrentParent(String table, UUID attemptId) {
+    // Fixed internal table names only. Parent-first locks match solution decision admission;
+    // re-read the child after locking its parent so a retry cannot grant stale publication.
+    var runs =
+        jdbc.queryForList(
+            "SELECT r.run_id,r.source_type FROM "
+                + table
+                + " a "
+                + "JOIN workspace_publication_preparation p ON p.id=a.preparation_id "
+                + "JOIN pipeline_run r ON r.run_id=p.run_id WHERE a.id=?",
+            attemptId);
+    if (runs.size() != 1) throw new IllegalStateException("PUBLICATION_RUN_IDENTITY_MISSING");
+    var run = runs.getFirst();
+    if ("EXECUTION_VIEW_APPROVED".equalsIgnoreCase(String.valueOf(run.get("source_type")))) {
+      var parents =
+          jdbc.queryForList(
+              "SELECT id,execution_run_id FROM execution_solution WHERE pipeline_run_id=?",
+              run.get("run_id"));
+      if (parents.size() != 1)
+        throw new IllegalStateException("PUBLICATION_PARENT_ATTEMPT_NOT_CURRENT");
+      var parent = parents.getFirst();
+      String parentStatus =
+          jdbc.queryForObject(
+              "SELECT status FROM execution_run WHERE id=? FOR UPDATE",
+              String.class,
+              parent.get("execution_run_id"));
+      if (parentStatus == null
+          || java.util.Set.of("PAUSED", "ABORTED", "CANCELLED", "FAILED").contains(parentStatus)) {
+        throw new IllegalStateException("PUBLICATION_PARENT_EXECUTION_STOPPED");
+      }
+      var current =
+          jdbc.queryForList(
+              "SELECT status FROM execution_solution WHERE id=? AND pipeline_run_id=? FOR UPDATE",
+              parent.get("id"),
+              run.get("run_id"));
+      if (current.size() != 1
+          || "SKIPPED".equals(String.valueOf(current.getFirst().get("status")))) {
+        throw new IllegalStateException("PUBLICATION_PARENT_ATTEMPT_NOT_CURRENT");
+      }
+    }
+    String status =
+        jdbc.queryForObject(
+            "SELECT status FROM pipeline_run WHERE run_id=? FOR UPDATE",
+            String.class,
+            run.get("run_id"));
+    if ("CANCELLED".equals(status) || "PAUSED".equals(status)) {
+      throw new IllegalStateException("PUBLICATION_RUN_STOPPED");
     }
   }
 

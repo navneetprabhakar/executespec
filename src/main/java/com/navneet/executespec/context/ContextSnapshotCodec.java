@@ -36,10 +36,12 @@ class ContextSnapshotCodec {
 
   private final ObjectMapper objectMapper;
 
-  String serialize(List<Message> history, int iteration, String runId, String taskId) {
+  String serialize(
+      List<Message> history, int iteration, String runId, String taskId, java.util.UUID attemptId) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("runId", runId);
     root.put("taskId", taskId);
+    if (attemptId != null) root.put("workspaceGenerationAttemptId", attemptId.toString());
     root.put("iteration", iteration);
     root.put("savedAtEpochMs", System.currentTimeMillis());
     ArrayNode msgs = root.putArray("history");
@@ -106,6 +108,10 @@ class ContextSnapshotCodec {
         .runId(runId)
         .taskId(taskId)
         .iteration(iteration)
+        .workspaceGenerationAttemptId(
+            root.hasNonNull("workspaceGenerationAttemptId")
+                ? java.util.UUID.fromString(root.path("workspaceGenerationAttemptId").asText())
+                : null)
         .history(history)
         .savedAt(Instant.ofEpochMilli(savedAt))
         .sizeBytes(json.getBytes(StandardCharsets.UTF_8).length)

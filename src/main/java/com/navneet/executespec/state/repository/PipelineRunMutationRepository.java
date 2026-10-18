@@ -50,6 +50,28 @@ public interface PipelineRunMutationRepository extends Repository<PipelineRun, S
 
   @Modifying(clearAutomatically = true, flushAutomatically = true)
   @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.acceptedWorkspaceGeneration = :candidate,"
+          + " r.acceptedGenerationAttemptId = :attemptId, r.acceptedCheckpointKind ="
+          + " :checkpointKind, r.acceptedCheckpointKey = :checkpointKey, r.acceptedCheckpointDigest"
+          + " = :checkpointDigest, r.acceptedCheckpointCompletedAt = :checkpointCompletedAt WHERE"
+          + " r.runId = :runId AND r.status = 'WORKING' AND r.acceptedWorkspaceGeneration = :before"
+          + " AND r.acceptedTaskIndex = :frontierIndex AND r.acceptedGenerationAttemptId ="
+          + " :baseAttemptId")
+  int replaceAcceptedWorkspaceFrontier(
+      @Param("runId") String runId,
+      @Param("before") String before,
+      @Param("baseAttemptId") UUID baseAttemptId,
+      @Param("frontierIndex") int frontierIndex,
+      @Param("candidate") String candidate,
+      @Param("attemptId") UUID attemptId,
+      @Param("checkpointKind") String checkpointKind,
+      @Param("checkpointKey") String checkpointKey,
+      @Param("checkpointDigest") String checkpointDigest,
+      @Param("checkpointCompletedAt") Instant checkpointCompletedAt);
+
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Transactional
   @Query("UPDATE PipelineRun r SET r.gcsWorkspaceKey = :key WHERE r.runId = :runId")
   int updateGcsWorkspaceKey(@Param("runId") String runId, @Param("key") String key);
 }

@@ -18,7 +18,11 @@ final class WorkspaceGenerationAcceptanceProof {
         || accepted.getState() != WorkspaceGenerationState.ACCEPTED
         || !runId.equals(accepted.getRunId())
         || !expectedGeneration.equals(accepted.getCandidateGeneration())
-        || !Objects.equals(run.getAcceptedTaskIndex(), accepted.getTaskIndex())
+        || !Objects.equals(
+            run.getAcceptedTaskIndex(),
+            accepted.getAttemptKind() == WorkspaceGenerationKind.CORRECTION
+                ? accepted.getFrontierTaskIndex()
+                : accepted.getTaskIndex())
         || run.getAcceptedCheckpointKind() == null
         || run.getAcceptedCheckpointKey() == null
         || run.getAcceptedCheckpointDigest() == null

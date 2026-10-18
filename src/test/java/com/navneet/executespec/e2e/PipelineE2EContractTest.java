@@ -33,7 +33,7 @@ class PipelineE2EContractTest {
         .contains("executespec.live-llm.enabled")
         .contains("executespec.live-llm.test-mode")
         .contains("executespec.live-llm.reservation-id")
-        .contains("deepseek-v4-flash-native")
+        .contains("PipelineE2ERoute.from(System.getenv())")
         .contains("userCostCap(COST_CAP_USD)")
         .contains(".autoMerge(false)")
         .contains("withReservedRunId")

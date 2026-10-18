@@ -37,6 +37,7 @@ workspace-e2e/*
 workspace-test/
 workspace-test/*
 test-workspace-e2e/
+/test-sandboxes-e2e/
 
 scripts/*.md
 scripts/*.json

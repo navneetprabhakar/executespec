@@ -265,3 +265,14 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
   for display-status bucketing: the project dashboard uses it to find persisted-COMPLETE runs,
   batch their task goal proof, and move unproven runs into its additive `partialRuns` counter via
   the now-public `RunMapper.displayRunStatus`.
+
+## V403 BUILD execution policy
+
+[ V403 ](../../../../../resources/db/migration/V403__persist_plan_bound_build_execution_policy.sql)
+adds `PipelineRun.buildExecutionPolicyJson`. `BuildExecutionPolicyStore` freezes its plan digest,
+design/standards block, continuation confirmation and benchmark requirements, and submitted low-tier
+override before execution. PostgreSQL forbids replacement or clearing after the first write.
+Recovery verifies the exact persisted plan and refuses a missing/malformed snapshot rather than
+weakening confirmation defaults or dropping the design context.
+V401 separately permits only exact accepted-prefix correction replacement; see
+`workspacegeneration/CLAUDE.md` for the attempt fields and frontier compare-and-set.

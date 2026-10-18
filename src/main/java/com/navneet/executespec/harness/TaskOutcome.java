@@ -63,7 +63,8 @@ public record TaskOutcome(
     GoalContinuationPolicyDecision continuationDecision,
     RunContinuationDecision continuationAction,
     String continuationActionProvider,
-    String continuationActionModel) {
+    String continuationActionModel,
+    @com.fasterxml.jackson.annotation.JsonIgnore String acceptanceDiagnostics) {
 
   public enum Status {
     /** Worker completed AND smoke test passed. */

@@ -13,11 +13,9 @@ import com.navneet.executespec.testgen.model.TestTask;
 
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
-
 /** Fail-closed source admission for generated integration tests. */
 @Component
-@RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class TestGenerationAdmissionService {
 
   private static final Set<String> SOURCE_EXTENSIONS =
@@ -47,6 +45,42 @@ public class TestGenerationAdmissionService {
   private final RunChangeEvidenceService changeEvidenceService;
   private final ApiSurfaceExtractor apiSurfaceExtractor;
   private final com.navneet.executespec.harness.WorkspaceInitService workspaceInitService;
+  private final com.navneet.executespec.integration.CorrectionWorkspaceTransaction generations;
+
+  public TestGenerationAdmissionService(
+      RunChangeEvidenceService changes,
+      ApiSurfaceExtractor surfaces,
+      com.navneet.executespec.harness.WorkspaceInitService workspaces) {
+    this(
+        changes,
+        surfaces,
+        workspaces,
+        new com.navneet.executespec.integration.CorrectionWorkspaceTransaction());
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public TestGenerationAdmissionService(
+      RunChangeEvidenceService changes,
+      ApiSurfaceExtractor surfaces,
+      com.navneet.executespec.harness.WorkspaceInitService workspaces,
+      com.navneet.executespec.integration.CorrectionWorkspaceTransaction generations) {
+    this.changeEvidenceService = changes;
+    this.apiSurfaceExtractor = surfaces;
+    this.workspaceInitService = workspaces;
+    this.generations = generations;
+  }
+
+  public String currentWorkspaceGeneration(String runId) {
+    Path workspace = workspaceInitService.runWorkspacePath(runId);
+    if (workspace == null || !Files.isDirectory(workspace)) return null;
+    try {
+      return generations.captureGeneration(workspace);
+    } catch (RuntimeException unavailable) {
+      log.debug(
+          "Canonical test source generation unavailable run={}: {}", runId, unavailable.toString());
+      return null;
+    }
+  }
 
   public Admission assess(String runId, boolean isCli, boolean isStaticHtml) {
     Path workspace = workspaceInitService.runWorkspacePath(runId);

@@ -207,7 +207,15 @@ public class ContextStore {
     return Optional.empty();
   }
 
-  /** Remove the snapshot for a task — called when the task completes successfully. */
+  /** BUILD retry reuse is valid only inside the same physical accepted-generation attempt. */
+  public Optional<SavedContext> loadForWorkspaceAttempt(ExecutionContext ctx) {
+    if (ctx == null || ctx.workspaceGenerationDispatchAuthority() == null) return Optional.empty();
+    java.util.UUID attemptId = ctx.workspaceGenerationDispatchAuthority().attemptId();
+    if (attemptId == null) return Optional.empty();
+    return load(ctx).filter(snapshot -> attemptId.equals(snapshot.workspaceGenerationAttemptId()));
+  }
+
+  /** Remove the task snapshot after success or before a fresh attempt. */
   public void delete(ExecutionContext ctx) {
     if (ctx == null) return;
     if (redis != null) {
@@ -524,7 +532,14 @@ public class ContextStore {
   }
 
   private String serialize(List<Message> history, int iteration, ExecutionContext ctx) {
-    return codec.serialize(history, iteration, ctx.runId(), ctx.taskId());
+    return codec.serialize(
+        history,
+        iteration,
+        ctx.runId(),
+        ctx.taskId(),
+        ctx.workspaceGenerationDispatchAuthority() == null
+            ? null
+            : ctx.workspaceGenerationDispatchAuthority().attemptId());
   }
 
   private SavedContext deserialize(String json) throws Exception {

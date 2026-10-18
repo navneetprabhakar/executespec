@@ -32,6 +32,13 @@ public class ValidationReport {
   @Column(name = "workspace_generation", length = 64)
   private String workspaceGeneration;
 
+  /** V402: last admitted asynchronous test execution for this exact report generation. */
+  @Column(name = "concrete_test_execution_id")
+  private String concreteTestExecutionId;
+
+  @Column(name = "concrete_test_started_at")
+  private Instant concreteTestStartedAt;
+
   /** Runtime surface bound at report generation; null only for historical rows. */
   @Column(name = "runtime_surface", length = 24)
   private String runtimeSurface;

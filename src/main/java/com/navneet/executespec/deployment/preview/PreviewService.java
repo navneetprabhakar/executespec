@@ -108,6 +108,11 @@ public class PreviewService {
   private final ConcurrentHashMap<String, PreviewSession> active = new ConcurrentHashMap<>();
 
   /** runId → last-used env vars (preserved across rebuild so users don't re-enter secrets) */
+  private final ConcurrentHashMap<String, java.util.UUID> inFlightBuilds =
+      new ConcurrentHashMap<>();
+
+  private final ConcurrentHashMap<String, Path> stagedContexts = new ConcurrentHashMap<>();
+
   private final ConcurrentHashMap<String, Map<String, String>> lastEnvVars =
       new ConcurrentHashMap<>();
 
@@ -326,10 +331,12 @@ public class PreviewService {
 
     // SECURITY: synchronized block ensures atomic check-count-insert to prevent
     // race condition where two concurrent requests both pass the limit check.
+    final java.util.UUID buildId = java.util.UUID.randomUUID();
     PreviewSession session;
     PreviewProjectType type;
     PreviewMode mode;
     Path workspace;
+    String sourceGeneration = null;
     String projectName;
     Duration ttl;
     synchronized (active) {
@@ -337,6 +344,13 @@ public class PreviewService {
       // If FAILED or TIMED_OUT, remove it so the user can retry.
       // If ANALYZING/BUILDING/STARTING/RUNNING, return as-is (no restart).
       PreviewSession existing = active.get(runId);
+      if (inFlightBuilds.containsKey(runId)
+          && (existing == null
+              || existing.status() == PreviewStatus.FAILED
+              || existing.status() == PreviewStatus.TIMED_OUT)) {
+        throw new PreviewException(
+            "The previous preview build is still stopping. Retry when it has finished.");
+      }
       if (existing != null) {
         if (existing.status() == PreviewStatus.FAILED
             || existing.status() == PreviewStatus.TIMED_OUT) {
@@ -353,9 +367,16 @@ public class PreviewService {
             cleanupCompose(existing);
           }
           active.remove(runId);
+          discardStagedContext(runId);
           log.info("Cleared failed preview session for run {} — allowing retry", runId);
         } else {
-          // ANALYZING, BUILDING, STARTING, RUNNING — return current state, don't restart
+          if (workspaceResolver != null
+              && !workspaceResolver.matchesGeneration(
+                  restoreService.ensureWorkspaceAvailable(runId), existing.workspaceGeneration())) {
+            throw new PreviewException(
+                "Preview belongs to an earlier code generation. Restart the preview for the current"
+                    + " code.");
+          }
           return existing;
         }
       }
@@ -410,7 +431,15 @@ public class PreviewService {
         stateStore.saveRun(run);
 
         // Detect project type (restore from GCS if needed)
-        workspace = resolvePreviewWorkspace(runId);
+        if (workspaceResolver == null) {
+          workspace = resolvePreviewWorkspace(runId);
+        } else {
+          var staged =
+              workspaceResolver.resolveBound(runId, restoreService.ensureWorkspaceAvailable(runId));
+          workspace = staged.workspace();
+          stagedContexts.put(runId, workspace);
+          sourceGeneration = staged.generation();
+        }
         type = dockerfileGen.detect(workspace);
         if (type == null) {
           throw new PreviewException("Unsupported project type — could not detect build system.");
@@ -446,7 +475,9 @@ public class PreviewService {
                 Instant.now().plus(ttl),
                 crServiceName,
                 null);
+        session = session.withWorkspaceGeneration(sourceGeneration);
         active.put(runId, session);
+        inFlightBuilds.put(runId, buildId);
         acquired = false; // active.put now owns the slot — release will happen via stop()
       } finally {
         if (acquired) {
@@ -495,6 +526,8 @@ public class PreviewService {
                 null,
                 null);
         active.put(runId, queued);
+        inFlightBuilds.remove(runId, buildId);
+        discardStagedContext(runId);
         broadcaster.emit(
             runId,
             RunEvent.log(
@@ -508,15 +541,25 @@ public class PreviewService {
           .name("preview-vm-" + shortId)
           .start(
               snapshot.wrap(
-                  () -> buildAndStartVm(runId, workspace, type, mode, projectName, safeEnvVars)));
+                  () ->
+                      runPreviewBuild(
+                          runId,
+                          buildId,
+                          () ->
+                              buildAndStartVm(
+                                  runId, workspace, type, mode, projectName, safeEnvVars))));
     } else if (isCloudRunMode()) {
       Thread.ofVirtual()
           .name("preview-cr-" + shortId)
           .start(
               snapshot.wrap(
                   () ->
-                      buildAndStartCloudRun(
-                          runId, workspace, type, mode, projectName, safeEnvVars)));
+                      runPreviewBuild(
+                          runId,
+                          buildId,
+                          () ->
+                              buildAndStartCloudRun(
+                                  runId, workspace, type, mode, projectName, safeEnvVars))));
     } else if (engineHandoff() != null && props.getEngine().isRouteVia()) {
       // Route via preview-engine: main app builds + pushes, preview-engine runs.
       String tierName = user.getTier() == null ? "LOCAL" : String.valueOf(user.getTier());
@@ -527,22 +570,32 @@ public class PreviewService {
           .start(
               snapshot.wrap(
                   () ->
-                      buildAndStartViaEngine(
+                      runPreviewBuild(
                           runId,
-                          workspace,
-                          type,
-                          mode,
-                          projectName,
-                          safeEnvVars,
-                          userId,
-                          tierName,
-                          ttlSeconds)));
+                          buildId,
+                          () ->
+                              buildAndStartViaEngine(
+                                  runId,
+                                  workspace,
+                                  type,
+                                  mode,
+                                  projectName,
+                                  safeEnvVars,
+                                  userId,
+                                  tierName,
+                                  ttlSeconds))));
     } else {
       Thread.ofVirtual()
           .name("preview-docker-" + shortId)
           .start(
               snapshot.wrap(
-                  () -> buildAndStart(runId, workspace, type, mode, projectName, safeEnvVars)));
+                  () ->
+                      runPreviewBuild(
+                          runId,
+                          buildId,
+                          () ->
+                              buildAndStart(
+                                  runId, workspace, type, mode, projectName, safeEnvVars))));
     }
 
     log.info(
@@ -600,6 +653,7 @@ public class PreviewService {
       mode = "docker";
     }
 
+    if (!inFlightBuilds.containsKey(runId)) discardStagedContext(runId);
     broadcaster.emit(runId, new RunEvent("PREVIEW_STOPPED", runId, null, null, Instant.now()));
     log.info("Preview stopped for run {} (mode={})", runId, mode);
 
@@ -1890,9 +1944,24 @@ public class PreviewService {
     return "other";
   }
 
+  private void runPreviewBuild(String runId, java.util.UUID buildId, Runnable build) {
+    try {
+      build.run();
+    } finally {
+      inFlightBuilds.remove(runId, buildId);
+      if (!active.containsKey(runId)) discardStagedContext(runId);
+    }
+  }
+
+  private void discardStagedContext(String runId) {
+    Path staged = stagedContexts.remove(runId);
+    if (staged != null && workspaceResolver != null) workspaceResolver.discard(staged);
+  }
+
   private void updateSession(
       String runId, java.util.function.UnaryOperator<PreviewSession> updater) {
-    active.computeIfPresent(runId, (k, old) -> updater.apply(old));
+    active.computeIfPresent(
+        runId, (k, old) -> updater.apply(old).withWorkspaceGeneration(old.workspaceGeneration()));
   }
 
   private String composeProjectName(String runId) {

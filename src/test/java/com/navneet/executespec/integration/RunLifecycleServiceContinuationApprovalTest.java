@@ -57,6 +57,7 @@ import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,6 +124,9 @@ class RunLifecycleServiceContinuationApprovalTest {
   private final RunCancellationStore cancellationStore = mock(RunCancellationStore.class);
   private RunLifecycleService service;
 
+  private final AcceptedGenerationVerificationRunner acceptedVerification =
+      mock(AcceptedGenerationVerificationRunner.class);
+
   @BeforeEach
   void setUp() {
     agentProps.setWorkspace(tempDir.toString());
@@ -169,7 +173,22 @@ class RunLifecycleServiceContinuationApprovalTest {
             approvedRouteAdmission,
             correctionValidationAdmission,
             workspaceGenerationRecovery,
-            cancellationStore);
+            cancellationStore,
+            acceptedVerification,
+            mock(BuildExecutionPolicyStore.class));
+    when(acceptedVerification.execute(any(), anyString(), any()))
+        .thenAnswer(
+            invocation -> {
+              java.util.function.Function<ExecutionContext, Object> verification =
+                  invocation.getArgument(2);
+              ExecutionContext canonical = invocation.getArgument(0);
+              var authority =
+                  mock(com.navneet.executespec.sandboxroute.VerificationSandboxAuthority.class);
+              when(authority.runId()).thenReturn(canonical.runId());
+              when(authority.workspaceRoot())
+                  .thenReturn(canonical.workspaceRoot().toAbsolutePath().normalize());
+              return verification.apply(canonical.withVerificationSandboxAuthority(authority));
+            });
     LlmExecutionReference reference =
         new LlmExecutionReference(
             "llmctx-continuation-test", LlmExecutionScope.customer("test-org"));
@@ -250,7 +269,7 @@ class RunLifecycleServiceContinuationApprovalTest {
               return fresh;
             });
     when(correctionValidationAdmission.regenerateAndAssertAcceptedGeneration(
-            any(), any(), any(), any(), any(), any()))
+            any(), any(), any(), any(), any()))
         .thenReturn(correctionValidationReport());
   }
 
@@ -977,11 +996,10 @@ class RunLifecycleServiceContinuationApprovalTest {
         .assertPreReview(eq(RUN_ID), eq(request.getValue().plan()), isNull(), any(Path.class));
     verify(correctionValidationAdmission)
         .regenerateAndAssertAcceptedGeneration(
-            eq(RUN_ID),
+            any(ExecutionContext.class),
             eq(retryResult),
             eq(reviewResult),
             eq(request.getValue().plan()),
-            any(Path.class),
             eq("b".repeat(64)));
     verify(controlPort).terminate(eq(RUN_ID), eq("COMPLETE"), any(), any(), any());
   }
@@ -1032,7 +1050,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(reviewer, never()).review(any());
     verify(validationKickoff, never()).generateValidationReport(any(), any(), any(), any());
     verify(correctionValidationAdmission, never())
-        .regenerateAndAssertAcceptedGeneration(any(), any(), any(), any(), any(), any());
+        .regenerateAndAssertAcceptedGeneration(any(), any(), any(), any(), any());
   }
 
   @Test
@@ -1265,7 +1283,7 @@ class RunLifecycleServiceContinuationApprovalTest {
     verify(tokenAttributor, never())
         .attributeReviewerAdditionalFromAttempt(any(), anyLong(), anyLong(), any());
     verify(correctionValidationAdmission, never())
-        .regenerateAndAssertAcceptedGeneration(any(), any(), any(), any(), any(), any());
+        .regenerateAndAssertAcceptedGeneration(any(), any(), any(), any(), any());
     verify(persistenceWriter, never()).persistReview(any(), any());
   }
 

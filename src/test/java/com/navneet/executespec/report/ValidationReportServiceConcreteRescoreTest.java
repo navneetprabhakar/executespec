@@ -31,6 +31,7 @@ class ValidationReportServiceConcreteRescoreTest {
     FeatureFlagService flags = mock(FeatureFlagService.class);
     ValidationReport report =
         ValidationReport.builder()
+            .workspaceGeneration("a".repeat(64))
             .id("vr-unverified")
             .runId("run-unverified")
             .filesGenerated(1)
@@ -39,7 +40,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .reviewerVerdict("CLEAN")
             .issuesJson("[]")
             .build();
-    when(repository.findByRunId("run-unverified")).thenReturn(Optional.of(report));
+    when(repository.findByRunIdForUpdate("run-unverified")).thenReturn(Optional.of(report));
     when(repository.save(any(ValidationReport.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(flags.isEnabled(any())).thenReturn(true);
@@ -52,6 +53,9 @@ class ValidationReportServiceConcreteRescoreTest {
             .rescoreAfterConcreteTests(
                 "run-unverified",
                 TestExecutionSummary.builder()
+                    .workspaceGeneration("a".repeat(64))
+                    .executionId("execution-1")
+                    .executionStartedAt(java.time.Instant.parse("2026-10-17T00:00:00Z"))
                     .totalTests(17)
                     .passed(17)
                     .failed(0)
@@ -73,6 +77,7 @@ class ValidationReportServiceConcreteRescoreTest {
     var events = mock(org.springframework.context.ApplicationEventPublisher.class);
     ValidationReport report =
         ValidationReport.builder()
+            .workspaceGeneration("a".repeat(64))
             .id("vr-1")
             .runId("run-1")
             .filesGenerated(4)
@@ -96,7 +101,7 @@ class ValidationReportServiceConcreteRescoreTest {
                     + "\"testEvidenceStatus\":\"CITED\","
                     + "\"testEvidenceLocations\":[\"src/test/java/example/ApiTest.java:1\"]}")
             .build();
-    when(repository.findByRunId("run-1")).thenReturn(Optional.of(report));
+    when(repository.findByRunIdForUpdate("run-1")).thenReturn(Optional.of(report));
     when(repository.save(any(ValidationReport.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     when(flags.isEnabled(any())).thenReturn(true);
@@ -117,6 +122,9 @@ class ValidationReportServiceConcreteRescoreTest {
         service.rescoreAfterConcreteTests(
             "run-1",
             TestExecutionSummary.builder()
+                .workspaceGeneration("a".repeat(64))
+                .executionId("execution-1")
+                .executionStartedAt(java.time.Instant.parse("2026-10-17T00:00:00Z"))
                 .totalTests(10)
                 .passed(8)
                 .failed(2)
@@ -167,7 +175,7 @@ class ValidationReportServiceConcreteRescoreTest {
   void missingReportIsSafeAndDoesNotInventEvidence() {
     ValidationReportRepository repository = mock(ValidationReportRepository.class);
     FeatureFlagService flags = mock(FeatureFlagService.class);
-    when(repository.findByRunId("missing")).thenReturn(Optional.empty());
+    when(repository.findByRunIdForUpdate("missing")).thenReturn(Optional.empty());
     ValidationReportService service =
         new ValidationReportService(repository, null, new ObjectMapper(), null, null, null, flags);
 
@@ -182,6 +190,7 @@ class ValidationReportServiceConcreteRescoreTest {
     var events = mock(org.springframework.context.ApplicationEventPublisher.class);
     ValidationReport report =
         ValidationReport.builder()
+            .workspaceGeneration("a".repeat(64))
             .id("vr-worker-tests")
             .runId("run-worker-tests")
             .testsPassed(2)
@@ -197,7 +206,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .verifiedScore(94)
             .rubricScore(100)
             .build();
-    when(repository.findByRunId("run-worker-tests")).thenReturn(Optional.of(report));
+    when(repository.findByRunIdForUpdate("run-worker-tests")).thenReturn(Optional.of(report));
     when(repository.save(any(ValidationReport.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     ValidationReportService service =
@@ -233,6 +242,7 @@ class ValidationReportServiceConcreteRescoreTest {
     var events = mock(org.springframework.context.ApplicationEventPublisher.class);
     ValidationReport report =
         ValidationReport.builder()
+            .workspaceGeneration("a".repeat(64))
             .id("vr-workspace-suite")
             .runId("run-workspace-suite")
             .filesGenerated(4)
@@ -242,7 +252,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .issuesJson("[]")
             .accuracyJson("{\"testCoverageLevel\":\"GOOD\"}")
             .build();
-    when(repository.findByRunId("run-workspace-suite")).thenReturn(Optional.of(report));
+    when(repository.findByRunIdForUpdate("run-workspace-suite")).thenReturn(Optional.of(report));
     when(repository.save(any(ValidationReport.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     ValidationReportService service =
@@ -262,6 +272,9 @@ class ValidationReportServiceConcreteRescoreTest {
             .rescoreAfterConcreteTests(
                 "run-workspace-suite",
                 TestExecutionSummary.builder()
+                    .workspaceGeneration("a".repeat(64))
+                    .executionId("execution-1")
+                    .executionStartedAt(java.time.Instant.parse("2026-10-17T00:00:00Z"))
                     .totalTests(8)
                     .passed(7)
                     .skipped(1)
@@ -309,6 +322,7 @@ class ValidationReportServiceConcreteRescoreTest {
     when(flags.isEnabled(any())).thenReturn(true);
     ValidationReport report =
         ValidationReport.builder()
+            .workspaceGeneration("a".repeat(64))
             .id("vr-merge")
             .runId("run-merge")
             .filesGenerated(6)
@@ -320,7 +334,7 @@ class ValidationReportServiceConcreteRescoreTest {
             .issuesJson("[]")
             .accuracyJson("{\"testCoverageLevel\":\"GOOD\"}")
             .build();
-    when(repository.findByRunId("run-merge")).thenReturn(Optional.of(report));
+    when(repository.findByRunIdForUpdate("run-merge")).thenReturn(Optional.of(report));
     when(repository.save(any(ValidationReport.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
     ValidationReportService service =
@@ -332,6 +346,9 @@ class ValidationReportServiceConcreteRescoreTest {
             .rescoreAfterConcreteTests(
                 "run-merge",
                 TestExecutionSummary.builder()
+                    .workspaceGeneration("a".repeat(64))
+                    .executionId("execution-1")
+                    .executionStartedAt(java.time.Instant.parse("2026-10-17T00:00:00Z"))
                     .totalTests(3)
                     .passed(2)
                     .failed(1)
@@ -349,6 +366,9 @@ class ValidationReportServiceConcreteRescoreTest {
             .rescoreAfterConcreteTests(
                 "run-merge",
                 TestExecutionSummary.builder()
+                    .workspaceGeneration("a".repeat(64))
+                    .executionId("execution-1")
+                    .executionStartedAt(java.time.Instant.parse("2026-10-17T00:00:00Z"))
                     .totalTests(3)
                     .passed(2)
                     .failed(1)

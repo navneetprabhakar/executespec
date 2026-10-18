@@ -292,6 +292,13 @@ class PublicationPreparationPostgresTest {
         .rootCause()
         .hasMessageContaining("bare ADMITTED intent");
 
+    jdbc.update(
+        "UPDATE pipeline_run SET source_type='EXECUTION_VIEW_APPROVED' WHERE run_id=?", runId);
+    assertThatThrownBy(() -> store.markPublicationDispatched(publication.attemptId()))
+        .hasMessageContaining("PUBLICATION_PARENT_ATTEMPT_NOT_CURRENT");
+    assertThat(state(jdbc, "workspace_publication_attempt", publication.attemptId()))
+        .isEqualTo("ADMITTED");
+    jdbc.update("UPDATE pipeline_run SET source_type=NULL WHERE run_id=?", runId);
     store.markPublicationDispatched(publication.attemptId());
     store.settlePublication(publication.attemptId(), publicationLease, true, "7".repeat(64), null);
     assertThat(state(jdbc, "workspace_publication_attempt", publication.attemptId()))

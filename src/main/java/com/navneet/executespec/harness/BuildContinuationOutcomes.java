@@ -108,6 +108,7 @@ final class BuildContinuationOutcomes {
         .continuationAction(decision == null ? null : decision.decision())
         .continuationActionProvider(candidate == null ? null : candidate.provider())
         .continuationActionModel(candidate == null ? null : candidate.model())
+        .acceptanceDiagnostics(rerun.acceptanceDiagnostics())
         .build();
   }
 }

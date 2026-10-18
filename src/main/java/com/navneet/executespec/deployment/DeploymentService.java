@@ -239,7 +239,13 @@ public class DeploymentService {
                     try (publicationAdmission) {
                       publicationAdmission.assertOwned();
                       executeDeployPipeline(
-                          deployment, run, workspacePath, repoMode, repoUrl, repoName);
+                          deployment,
+                          run,
+                          workspacePath,
+                          repoMode,
+                          repoUrl,
+                          repoName,
+                          publicationAdmission);
                     }
                   }));
       publicationLeaseHandedOff = true;
@@ -256,7 +262,8 @@ public class DeploymentService {
       Path workspacePath,
       RunRepo.RepoMode repoMode,
       String repoUrl,
-      String repoName) {
+      String repoName,
+      PublicationAdmissionService.Admission publicationAdmission) {
     Metrics.ACTIVE_DEPLOYS.incrementAndGet();
     Counter.builder(DEPLOY_TOTAL).register(meterRegistry).increment();
     java.time.Instant deployStart = java.time.Instant.now();
@@ -285,6 +292,7 @@ public class DeploymentService {
 
     try {
       // Phase 1: GitHub (optional)
+      publicationAdmission.assertOwned();
       RunRepo repo = handleGitHub(deployment, run, workspacePath, repoMode, repoUrl, repoName);
       deployment.setRunRepoId(repo.getId());
       deploymentRepo.save(deployment);
@@ -308,6 +316,7 @@ public class DeploymentService {
           deployment.getRunId(),
           RunEvent.deployPushing(deployment.getRunId(), deployment.getVersionTag()));
 
+      publicationAdmission.assertOwned();
       artifactRegistry.pushImage(buildResult.imageTag());
       pushedImageTag = buildResult.imageTag();
 
@@ -315,6 +324,7 @@ public class DeploymentService {
       deployment.setStatus(DeployStatus.DEPLOYING);
       deploymentRepo.save(deployment);
 
+      publicationAdmission.assertOwned();
       CloudRunClient.DeployResult deployResult =
           cloudRun.deploy(deployment.getServiceName(), deployment.getImageUri());
 

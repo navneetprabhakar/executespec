@@ -46,6 +46,12 @@ public class TestExecutionSummary {
   /** Per-attempt execution id; also names the directory the parsed reports were read from. */
   private String executionId;
 
+  /** Canonical product tree measured before and after this execution, never a diff fingerprint. */
+  private String workspaceGeneration;
+
+  /** Server launch time orders distinct executions independently of event delivery order. */
+  private java.time.Instant executionStartedAt;
+
   /** Why {@link #executionVerified} is FALSE. Null when verified or when no signal was recorded. */
   private String unverifiedReason;
 

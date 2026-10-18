@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -41,7 +42,8 @@ class AnthropicAttemptModelFactoryTest {
               respond(exchange, 500, "{\"error\":{\"message\":\"temporary\"}}");
             });
     var model =
-        new AnthropicAttemptModelFactory().create("test-key", "claude-test", 64, 5, baseUrl);
+        new AnthropicAttemptModelFactory(new AnthropicWorkspaceHeaders("", ""))
+            .create("test-key", "claude-test", 64, 5, baseUrl);
 
     long startedAt = System.nanoTime();
     assertThatThrownBy(() -> model.call(new Prompt(List.of(new UserMessage("hello")))))
@@ -66,7 +68,8 @@ class AnthropicAttemptModelFactoryTest {
               }
             });
     var model =
-        new AnthropicAttemptModelFactory().create("test-key", "claude-test", 64, 1, baseUrl);
+        new AnthropicAttemptModelFactory(new AnthropicWorkspaceHeaders("", ""))
+            .create("test-key", "claude-test", 64, 1, baseUrl);
 
     long startedAt = System.nanoTime();
     assertThatThrownBy(() -> model.call(new Prompt(List.of(new UserMessage("hello")))))
@@ -75,6 +78,43 @@ class AnthropicAttemptModelFactoryTest {
     assertThat(requests).hasValue(1);
     assertThat(Duration.ofNanos(System.nanoTime() - startedAt))
         .isBetween(Duration.ofMillis(700), Duration.ofSeconds(2));
+  }
+
+  @Test
+  void platformCredentialIncludesConfiguredWorkspaceHeader() throws Exception {
+    assertWorkspaceHeader("platform-key", "platform-key", "wrkspc_test", "wrkspc_test");
+  }
+
+  @Test
+  void unrelatedByokCredentialDoesNotInheritPlatformWorkspace() throws Exception {
+    assertWorkspaceHeader("byok-key", "platform-key", "wrkspc_test", null);
+  }
+
+  @Test
+  void unsetWorkspacePreservesExistingRequestShape() throws Exception {
+    assertWorkspaceHeader("platform-key", "platform-key", "", null);
+  }
+
+  private void assertWorkspaceHeader(
+      String selectedKey, String platformKey, String workspaceId, String expected)
+      throws Exception {
+    AtomicInteger requests = new AtomicInteger();
+    AtomicReference<String> received = new AtomicReference<>();
+    String baseUrl =
+        startServer(
+            exchange -> {
+              requests.incrementAndGet();
+              received.set(exchange.getRequestHeaders().getFirst("anthropic-workspace-id"));
+              respond(exchange, 400, "{\"error\":{\"message\":\"fixture rejection\"}}");
+            });
+    var model =
+        new AnthropicAttemptModelFactory(new AnthropicWorkspaceHeaders(platformKey, workspaceId))
+            .create(selectedKey, "claude-test", 64, 5, baseUrl);
+
+    assertThatThrownBy(() -> model.call(new Prompt(List.of(new UserMessage("hello")))))
+        .isInstanceOf(RuntimeException.class);
+    assertThat(requests).hasValue(1);
+    assertThat(received.get()).isEqualTo(expected);
   }
 
   private String startServer(com.sun.net.httpserver.HttpHandler handler) throws IOException {

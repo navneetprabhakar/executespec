@@ -42,6 +42,9 @@ class RunPublicationFenceTest {
     ExecutionSolution s = new ExecutionSolution();
     s.setId("sol-1");
     s.setStatus(status);
+    var parent = new com.navneet.executespec.execution.entity.ExecutionRun();
+    parent.setStatus("RUNNING");
+    s.setExecutionRun(parent);
     return s;
   }
 
@@ -77,11 +80,21 @@ class RunPublicationFenceTest {
   }
 
   @Test
-  void repository_failure_fails_open_rather_than_stranding_legitimate_work() {
+  void repository_failure_refuses_unverified_publication() {
     when(solutionRepo.findFirstByPipelineRunId(anyString()))
         .thenThrow(new RuntimeException("db down"));
 
-    assertTrue(fence.mayPublish(run("EXECUTION_VIEW_APPROVED")));
+    assertFalse(fence.mayPublish(run("EXECUTION_VIEW_APPROVED")));
+  }
+
+  @Test
+  void pausedOrAbortedParentCannotPublishEvenWhenTheSolutionStillNamesTheChild() {
+    ExecutionSolution current = solution("RUNNING");
+    when(solutionRepo.findFirstByPipelineRunId("run-1")).thenReturn(Optional.of(current));
+    current.getExecutionRun().setStatus("PAUSED");
+    assertFalse(fence.mayPublish(run("EXECUTION_VIEW_APPROVED")));
+    current.getExecutionRun().setStatus("ABORTED");
+    assertFalse(fence.mayPublish(run("EXECUTION_VIEW_APPROVED")));
   }
 
   @Test

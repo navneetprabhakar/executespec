@@ -13,8 +13,9 @@ import java.util.Map;
  *
  * <p>The allow-list is explicit (an unmapped id throws rather than sending an unverified slug), but
  * any id that is already a full Fireworks slug passes straight through — handy for ad-hoc testing.
- * Slugs below are the account-visible serverless catalogue ids from {@code
- * https://api.fireworks.ai/inference/v1/models}, rechecked 2026-07-24.
+ * The current route was checked against the serverless model page and authenticated catalogue at
+ * {@code https://api.fireworks.ai/inference/v1/models}, rechecked 2026-10-17. Retired ids are
+ * refused; pins are never silently substituted.
  */
 public final class FireworksModelMapper {
 
@@ -23,16 +24,7 @@ public final class FireworksModelMapper {
   private static final String P = "accounts/fireworks/models/";
 
   private static final Map<String, String> SLUGS =
-      Map.ofEntries(
-          Map.entry("deepseek-v4-pro-fw", P + "deepseek-v4-pro"),
-          // Pinned 2026-07-31 re-post-trained Flash build; native exposes only the
-          // unversioned id, so Fireworks is the only route that pins this revision.
-          Map.entry("deepseek-v4-flash-0731-fw", P + "deepseek-v4-flash-0731"),
-          Map.entry("kimi-k2p6-fw", P + "kimi-k2p6"),
-          Map.entry("glm-5.2-fw", P + "glm-5p2"),
-          // Fast serving tier: a ROUTER slug (not models/) over the same glm-5p2 weights.
-          // Live-smoked 2026-07-31: OpenAI-wire tool_choice=required verified on the router path.
-          Map.entry("glm-5.2-fast-fw", "accounts/fireworks/routers/glm-5p2-fast"));
+      Map.of("deepseek-v4p1-flash-fw", P + "deepseek-v4p1-flash");
 
   /**
    * @return the Fireworks slug for a matrix model id; an id that already looks like a full

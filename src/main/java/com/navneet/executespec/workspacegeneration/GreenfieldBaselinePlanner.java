@@ -26,6 +26,23 @@ public class GreenfieldBaselinePlanner {
     Path root = normalizedRoot(workspaceRoot);
     List<String> requiredPaths = requiredPaths(task);
     if (workspaceOrigin == null) throw new IllegalArgumentException("workspaceOrigin required");
+    // Origin is immutable run provenance. It does not mean that every later task must bootstrap
+    // another project. Reuse the first task's immutable verifier without inventing new outputs.
+    if (workspaceOrigin.requiresBootstrap()
+        && plan != null
+        && !plan.tasks().isEmpty()
+        && !plan.tasks().getFirst().id().equals(task.id())) {
+      GreenfieldBaselinePlan bootstrap = plan(root, plan.tasks().getFirst(), plan, workspaceOrigin);
+      return new GreenfieldBaselinePlan(
+          GreenfieldBaselinePlan.Kind.EXISTING,
+          "EXISTING_REPOSITORY",
+          false,
+          bootstrap.supported(),
+          bootstrap.filesToCreate(),
+          requiredPaths,
+          initialFailures(root, requiredPaths, Map.of()),
+          List.of());
+    }
     if (!workspaceOrigin.requiresBootstrap()) {
       GreenfieldBaselinePlan multiRepository = multiRepositoryPlan(root, task, requiredPaths);
       if (multiRepository != null) return multiRepository;

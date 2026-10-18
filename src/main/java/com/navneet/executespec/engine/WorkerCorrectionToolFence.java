@@ -41,6 +41,7 @@ final class WorkerCorrectionToolFence {
   }
 
   static void assertDispatch(ExecutionContext context) {
+    context.assertVerificationSandboxLive();
     RunWorkspaceAuthorityService.assertCorrectionToolDispatch(context.runId());
   }
 

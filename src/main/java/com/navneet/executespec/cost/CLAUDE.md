@@ -256,3 +256,12 @@ P25/P75 band was computed across every organisation's observed `actual_cost_usd`
 mispriced runs across tenants and made foreign orgs' cost distribution reconstructable by varying
 `planStrategy`/`provider`. V372's partial index leads with org, strategy, requested provider, route,
 repository count, task count, task-complexity distribution, and completion time.
+
+## Terminal usage and late work
+
+`RunUsageRegistry` retains the same run/task accumulators after `RunCostTracker.finalizeRun`.
+A bounded late provider response or repeated terminalization cannot reset token/cost ceilings or
+lose earlier task usage. Retired populations expire after 24 hours without another recorded call;
+hourly cleanup removes only retired entries. Active run populations are not time-evicted.
+The physical usage ledger/outbox remains durable authority; its existing terminal materializer
+raises persisted run totals for provider responses arriving after terminal status.

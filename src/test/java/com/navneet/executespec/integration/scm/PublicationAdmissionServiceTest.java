@@ -117,6 +117,26 @@ class PublicationAdmissionServiceTest {
   }
 
   @Test
+  void publicationAuthorityRechecksParentAfterAdmissionBeforeEachExternalEffect() {
+    PipelineRun run = new PipelineRun();
+    run.setRunId(RUN_ID);
+    run.setSourceType("EXECUTION_VIEW_APPROVED");
+    var fence = mock(com.navneet.executespec.integration.RunPublicationFence.class);
+    when(fence.mayPublish(run)).thenReturn(true, false);
+    var admission =
+        new PublicationAdmissionService.Admission(
+            GENERATION,
+            "PUBLICATION_ELIGIBLE",
+            publicationLease,
+            null,
+            PublicationAuthority.parentFence(run, fence));
+    admission.assertOwned();
+    assertThatThrownBy(admission::assertOwned)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("PUBLICATION_PARENT_AUTHORITY_LOST");
+  }
+
+  @Test
   void admitsFreshBuildAndVerifiedTests() {
     assertThat(service.assertEligible(run()).workspaceGeneration()).isEqualTo(GENERATION);
     verify(workspaceGenerationRecovery, org.mockito.Mockito.times(2))

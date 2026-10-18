@@ -252,4 +252,21 @@ class SequentialExecutorResumeKeyTest {
     String kind = resumeKind(exec, RUN_ID, "T3", new ResumeRequest(FULL_KEY));
     assertEquals("RUN_FRESH", kind);
   }
+
+  @Test
+  void crashRecoveryDiscardsTranscriptInsteadOfReplayingRolledBackEdits() throws Exception {
+    AgentTaskRepository repo = mock(AgentTaskRepository.class);
+    ContextStore contexts = mock(ContextStore.class);
+    when(repo.findByRunIdAndTaskId(RUN_ID, FULL_KEY))
+        .thenReturn(Optional.of(taskWithStatus(FULL_KEY, "WORKING")));
+    assertEquals(
+        "RUN_FRESH",
+        resumeKind(newExecutorWith(repo, contexts), RUN_ID, TASK_ID, new ResumeRequest(null)));
+    org.mockito.Mockito.verify(contexts)
+        .delete(
+            org.mockito.ArgumentMatchers.argThat(
+                context -> context.runId().equals(RUN_ID) && context.taskId().equals(TASK_ID)));
+    org.mockito.Mockito.verify(contexts, org.mockito.Mockito.never())
+        .load(org.mockito.ArgumentMatchers.any());
+  }
 }

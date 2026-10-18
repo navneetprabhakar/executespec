@@ -107,8 +107,11 @@ class FlywayMigrationInventoryTest {
     // diagnostics and dead-letter indexes, bringing the total to 384. V399 persists the exact
     // physical-operation terminal intent and completion receipt, bringing the total to 385. V400
     // repairs pre-dispatch rollback identity and bounds durable recovery, bringing it to 386.
-    assertThat(migrations).hasSize(386);
-    assertThat(migrations.getLast().version()).isEqualTo("400");
+    // V401 binds corrections to the exact accepted prefix; V402 orders generation-bound concrete
+    // test execution evidence; V403 freezes plan-bound BUILD recovery settings. Historical V-files
+    // remain immutable; the exact inventory is now 389 source files through V403.
+    assertThat(migrations).hasSize(389);
+    assertThat(migrations.getLast().version()).isEqualTo("403");
 
     assertThat(migrations.stream().map(MigrationFile::version)).doesNotHaveDuplicates();
     assertThat(migrations.stream().map(MigrationFile::fileName))

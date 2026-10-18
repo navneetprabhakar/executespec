@@ -1,5 +1,7 @@
 package com.navneet.executespec.integration.scm;
 
+import static com.navneet.executespec.integration.scm.PublicationAuthority.blockedEligibility;
+
 import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +38,34 @@ public class PublicationAdmissionService {
   private final RunWorkspaceAuthorityService workspaceAuthorities;
   private final WorkspaceGenerationRecoveryService workspaceGenerationRecovery;
   private final PublicationPreparationService publicationPreparations;
+  private final com.navneet.executespec.integration.RunPublicationFence parentAttempts;
+
+  public PublicationAdmissionService(
+      ValidationReportRepository validationReportRepository,
+      AgentTaskRepository taskRepository,
+      CorrectionWorkspaceTransaction workspaceGenerations,
+      AgentProperties agentProperties,
+      ObjectMapper objectMapper,
+      BrownfieldHttpContractGuard brownfieldHttpContractGuard,
+      RunEffectiveRouteService effectiveRoutes,
+      DurableCorrectionLifecycle durableCorrections,
+      RunWorkspaceAuthorityService workspaceAuthorities,
+      WorkspaceGenerationRecoveryService workspaceGenerationRecovery,
+      PublicationPreparationService publicationPreparations) {
+    this(
+        validationReportRepository,
+        taskRepository,
+        workspaceGenerations,
+        agentProperties,
+        objectMapper,
+        brownfieldHttpContractGuard,
+        effectiveRoutes,
+        durableCorrections,
+        workspaceAuthorities,
+        workspaceGenerationRecovery,
+        publicationPreparations,
+        null);
+  }
 
   @Autowired
   public PublicationAdmissionService(
@@ -49,7 +79,8 @@ public class PublicationAdmissionService {
       DurableCorrectionLifecycle durableCorrections,
       RunWorkspaceAuthorityService workspaceAuthorities,
       WorkspaceGenerationRecoveryService workspaceGenerationRecovery,
-      PublicationPreparationService publicationPreparations) {
+      PublicationPreparationService publicationPreparations,
+      com.navneet.executespec.integration.RunPublicationFence parentAttempts) {
     this.validationReportRepository = validationReportRepository;
     this.taskRepository = taskRepository;
     this.workspaceGenerations = workspaceGenerations;
@@ -61,6 +92,7 @@ public class PublicationAdmissionService {
     this.workspaceAuthorities = workspaceAuthorities;
     this.workspaceGenerationRecovery = workspaceGenerationRecovery;
     this.publicationPreparations = publicationPreparations;
+    this.parentAttempts = parentAttempts;
   }
 
   public PublicationAdmissionService(
@@ -123,7 +155,11 @@ public class PublicationAdmissionService {
               ? publicationPreparations.requirePrepared(run)
               : null;
       return new Admission(
-          eligibility.currentWorkspaceGeneration(), eligibility.code(), lease, prepared);
+          eligibility.currentWorkspaceGeneration(),
+          eligibility.code(),
+          lease,
+          prepared,
+          PublicationAuthority.parentFence(run, parentAttempts));
     } catch (RuntimeException failure) {
       lease.close();
       throw failure;
@@ -150,6 +186,18 @@ public class PublicationAdmissionService {
           "Publication requires a durable run identity",
           false,
           "Reload the run. If it no longer exists, start a new run.",
+          null,
+          null);
+    }
+    if (java.util.Set.of("CANCELLED", "PAUSED").contains(String.valueOf(run.getStatus()))
+        || ("EXECUTION_VIEW_APPROVED".equalsIgnoreCase(String.valueOf(run.getSourceType()))
+            && (parentAttempts == null || !parentAttempts.mayPublish(run)))) {
+      return blockedEligibility(
+          "PUBLICATION_PARENT_ATTEMPT_NOT_CURRENT",
+          "PARENT_ATTEMPT",
+          "The current parent solution attempt could not be verified",
+          true,
+          "Publish only from the current, active solution attempt.",
           null,
           null);
     }
@@ -490,75 +538,27 @@ public class PublicationAdmissionService {
     }
   }
 
-  private static Eligibility blockedEligibility(
-      String code,
-      String blockingGate,
-      String reason,
-      boolean retryable,
-      String remediation,
-      String evidenceWorkspaceGeneration,
-      String currentWorkspaceGeneration) {
-    return new Eligibility(
-        false,
-        "BLOCKED",
-        code,
-        blockingGate,
-        reason,
-        retryable,
-        remediation,
-        evidenceWorkspaceGeneration,
-        currentWorkspaceGeneration);
-  }
-
-  public static final class Admission implements AutoCloseable {
-    private final String workspaceGeneration;
-    private final String code;
-    private final RunWorkspaceAuthorityService.Lease lease;
-    private final PublicationPreparationService.RequiredPreparation prepared;
-
+  public static final class Admission extends PublicationAuthority {
     Admission(
-        String workspaceGeneration,
+        String generation,
         String code,
         RunWorkspaceAuthorityService.Lease lease,
         PublicationPreparationService.RequiredPreparation prepared) {
-      this.workspaceGeneration = workspaceGeneration;
-      this.code = code;
-      this.lease = lease;
-      this.prepared = prepared;
+      super(generation, code, lease, prepared);
     }
 
-    /** Test-fixture constructor; production admission always carries a durable workspace lease. */
-    public Admission(String workspaceGeneration, String code) {
-      this(workspaceGeneration, code, null, null);
+    Admission(
+        String generation,
+        String code,
+        RunWorkspaceAuthorityService.Lease lease,
+        PublicationPreparationService.RequiredPreparation prepared,
+        Runnable... parentFences) {
+      super(generation, code, lease, prepared, parentFences);
     }
 
-    public String workspaceGeneration() {
-      return workspaceGeneration;
-    }
-
-    public String code() {
-      return code;
-    }
-
-    public PublicationPreparationService.RequiredPreparation prepared() {
-      return prepared;
-    }
-
-    RunWorkspaceAuthorityService.Lease leaseForSettlement() {
-      if (lease == null) {
-        throw new IllegalStateException("PUBLICATION_SETTLEMENT_AUTHORITY_MISSING");
-      }
-      return lease;
-    }
-
-    /** Re-fences the lease immediately before an irreversible publication side effect. */
-    public void assertOwned() {
-      if (lease != null) lease.assertOwned();
-    }
-
-    @Override
-    public void close() {
-      if (lease != null) lease.close();
+    /** Bounded test constructor; production always carries workspace authority. */
+    public Admission(String generation, String code) {
+      super(generation, code);
     }
   }
 

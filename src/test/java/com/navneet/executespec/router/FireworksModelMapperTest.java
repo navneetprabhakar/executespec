@@ -10,16 +10,24 @@ class FireworksModelMapperTest {
 
   @Test
   void maps_fireworks_models_to_current_slugs() {
-    assertThat(FireworksModelMapper.toSlug("deepseek-v4-pro-fw"))
-        .isEqualTo("accounts/fireworks/models/deepseek-v4-pro");
-    assertThat(FireworksModelMapper.toSlug("kimi-k2p6-fw"))
-        .isEqualTo("accounts/fireworks/models/kimi-k2p6");
-    // 2026-07-24 — exact account-visible Fireworks serverless coding subset.
-    assertThat(FireworksModelMapper.toSlug("glm-5.2-fw"))
-        .isEqualTo("accounts/fireworks/models/glm-5p2");
-    assertThat(FireworksModelMapper.toSlug("glm-5.2-fast-fw"))
-        .isEqualTo("accounts/fireworks/routers/glm-5p2-fast");
-    assertThat(FireworksModelMapper.allowList()).hasSize(5);
+    assertThat(FireworksModelMapper.toSlug("deepseek-v4p1-flash-fw"))
+        .isEqualTo("accounts/fireworks/models/deepseek-v4p1-flash");
+    assertThat(FireworksModelMapper.allowList()).hasSize(1);
+  }
+
+  @Test
+  void retiredPinsFailBeforeTransportInsteadOfSilentlySelectingAnotherModel() {
+    for (String retired :
+        java.util.List.of(
+            "deepseek-v4-pro-fw",
+            "kimi-k2p6-fw",
+            "glm-5.2-fw",
+            "glm-5.2-fast-fw",
+            "deepseek-v4-flash-0731-fw")) {
+      assertThatThrownBy(() -> FireworksModelMapper.toSlug(retired))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThat(FireworksModelMapper.isSupported(retired)).isFalse();
+    }
   }
 
   @Test

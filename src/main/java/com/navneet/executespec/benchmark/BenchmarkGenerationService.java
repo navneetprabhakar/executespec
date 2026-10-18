@@ -67,6 +67,7 @@ public class BenchmarkGenerationService {
 
   private static final ObjectMapper JSON = new ObjectMapper();
   static final long DEFAULT_SHUTDOWN_RESERVE_MS = 120_000L;
+  private final com.navneet.executespec.router.ModelRegistry modelRegistry;
   private final SwebenchProperties props;
   private final SwebenchInstanceLoader loader;
   private final SwebenchContainerStore containerStore;
@@ -176,7 +177,9 @@ public class BenchmarkGenerationService {
     String provider =
         aiProvider != null && !aiProvider.isBlank() ? aiProvider : props.getDefaultProvider();
     String model =
-        modelName != null && !modelName.isBlank() ? modelName : defaultPlanningModel(provider);
+        modelName != null && !modelName.isBlank()
+            ? modelName
+            : defaultPlanningModel(modelRegistry, provider);
     Double hardCapUsd =
         Boolean.FALSE.equals(enforceHardCap) ? null : validatedHardCapUsd(requestedHardCapUsd);
 
@@ -726,28 +729,16 @@ public class BenchmarkGenerationService {
    * Overridable per request via {@code modelName}; this only sets the default when none is given so
    * the service stays dependency-light.
    */
-  static String defaultPlanningModel(String provider) {
-    // RR-954 — never silently pair a non-Anthropic provider with an Anthropic model. The previous
-    // default fell every unrecognised provider (including OpenRouter/Fireworks, which YAML assigns
-    // DeepSeek models) through to claude-sonnet-5, so an omitted-model run failed or recorded an
-    // invalid cross-provider comparison. Map each supported provider to its PLANNING-tier default
-    // (mirror application.yml model-matrix) and fail closed on anything else.
-    if (provider == null || provider.isBlank()) {
+  static String defaultPlanningModel(
+      com.navneet.executespec.router.ModelRegistry registry, String provider) {
+    String normalized = provider == null ? "" : provider.trim().toLowerCase(java.util.Locale.ROOT);
+    String model = registry.planningModelFor("google".equals(normalized) ? "gemini" : normalized);
+    if (model == null || model.isBlank()) {
       throw new ResponseStatusException(
-          HttpStatus.BAD_REQUEST, "aiProvider is required to resolve a default model");
+          HttpStatus.BAD_REQUEST,
+          "no configured planning model for provider; supply a supported provider and model");
     }
-    return switch (provider.toLowerCase()) {
-      case "anthropic" -> "claude-sonnet-5";
-      case "openai" -> "gpt-5.4";
-      case "gemini", "google" -> "gemini-3.5-flash";
-      case "deepseek" -> "deepseek-v4-flash-native";
-      case "openrouter" -> "deepseek-v4-pro";
-      case "fireworks" -> "deepseek-v4-pro-fw";
-      default ->
-          throw new ResponseStatusException(
-              HttpStatus.BAD_REQUEST,
-              "no default model for provider '" + provider + "'; supply modelName explicitly");
-    };
+    return model;
   }
 
   /**

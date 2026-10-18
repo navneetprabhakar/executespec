@@ -107,6 +107,8 @@ spring:
         max-interval: 10000
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
+      # Optional workspace scope for this platform key; unrelated BYOK credentials omit it.
+      workspace-id: ${ANTHROPIC_WORKSPACE_ID:}
       chat:
         options:
           model: claude-haiku-4-5-20251001
@@ -335,9 +337,10 @@ model-matrix:
       workhorse: deepseek-v4-pro-native
       lightweight: deepseek-v4-flash-native
     fireworks:
-      planning: deepseek-v4-pro-fw
-      workhorse: deepseek-v4-pro-fw
-      lightweight: kimi-k2p6-fw
+      # 2026-10-17: retired serverless routes no longer dispatch; use the current explicit model.
+      planning: deepseek-v4p1-flash-fw
+      workhorse: deepseek-v4p1-flash-fw
+      lightweight: deepseek-v4p1-flash-fw
   models:
     claude-opus-4-6:
       provider: anthropic
@@ -697,73 +700,21 @@ model-matrix:
         cached-input-per-1m: 0.02
         output-per-1m: 0.20
       notes: "OpenRouter deepseek/deepseek-v4-flash — ENTERPRISE BYOK. Pricing verified vs OpenRouter 2026-05-26: $0.10 in / $0.02 cached / $0.20 out per 1M."
-    deepseek-v4-pro-fw:
+    deepseek-v4p1-flash-fw:
       provider: fireworks
       chain-tier: CAPABLE
-      cost-class: BALANCED
+      cost-class: CHEAP
       quality-class: HIGH
       managed-ai-enabled: true
-      step-down-priority: 20
+      step-down-priority: 10
       context-limit: 1048576
-      max-output-tokens: 131072
-      display-label: "DeepSeek V4 Pro (Fireworks)"
-      pricing:
-        input-per-1m: 1.74
-        cached-input-per-1m: 0.14
-        output-per-1m: 3.48
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-pro — ENTERPRISE BYOK. Pricing/slugs from Fireworks model page 2026-06-10. Live API smoke 2026-06-18: callable + tool_choice=required verified (RL-2026-06-052)."
-    kimi-k2p6-fw:
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 262144
       max-output-tokens: 32768
-      display-label: "Kimi K2.6 (Fireworks)"
+      display-label: "DeepSeek V4.1 Flash (Fireworks)"
       pricing:
-        input-per-1m: 0.95
-        cached-input-per-1m: 0.16
-        output-per-1m: 4.00
-      notes: "Fireworks accounts/fireworks/models/kimi-k2p6 Standard path — ENTERPRISE BYOK. Priority/Fast tiers are more expensive and need route-level policy before exposure."
-    # Fireworks' account-visible serverless catalogue was rechecked on 2026-07-24. Only
-    # deepseek-v4-pro, kimi-k2p6, glm-5p1, and glm-5p2 remain among ExecuteSpec's coding cohort.
-    # Removed serverless ids stay as legacy aliases below so persisted selections resolve to a
-    # callable Fireworks replacement instead of reaching transport with a dead slug.
-    "[glm-5.2-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 202000
-      max-output-tokens: 25344
-      display-label: "GLM 5.2 (Fireworks)"
-      pricing:
-        input-per-1m: 1.40
-        cached-input-per-1m: 0.26
-        output-per-1m: 4.40
-      notes: "Fireworks accounts/fireworks/models/glm-5p2 Standard path — ENTERPRISE BYOK. Pricing from Fireworks docs 2026-06-18 (GLM-5 band). Live API smoke 2026-06-18: callable + tool_choice=required verified."
-    "[glm-5.2-fast-fw]": # bracket-wrapped: dotted key (5.2) would otherwise bind as a nested path
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 202000
-      max-output-tokens: 25344
-      display-label: "GLM 5.2 Fast (Fireworks)"
-      pricing:
-        input-per-1m: 2.10
-        cached-input-per-1m: 0.21
-        output-per-1m: 6.60
-      notes: "Fireworks accounts/fireworks/routers/glm-5p2-fast — the Fast serving tier is a ROUTER slug over the same glm-5p2 weights (responses report models/glm-5p2). Pricing from Fireworks Fast SKU page 2026-07-31. Live API smoke 2026-07-31: callable + tool_choice=required verified. Added for the TB 2.1 internal benchmark campaign."
-    deepseek-v4-flash-0731-fw:
-      provider: fireworks
-      chain-tier: CAPABLE
-      quality-class: HIGH
-      context-limit: 262144
-      max-output-tokens: 32768
-      display-label: "DeepSeek V4 Flash 0731 (Fireworks)"
-      pricing:
-        input-per-1m: 0.14
-        cached-input-per-1m: 0.014
-        output-per-1m: 0.28
-      notes: "Fireworks accounts/fireworks/models/deepseek-v4-flash-0731 — the pinned 2026-07-31 re-post-trained Flash build; native DeepSeek exposes only the unversioned deepseek-v4-flash, so this slug is the only way to pin 0731. Vendor claims it beats V4-Pro on agent benchmarks (TB 2.1 82.7 vs 72.1) using an unreleased in-house harness; treated here as an unverified third-party claim. Live API smoke 2026-08-02: callable + tool_choice=required verified."
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.006
+        output-per-1m: 1.20
+      notes: "accounts/fireworks/models/deepseek-v4p1-flash. Account-visible, chat/tools supported; current serverless pricing from https://fireworks.ai/models/deepseek-ai/deepseek-v4p1-flash on 2026-10-17. Old Kimi/GLM/DeepSeek V4 routes are retired from selectable configuration; explicit old pins require reselection rather than silent substitution."
     codestral-2508:
       provider: openrouter
       chain-tier: CAPABLE
@@ -1008,10 +959,6 @@ model-matrix:
     gemini-flash-latest: gemini-3.6-flash
     gemini-3-pro-preview: gemini-3.1-pro-preview
     gemini-pro-latest: gemini-3.1-pro-preview
-    deepseek-v4-flash-fw: kimi-k2p6-fw
-    minimax-m3-fw: glm-5.2-fw
-    minimax-m2.7-fw: glm-5.2-fw   # was glm-5.1-fw; that slug 404s upstream (2026-08-06)
-    kimi-k2.7-code-fw: kimi-k2p6-fw
 
   fallback-chains:
     ARCHITECT:

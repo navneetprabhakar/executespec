@@ -74,6 +74,29 @@ class TaskAcceptanceContractResolverTest {
   }
 
   @Test
+  void legacyDocumentationCorrectionStillProtectsAcceptedCodeAndTests() {
+    PlannedTask code =
+        PlannedTask.builder()
+            .id("T1")
+            .title("Implement library")
+            .requiredArtifacts(List.of("main.py", "test_main.py"))
+            .build();
+    PlannedTask docs =
+        PlannedTask.builder()
+            .id("T2")
+            .title("Update README documentation")
+            .touchesFiles(List.of("README.md"))
+            .requiredArtifacts(List.of("README.md"))
+            .build();
+    Plan plan = Plan.builder().tasks(List.of(code, docs)).build();
+    TaskAcceptanceContract contract = resolver.resolveLegacyCorrection(docs, plan, 1, 1);
+    assertThat(contract.schemaVersion()).isEqualTo(1);
+    assertThat(contract.requiredPaths()).containsExactly("README.md", "main.py", "test_main.py");
+    assertThat(contract.testRequirement()).isEqualTo("REQUIRED");
+    assertThat(contract.digest()).isNotEqualTo(resolver.resolve(docs, 1).digest());
+  }
+
+  @Test
   void failureFirstContractFreezesGreenfieldCommandsAndChecksBeforeMutation() {
     PlannedTask task =
         PlannedTask.builder()
@@ -94,8 +117,8 @@ class TaskAcceptanceContractResolverTest {
             workspace,
             baseline);
 
-    assertThat(contract.schemaVersion()).isEqualTo(2);
-    assertThat(contract.verificationPolicy()).isEqualTo("SERVER_RESOLVED_FAILURE_FIRST_V2");
+    assertThat(contract.schemaVersion()).isEqualTo(3);
+    assertThat(contract.verificationPolicy()).isEqualTo("SERVER_RESOLVED_BOOTSTRAP_V3");
     assertThat(contract.runtimeSurface()).isEqualTo("PYTHON_LIBRARY");
     assertThat(contract.baselineKind()).isEqualTo("PYTHON");
     assertThat(contract.buildCommand().command()).isEqualTo("python3 -m compileall -q .");

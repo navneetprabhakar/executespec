@@ -3,6 +3,7 @@
 The public source repository keeps documentation needed to understand, build, test, and contribute:
 
 - [README.md](README.md): capabilities, local setup, checks, and layout.
+- [BUILD execution contract](docs/architecture/build-path-contract.md): acceptance, recovery, leases, publication and bounded local evidence.
 - [AGENTS.md](AGENTS.md): implementation and coding-agent rules.
 - [CONTRIBUTING.md](CONTRIBUTING.md): contribution and verification workflow.
 - [SECURITY.md](SECURITY.md): private vulnerability reporting and publication hygiene.
