@@ -61,6 +61,27 @@ class ContextStoreTest {
   }
 
   @Test
+  void buildRetryLoadsOnlyTheSamePhysicalAttemptAndRejectsLegacyOrReplacedSnapshots() {
+    ContextStore store = new ContextStore(new ObjectMapper(), metrics, (StringRedisTemplate) null);
+    var originalAuthority =
+        org.mockito.Mockito.mock(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.class);
+    var replacementAuthority =
+        org.mockito.Mockito.mock(
+            com.navneet.executespec.workspacegeneration.WorkspaceGenerationDispatchAuthority.class);
+    when(originalAuthority.attemptId()).thenReturn(java.util.UUID.randomUUID());
+    when(replacementAuthority.attemptId()).thenReturn(java.util.UUID.randomUUID());
+    ExecutionContext original = context.withWorkspaceGenerationAuthority(originalAuthority);
+    ExecutionContext replacement = context.withWorkspaceGenerationAuthority(replacementAuthority);
+    store.save(context, List.of(new UserMessage("unbound old transcript")), 3);
+    assertThat(store.loadForWorkspaceAttempt(original)).isEmpty();
+    store.save(original, List.of(new UserMessage("same physical attempt")), 5);
+    assertThat(store.loadForWorkspaceAttempt(original)).isPresent();
+    assertThat(store.loadForWorkspaceAttempt(replacement)).isEmpty();
+    assertThat(store.load(context)).isPresent(); // Generic non-BUILD readers stay compatible.
+  }
+
+  @Test
   void saveAndLoadRoundTripsMessagesThroughRedis() {
     ContextStore store = new ContextStore(new ObjectMapper(), metrics, redis);
     when(redis.opsForValue()).thenReturn(ops);

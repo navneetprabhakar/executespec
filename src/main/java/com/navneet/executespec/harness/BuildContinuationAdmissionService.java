@@ -105,7 +105,11 @@ public class BuildContinuationAdmissionService {
         BuildProtocolVersion.parse(run.getBuildProtocolVersion());
     protocolVersion.requireExecutable();
     boolean alreadyWorking = "WORKING".equals(previousRunStatus);
+    boolean correctingReview =
+        request.kind() == AdmissionKind.AUTOMATIC_CONTINUATION
+            && List.of("REVIEWING", "VALIDATING").contains(previousRunStatus);
     if (!alreadyWorking
+        && !correctingReview
         && (request.kind() != AdmissionKind.AUTHORIZED_TERMINAL
             || !REOPENABLE_TERMINAL_RUNS.contains(previousRunStatus))) {
       return Admission.refused("RUN_NOT_REOPENABLE:" + previousRunStatus);
@@ -123,6 +127,25 @@ public class BuildContinuationAdmissionService {
     }
     if ("CANCELLED".equals(task.getStatus())) return Admission.refused("TASK_CANCELLED");
     String previousTaskStatus = task.getStatus();
+    boolean correction =
+        request.kind() != AdmissionKind.INITIAL
+            && run.getAcceptedGenerationAttemptId() != null
+            && run.getAcceptedTaskIndex() != null
+            && request.taskIndex() <= run.getAcceptedTaskIndex();
+    var expectedFrontier = request.expectedFrontier();
+    if (correction
+        && (expectedFrontier == null
+            || !java.util.Objects.equals(
+                expectedFrontier.attemptId(), run.getAcceptedGenerationAttemptId())
+            || expectedFrontier.taskIndex() != run.getAcceptedTaskIndex()
+            || !java.util.Objects.equals(
+                expectedFrontier.generation(), run.getAcceptedWorkspaceGeneration()))) {
+      return Admission.refused("CORRECTION_CONTRACT_FRONTIER_CHANGED");
+    }
+    if (!correction && expectedFrontier != null)
+      return Admission.refused("CORRECTION_FRONTIER_MISSING");
+    if (correctingReview && !correction)
+      return Admission.refused("REVIEW_CORRECTION_FRONTIER_MISSING");
     if (request.kind() == AdmissionKind.INITIAL) {
       if (!"PENDING".equals(previousTaskStatus)) {
         return Admission.refused("INITIAL_TASK_NOT_PENDING:" + previousTaskStatus);
@@ -155,7 +178,13 @@ public class BuildContinuationAdmissionService {
             .taskId(request.taskId())
             .taskIndex(request.taskIndex())
             .attemptNumber(attemptNumber)
-            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .attemptKind(
+                correction
+                    ? WorkspaceGenerationKind.CORRECTION
+                    : WorkspaceGenerationKind.BUILD_TASK)
+            .baseFrontierAttemptId(correction ? run.getAcceptedGenerationAttemptId() : null)
+            .frontierTaskIndex(correction ? run.getAcceptedTaskIndex() : null)
+            .baseFrontierGeneration(correction ? run.getAcceptedWorkspaceGeneration() : null)
             .state(WorkspaceGenerationState.ADMITTED)
             .workspaceRoot(request.workspaceRoot().toAbsolutePath().normalize().toString())
             .authorityDigest(request.authorityDigest())
@@ -179,6 +208,41 @@ public class BuildContinuationAdmissionService {
     }
     return new Admission(
         true, previousRunStatus, previousTaskStatus, null, attemptId, attemptNumber);
+  }
+
+  /** Records physical worker dispatch only after generation preparation and baseline admission. */
+  @Transactional
+  public com.fasterxml.jackson.databind.JsonNode recordDispatch(UUID attemptId) {
+    WorkspaceGenerationAttempt attempt = attempts.findById(attemptId).orElseThrow();
+    PipelineRun run = runs.findByIdForTaskContinuation(attempt.getRunId()).orElseThrow();
+    if (!"WORKING".equals(run.getStatus())
+        || attempt.getState() != WorkspaceGenerationState.MUTATING) {
+      throw new IllegalStateException("CONTINUATION_DISPATCH_NOT_ADMITTED");
+    }
+    String key = attempt.getRunId().substring(0, 8) + "_" + attempt.getTaskId();
+    AgentTask task = tasks.findByIdForUpdate(key).orElseThrow();
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    try {
+      var actions =
+          mapper.readTree(
+              task.getContinuationActionsJson() == null ? "[]" : task.getContinuationActionsJson());
+      if (!actions.isArray()) throw new IllegalStateException("CONTINUATION_HISTORY_MALFORMED");
+      for (int i = actions.size() - 1; i >= 0; i--) {
+        var action = actions.get(i);
+        if (!"RESERVED".equals(action.path("status").asText())) continue;
+        if (!action.path("provider").asText().equalsIgnoreCase(attempt.getRequestedProvider())
+            || !action.path("model").asText().equals(attempt.getRequestedModel())) continue;
+        var dispatched = (com.fasterxml.jackson.databind.node.ObjectNode) action;
+        dispatched.put("status", "EXECUTED");
+        dispatched.put("physicalAttemptId", attemptId.toString());
+        task.setContinuationActionsJson(mapper.writeValueAsString(actions));
+        tasks.saveAndFlush(task);
+        return dispatched;
+      }
+      return null; // Explicit approved retries already carry their separate APPROVED receipt.
+    } catch (com.fasterxml.jackson.core.JsonProcessingException malformed) {
+      throw new IllegalStateException("CONTINUATION_HISTORY_MALFORMED", malformed);
+    }
   }
 
   public record Admission(
@@ -212,7 +276,37 @@ public class BuildContinuationAdmissionService {
       String requestedProvider,
       String requestedModel,
       Integer expectedRecoveryAttempt,
-      AdmissionKind kind) {
+      AdmissionKind kind,
+      com.navneet.executespec.workspacegeneration.AcceptedWorkspaceFrontier expectedFrontier) {
+    public AttemptRequest(
+        String runId,
+        String taskId,
+        int taskIndex,
+        java.nio.file.Path workspaceRoot,
+        String authorityDigest,
+        String taskContractDigest,
+        String taskContractJson,
+        String initialFailureEvidenceJson,
+        String requestedProvider,
+        String requestedModel,
+        Integer expectedRecoveryAttempt,
+        AdmissionKind kind) {
+      this(
+          runId,
+          taskId,
+          taskIndex,
+          workspaceRoot,
+          authorityDigest,
+          taskContractDigest,
+          taskContractJson,
+          initialFailureEvidenceJson,
+          requestedProvider,
+          requestedModel,
+          expectedRecoveryAttempt,
+          kind,
+          null);
+    }
+
     public AttemptRequest {
       if (kind == null) kind = AdmissionKind.INITIAL;
     }

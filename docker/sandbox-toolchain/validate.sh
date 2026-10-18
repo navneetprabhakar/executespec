@@ -4,6 +4,13 @@ set -euo pipefail
 IMAGE_TAG="${1:-executespec/sandbox-toolchain:local}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONTEXT_DIR="${ROOT_DIR}/docker/sandbox-toolchain"
+# Strict mounts must use the non-root service identity that owns the fixture workspace.
+VALIDATE_RUNTIME_UID="$(id -u)"
+VALIDATE_RUNTIME_GID="$(id -g)"
+if [[ "${VALIDATE_RUNTIME_UID}" == 0 ]]; then
+  printf '%s\n' 'Run validation as the non-root workspace owner.' >&2
+  exit 2
+fi
 
 docker build --pull=false --tag "${IMAGE_TAG}" "${CONTEXT_DIR}"
 
@@ -50,7 +57,9 @@ EOF
 
 docker run --rm \
   --network none \
-  --user 65532:65532 \
+  --user "${VALIDATE_RUNTIME_UID}:${VALIDATE_RUNTIME_GID}" \
+  --env "EXPECTED_RUNTIME_UID=${VALIDATE_RUNTIME_UID}" \
+  --env "EXPECTED_RUNTIME_GID=${VALIDATE_RUNTIME_GID}" \
   --security-opt no-new-privileges \
   --cap-drop ALL \
   --read-only \
@@ -63,8 +72,9 @@ docker run --rm \
   --workdir /workspace \
   "${IMAGE_TAG}" \
   sh -ceu '
-    test "$(id -u)" = 65532
-    test "$(id -g)" = 65532
+    test "$(id -u)" = "${EXPECTED_RUNTIME_UID}"
+    test "$(id -g)" = "${EXPECTED_RUNTIME_GID}"
+    test "$(id -u)" != 0
     test ! -S /var/run/docker.sock
     test ! -e /Users
     if touch /etc/executespec-readonly-probe 2>/dev/null; then exit 11; fi
@@ -89,6 +99,8 @@ PY
     javac -d /tmp Hello.java
     java -cp /tmp Hello | grep -qx java-ok
     python3 main.py | grep -qx python-ok
+    python3 -m pytest --version
+    PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -s .executespec/bootstrap/test_acceptance.py
     node index.js | grep -qx node-ok
     GOCACHE=/tmp/go-cache go build -o /workspace/go-main main.go
     /workspace/go-main | grep -qx go-ok

@@ -351,9 +351,40 @@ def test_required_http_routes_run_and_are_reachable():
             .collect(java.util.stream.Collectors.joining("\n"));
     return "import test from \"node:test\";\n"
         + "import assert from \"node:assert/strict\";\n"
-        + "import { existsSync } from \"node:fs\";\n\n"
+        + "import { existsSync, readdirSync } from \"node:fs\";\n"
+        + "import { join } from \"node:path\";\n"
+        + "import { spawnSync } from \"node:child_process\";\n\n"
         + "test(\"required task paths exist\", () => {\n"
         + assertions
-        + "\n});\n";
+        + "\n});\n"
+        + """
+
+// Execute maintained candidate tests separately; the immutable path test is not
+// behavioral evidence. Never recurse into this verifier or dependency directories.
+function testsIn(directory) {
+  return readdirSync(directory, {withFileTypes: true}).flatMap(entry => {
+    if (entry.isSymbolicLink() || entry.name.startsWith('.') ||
+        ['node_modules', 'dist', 'build', 'coverage'].includes(entry.name)) return [];
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return testsIn(path);
+    return /(?:\\.test|\\.spec)\\.[cm]?js$/.test(entry.name) ||
+        /^test_.*\\.[cm]?js$/.test(entry.name) ? [path] : [];
+  });
+}
+
+test('maintained candidate behavior tests pass', () => {
+  const files = testsIn('.').sort();
+  assert.ok(files.length > 0, 'No maintained candidate behavior tests found');
+            const environment = {...process.env};
+            delete environment.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...files], {
+              encoding: 'utf8', timeout: 480000, maxBuffer: 4 * 1024 * 1024, env: environment
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^# pass [1-9][0-9]*$/m,
+    'Candidate suite must execute at least one passing behavior test');
+});
+""";
   }
 }

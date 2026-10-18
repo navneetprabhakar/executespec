@@ -228,7 +228,9 @@ class BuildTaskGenerationCoordinatorTest {
             },
             status);
 
-    assertThat(actual).isSameAs(expected);
+    assertThat(actual.status()).isEqualTo(expected.status());
+    assertThat(actual.goalDonenessDecision().state())
+        .isEqualTo(com.navneet.executespec.execution.model.GoalDonenessState.DONE);
     assertThat(dispatchWasFenced).isTrue();
     InOrder order = inOrder(generations, verifier, checkpoints, convergence);
     order
@@ -358,6 +360,7 @@ class BuildTaskGenerationCoordinatorTest {
   @Test
   void rejectedAttemptThenContinuationUsesANewPhysicalCoordinatorAndLlmInvocation() {
     RunWorkspaceAuthorityService.Lease secondLease = mock(RunWorkspaceAuthorityService.Lease.class);
+    when(secondLease.runId()).thenReturn("run-1");
     WorkspaceGenerationLifecycle.Prepared secondPrepared =
         new WorkspaceGenerationLifecycle.Prepared(
             UUID.randomUUID(), checkpoint("6".repeat(40), "7".repeat(40)), secondLease);

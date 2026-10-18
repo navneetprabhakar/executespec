@@ -100,6 +100,27 @@ class PreviewWorkspaceResolverTest {
         .hasMessageContaining("unsafe for preview");
   }
 
+  @Test
+  void boundContextPreservesItsSourceAfterCanonicalEditsAndCannotBeReusedAsCurrent()
+      throws Exception {
+    when(snapshots.findByRunId("bound-run")).thenReturn(List.of());
+    try (var git = org.eclipse.jgit.api.Git.init().setDirectory(runRoot.toFile()).call()) {
+      Files.writeString(runRoot.resolve("app.js"), "export const value = 1;\n");
+      git.add().addFilepattern(".").call();
+      git.commit().setMessage("seed").setAuthor("Fixture", "fixture@example.invalid").call();
+    }
+    var resolver = new PreviewWorkspaceResolver(snapshots);
+    var bound = resolver.resolveBound("bound-run", runRoot);
+    try {
+      assertThat(resolver.matchesGeneration(runRoot, bound.generation())).isTrue();
+      Files.writeString(runRoot.resolve("app.js"), "export const value = 2;\n");
+      assertThat(resolver.matchesGeneration(runRoot, bound.generation())).isFalse();
+      assertThat(bound.workspace().resolve("app.js")).hasContent("export const value = 1;\n");
+    } finally {
+      org.apache.commons.io.FileUtils.deleteDirectory(bound.workspace().getParent().toFile());
+    }
+  }
+
   private static RunRepoSnapshot snapshot(String runId, String fullName) {
     return RunRepoSnapshot.builder()
         .runId(runId)

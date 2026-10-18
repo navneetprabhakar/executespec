@@ -632,6 +632,7 @@ public class ScmPushService {
 
       publicationGuard.assertGitWorkspaceSafe(run.getRunId());
       blockingGate = "GIT_PUSH";
+      admission.assertOwned();
       GitToolResult bitbucketPush;
       if (admission.prepared() != null) {
         PublicationPreparationStore.PreparedRepository prepared =
@@ -665,6 +666,7 @@ public class ScmPushService {
       String body =
           StringUtils.hasText(run.getRunSummary()) ? run.getRunSummary() : run.getUserRequest();
       blockingGate = "PR_CREATION";
+      admission.assertOwned();
       String prUrl =
           bitbucketRepoService.createPullRequest(
               workspace, repoSlug, branchName, title, body, username, appPassword);
@@ -867,6 +869,7 @@ public class ScmPushService {
       } else if (repoMode == RepoMode.NEW && (repoUrl == null || repoUrl.isBlank())) {
         blockingGate = "REPOSITORY_CREATION";
         log.info("Creating legacy GitHub repo for run {} (owner={})", run.getRunId(), owner);
+        admission.assertOwned();
         remote = gitHubRepoService.createRepo(run.getUserRequest(), null, "private", pat, owner);
         if (remote != null) {
           createdThisInvocation = true;
@@ -991,6 +994,7 @@ public class ScmPushService {
             existingBranchTarget
                 ? null
                 : expectedRemoteShaFor(run.getRunId(), repoFullNameFromUrl(remote), branchName);
+        admission.assertOwned();
         GitToolResult result;
         if (admission.prepared() != null) {
           String preparedRemote = remote;
@@ -1045,6 +1049,7 @@ public class ScmPushService {
         // RR-146 — an existing PR for this head is NOT a failure. Only a typed FAILED outcome may
         // authorize deleting the branch we just pushed.
         blockingGate = "PR_CREATION";
+        admission.assertOwned();
         GitHubRepoService.PullRequestCreation creation =
             existingBranchTarget
                 ? GitHubRepoService.PullRequestCreation.alreadyExists(
@@ -1148,6 +1153,7 @@ public class ScmPushService {
         }
       } else {
         blockingGate = "GIT_PUSH";
+        admission.assertOwned();
         GitToolResult result;
         if (admission.prepared() != null) {
           String preparedRemote = remote;
@@ -1500,6 +1506,7 @@ public class ScmPushService {
             existingBranchTarget
                 ? null
                 : expectedRemoteShaFor(run.getRunId(), repo.getGithubRepoFullName(), branchName);
+        admission.assertOwned();
         GitToolResult pushResult;
         if (admission.prepared() != null) {
           PublicationPreparationStore.PreparedRepository prepared =
@@ -1560,6 +1567,7 @@ public class ScmPushService {
         }
         boolean noNewChanges = "ALREADY_CURRENT".equals(pushResult.value());
 
+        admission.assertOwned();
         GitHubRepoService.PullRequestCreation creation =
             existingBranchTarget
                 ? GitHubRepoService.PullRequestCreation.alreadyExists(

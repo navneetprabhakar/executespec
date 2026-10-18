@@ -57,6 +57,61 @@ class WorkspaceIgnoredArtifactGuardTest {
   }
 
   @Test
+  void pytestSelfIgnoringCacheIsRemovedWithoutInvalidatingItsOwnClassification() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve("source.py"), "value = 1\n");
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+    var checkpoint = new CorrectionWorkspaceTransaction().begin(workspace);
+    var guard = new WorkspaceIgnoredArtifactGuard(new ObjectMapper());
+    var baseline = guard.prepare(checkpoint, () -> {});
+    Path cache = Files.createDirectories(workspace.resolve(".pytest_cache/v/cache"));
+    Files.writeString(workspace.resolve(".pytest_cache/.gitignore"), "*\n");
+    Files.writeString(workspace.resolve(".pytest_cache/README.md"), "pytest cache\n");
+    Files.writeString(cache.resolve("nodeids"), "[]\n");
+
+    var removed =
+        guard.cleanAttemptArtifacts(checkpoint, baseline.json(), baseline.digest(), () -> {});
+
+    assertThat(removed).hasSize(3);
+    assertThat(removed.getLast()).endsWith(":.pytest_cache/.gitignore");
+    assertThat(workspace.resolve(".pytest_cache")).doesNotExist();
+    assertThat(workspace.resolve("source.py")).hasContent("value = 1\n");
+  }
+
+  @Test
+  void externalIgnoreRuleChangeStillRefusesDeletion() throws Exception {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@executespec.local");
+    git("config", "user.name", "ExecuteSpec Test");
+    Files.writeString(workspace.resolve(".gitignore"), "cache.bin\n");
+    git("add", "-A");
+    git("commit", "-m", "baseline");
+    var checkpoint = new CorrectionWorkspaceTransaction().begin(workspace);
+    var guard = new WorkspaceIgnoredArtifactGuard(new ObjectMapper());
+    var baseline = guard.prepare(checkpoint, () -> {});
+    Files.writeString(workspace.resolve("cache.bin"), "retain until classification is valid");
+
+    assertThatThrownBy(
+            () ->
+                guard.cleanAttemptArtifacts(
+                    checkpoint,
+                    baseline.json(),
+                    baseline.digest(),
+                    () -> {
+                      try {
+                        Files.writeString(workspace.resolve(".gitignore"), "");
+                      } catch (java.io.IOException error) {
+                        throw new java.io.UncheckedIOException(error);
+                      }
+                    }))
+        .hasMessage("WORKSPACE_IGNORED_ARTIFACT_CLASSIFICATION_CHANGED");
+    assertThat(workspace.resolve("cache.bin")).exists();
+  }
+
+  @Test
   void cleansIgnoredSiblingsWithoutDeletingNestedRepositories() throws Exception {
     git("init", "-b", "main");
     git("config", "user.email", "test@executespec.local");

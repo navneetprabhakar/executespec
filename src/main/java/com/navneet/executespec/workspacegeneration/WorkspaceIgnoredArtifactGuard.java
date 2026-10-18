@@ -145,7 +145,19 @@ public class WorkspaceIgnoredArtifactGuard {
     for (CorrectionWorkspaceTransaction.RepositoryCheckpoint repository :
         checkpoint.repositories()) {
       Path root = repository.repository().toAbsolutePath().normalize();
-      for (String relative : ignoredPaths(root)) {
+      // Cache-local .gitignore files (pytest creates one containing '*') classify their siblings.
+      // Delete those rule files last, deepest first, so our own cleanup cannot reclassify bytes
+      // that are still awaiting their fresh per-path check. External rule changes still fail
+      // closed.
+      List<String> cleanupOrder =
+          ignoredPaths(root).stream()
+              .sorted(
+                  Comparator.comparing(
+                          (String path) ->
+                              path.equals(".gitignore") || path.endsWith("/.gitignore"))
+                      .thenComparing(Comparator.reverseOrder()))
+              .toList();
+      for (String relative : cleanupOrder) {
         Path candidate = safeResolve(root, relative);
         Set<Path> protectedRepositories =
             repositoryRoots.stream()

@@ -75,6 +75,38 @@ public class TaskAcceptanceContractResolver {
         digest);
   }
 
+  /** Legacy corrections retain the entire accepted prefix and run its complete test suite. */
+  public TaskAcceptanceContract resolveLegacyCorrection(
+      PlannedTask task, Plan plan, int taskIndex, int acceptedIndex) {
+    if (plan == null || acceptedIndex < taskIndex || acceptedIndex >= plan.tasks().size()) {
+      throw new IllegalArgumentException("BUILD_CORRECTION_PREFIX_INVALID");
+    }
+    var paths = new java.util.TreeSet<String>();
+    if (task.touchesFiles() != null) paths.addAll(task.touchesFiles());
+    plan.tasks()
+        .subList(0, acceptedIndex + 1)
+        .forEach(prefix -> paths.addAll(prefix.requiredArtifacts()));
+    TaskAcceptanceContract unsigned =
+        new TaskAcceptanceContract(
+            1,
+            task.id(),
+            taskIndex,
+            "SERVER_RESOLVED_CORRECTION_V1",
+            "REQUIRED_NON_NOOP",
+            "REQUIRED",
+            List.copyOf(paths),
+            "");
+    return new TaskAcceptanceContract(
+        1,
+        task.id(),
+        taskIndex,
+        unsigned.verificationPolicy(),
+        unsigned.buildRequirement(),
+        unsigned.testRequirement(),
+        unsigned.declaredTouchPaths(),
+        sha256(canonical(unsigned)));
+  }
+
   /**
    * Freeze the complete failure-first command/check contract before any model or baseline mutation.
    */
@@ -89,6 +121,32 @@ public class TaskAcceptanceContractResolver {
       int taskIndex,
       Path workspaceRoot,
       GreenfieldBaselinePlan baseline) {
+    return resolveContract(task, plan, taskIndex, workspaceRoot, baseline, List.of());
+  }
+
+  public TaskAcceptanceContract resolveCorrection(
+      PlannedTask task,
+      Plan plan,
+      int taskIndex,
+      Path root,
+      GreenfieldBaselinePlan baseline,
+      int acceptedTaskIndex) {
+    List<String> prefixEndpoints =
+        plan.tasks().subList(0, acceptedTaskIndex + 1).stream()
+            .flatMap(prefixTask -> HttpEndpointContract.from(prefixTask, plan).stream())
+            .distinct()
+            .sorted()
+            .toList();
+    return resolveContract(task, plan, taskIndex, root, baseline, prefixEndpoints);
+  }
+
+  private TaskAcceptanceContract resolveContract(
+      PlannedTask task,
+      Plan plan,
+      int taskIndex,
+      Path workspaceRoot,
+      GreenfieldBaselinePlan baseline,
+      List<String> prefixEndpoints) {
     if (workspaceRoot == null) throw new IllegalArgumentException("workspaceRoot required");
     if (baseline == null) throw new IllegalArgumentException("baseline required");
     if (!baseline.supported()) {
@@ -107,7 +165,12 @@ public class TaskAcceptanceContractResolver {
       prefix.add(
           new TaskAcceptanceContract.AcceptanceCheck("TEST_COMMAND_AVAILABLE", "workspace", false));
     }
-    List<String> endpoints = HttpEndpointContract.from(task, plan);
+    List<String> endpoints =
+        java.util.stream.Stream.concat(
+                HttpEndpointContract.from(task, plan).stream(), prefixEndpoints.stream())
+            .distinct()
+            .sorted()
+            .toList();
     List<TaskAcceptanceContract.AcceptanceCheck> finalChecks = new ArrayList<>();
     finalChecks.add(
         new TaskAcceptanceContract.AcceptanceCheck("REPOSITORY_SCOPE", "candidate", false));
@@ -128,16 +191,22 @@ public class TaskAcceptanceContractResolver {
         new TaskAcceptanceContract.AcceptanceCheck(
             "TESTS_PASSED", "candidate", "OPTIONAL".equals(testRequirement)));
     Map<String, Object> unsigned = new java.util.LinkedHashMap<>();
-    unsigned.put("schemaVersion", 2);
+    unsigned.put("schemaVersion", 3);
     unsigned.put("taskId", task.id());
     unsigned.put("taskIndex", taskIndex);
-    unsigned.put("verificationPolicy", "SERVER_RESOLVED_FAILURE_FIRST_V2");
+    String verificationPolicy =
+        "SERVER_RESOLVED_" + TaskAcceptanceKind.resolve(task, baseline) + "_V3";
+    unsigned.put("verificationPolicy", verificationPolicy);
     unsigned.put("buildRequirement", "REQUIRED_NON_NOOP");
     unsigned.put("testRequirement", testRequirement);
     unsigned.put("declaredTouchPaths", touchPaths);
     unsigned.put("runtimeSurface", baseline.runtimeSurface());
     AcceptanceProofStrength requiredProofStrength =
-        AcceptanceProofStrength.requiredFor(baseline.runtimeSurface(), testRequirement);
+        endpoints.isEmpty()
+            ? ("REQUIRED".equals(testRequirement)
+                ? AcceptanceProofStrength.TEST
+                : AcceptanceProofStrength.BUILD)
+            : AcceptanceProofStrength.requiredFor(baseline.runtimeSurface(), testRequirement);
     unsigned.put("requiredProofStrength", requiredProofStrength);
     unsigned.put("baselineKind", baseline.kind().name());
     unsigned.put("buildCommand", build);
@@ -158,10 +227,10 @@ public class TaskAcceptanceContractResolver {
     unsigned.put("immutableBootstrapArtifactDigests", bootstrapDigests);
     String digest = sha256(canonical(unsigned));
     return new TaskAcceptanceContract(
-        2,
+        3,
         task.id(),
         taskIndex,
-        "SERVER_RESOLVED_FAILURE_FIRST_V2",
+        verificationPolicy,
         "REQUIRED_NON_NOOP",
         testRequirement,
         touchPaths,

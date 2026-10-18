@@ -338,3 +338,26 @@ The unreferenced `ConversationAgent` service and its sole-use
 `ApplySuggestionTooLargeException` are removed. No production caller or route referenced that
 service. Active post-run Ask remains `chat/ChatService`; `/api/conversation` still uses
 `ConversationController` and its shared `conversation-system.md` prompt. The prompt is retained.
+
+## Single-shot positive runtime constraints
+
+`SingleShotSurfaceClassifier` excludes explicitly negated surface/framework clauses before its
+keyword checks, while retaining contrast clauses (`but`, `instead`, `however`) and `not only`/
+`not just` positive intent. A library that excludes HTTP/CLI remains a library; an API without a
+CLI remains HTTP. The same filtering applies to framework/project-type inference. This is bounded
+heuristic classification, not a natural-language proof of architecture.
+
+## Anthropic platform workspace scope (2026-10-17)
+
+Optional `ANTHROPIC_WORKSPACE_ID` configures `spring.ai.anthropic.workspace-id`.
+`AnthropicWorkspaceHeaders` attaches `anthropic-workspace-id` to normal admitted-attempt and forced
+tool-call clients only when the selected key matches the configured platform key. An unrelated
+BYOK credential never inherits the platform workspace. Empty configuration preserves old requests.
+Local socket tests verify header inclusion, omission for BYOK, and unset-workspace compatibility.
+
+## Bounded DeepSeek decisions across transports (2026-10-17)
+
+`deepSeekExtraBody` retains native worker thinking while disabling it for bounded structured agents
+and reviewer task IDs. OpenRouter translates that policy to `reasoning.enabled=false`; Fireworks
+uses `reasoning_effort=none`. Provider-routing/usage hints survive. A live verification capability
+is checked before a provider call and before each physical dispatch, including transient retries.

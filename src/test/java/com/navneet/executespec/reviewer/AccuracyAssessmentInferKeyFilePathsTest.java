@@ -126,6 +126,26 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   }
 
   @Test
+  void treeDecorationParsingPreservesRealLeadingLetters() throws Exception {
+    assertThat(infer("Router.java\nDocumentService.java\nIndex.ts\n├── Route.py"))
+        .contains("Router.java", "DocumentService.java", "Index.ts", "Route.py");
+    assertThat(inferConfigs("README.md\nDockerfile\n├── requirements.txt"))
+        .contains("README.md", "Dockerfile", "requirements.txt");
+  }
+
+  @Test
+  void documentationAndDependencyPinsReachAssessmentWithoutIncludingVendoredCopies()
+      throws Exception {
+    assertThat(
+            inferConfigs(
+                "README.md\nrequirements.txt\nrequirements-dev.txt\nrepos/lib/README.rst\n"
+                    + "node_modules/pkg/README.md\n.venv/requirements.txt\nnotes/unrelated.md"))
+        .contains("README.md", "requirements.txt", "requirements-dev.txt", "repos/lib/README.rst")
+        .doesNotContain(
+            "node_modules/pkg/README.md", ".venv/requirements.txt", "notes/unrelated.md");
+  }
+
+  @Test
   void workflowEvidenceIsPrioritisedAndBoundedIndependently() throws Exception {
     StringBuilder tree = new StringBuilder();
     for (int i = 0; i < 12; i++) tree.append("config/option-").append(i).append(".json\n");

@@ -250,3 +250,15 @@ that disclosure remains PASSED. Before this, the note demoted clean Node-stack r
 unprovable state was introduced to prevent. `isInformationalDisclosure` (review-issue id) and
 `isInformationalDisclosureDescription` (DTO description, no id available) are the twin filters;
 pinned by `ValidationReportServiceR09Test.httpStackUnprovableDisclosureDoesNot{Gate,Mask}...`.
+
+## V402 asynchronous test settlement
+
+[ V402 ](../../../../../resources/db/migration/V402__order_generation_bound_concrete_test_evidence.sql)
+adds `ValidationReport.concreteTestExecutionId` and `concreteTestStartedAt`.
+`ConcreteTestEvidenceAdmission` requires the report's canonical workspace generation, a server
+execution id, and its launch timestamp. A pessimistic report-row lock serializes replacement;
+duplicate, older, missing-identity, and other-generation events cannot overwrite current proof.
+A newly admitted concrete failure also sets the report's `PipelineResult` to FAILED so deterministic
+test failure cannot coexist with a passed headline verdict. Passing later evidence does not by
+itself undo unrelated failed gates; complete validation is required to re-establish acceptance.
+Historical reports without a generation binding cannot acquire new asynchronous proof.

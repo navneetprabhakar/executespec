@@ -2244,7 +2244,7 @@ class SequentialExecutorSoftCompletionTest {
                 s ->
                     "run-soft_T1".equals(s.taskKey())
                         && s.continuationActionsJson() != null
-                        && s.continuationActionsJson().contains("\"status\":\"EXECUTED\"")
+                        && s.continuationActionsJson().contains("\"status\":\"RESERVED\"")
                         && s.continuationActionsJson().contains("\"decision\":\"STEP_UP_MODEL\"")
                         && s.continuationActionsJson().contains("\"provider\":\"openai\"")
                         && s.continuationActionsJson().contains("\"model\":\"gpt-5.4\"")

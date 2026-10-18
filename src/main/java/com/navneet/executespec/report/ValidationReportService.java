@@ -560,12 +560,15 @@ public class ValidationReportService {
     if (runId == null || runId.isBlank() || summary == null || repository == null) {
       return Optional.empty();
     }
-    Optional<ValidationReport> found = repository.findByRunId(runId);
+    Optional<ValidationReport> found = repository.findByRunIdForUpdate(runId);
     if (found.isEmpty()) {
       return Optional.empty();
     }
 
     ValidationReport report = found.get();
+    if (!ConcreteTestEvidenceAdmission.mayReplace(report, summary)) {
+      return Optional.of(report);
+    }
     boolean provenTestExecution = summary.hasProvenTestExecution();
     boolean existingExecutionProven = Boolean.TRUE.equals(report.getTestExecutionVerified());
     boolean existingFunctionalProof =
@@ -602,6 +605,11 @@ public class ValidationReportService {
     String concreteCoverageLevel =
         total == 0 ? "NONE" : accuracy.testCited() ? accuracy.testCoverageLevel() : null;
 
+    report.setConcreteTestExecutionId(summary.getExecutionId());
+    report.setConcreteTestStartedAt(summary.getExecutionStartedAt());
+    if (provenTestExecution && (summary.getFailed() > 0 || summary.getErrors() > 0)) {
+      report.setPipelineResult(PipelineResult.FAILED);
+    }
     report.setTestsTotal(total);
     report.setTestsPassed(passed);
     report.setTestsSkipped(incomingSkipped);

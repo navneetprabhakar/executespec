@@ -716,6 +716,7 @@ public class LlmRouter {
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
   public ChatResponse call(LlmRequest request) {
+    request.context().assertVerificationSandboxLive();
     // V374 — a BUILD/correction worker may spend only while its exact workspace-generation and
     // LLM-attempt leases remain current. The bound fence is absent for unrelated agents.
     com.navneet.executespec.integration.RunWorkspaceAuthorityService.assertCorrectionToolDispatch(
@@ -1519,6 +1520,7 @@ public class LlmRouter {
 
   private ChatResponse dispatch(
       LlmRequest request, List<ToolCallback> tools, String apiKey, Instant transportDeadline) {
+    request.context().assertVerificationSandboxLive();
     return switch (request.provider().toLowerCase(Locale.ROOT)) {
       case "anthropic" -> callAnthropic(request, tools, apiKey);
       case "openai" -> callOpenAi(request, tools, apiKey, transportDeadline);
@@ -1912,11 +1914,22 @@ public class LlmRouter {
             .physicalAttemptStartedCallback(r.physicalAttemptStartedCallback())
             .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(openRouterBaseUrl)
-            .extraBody(
-                Map.of(
-                    "provider", Map.of("sort", "latency"),
-                    "usage", Map.of("include", true)))
+            .extraBody(openRouterExtraBody(r))
             .build());
+  }
+
+  static Map<String, Object> openRouterExtraBody(LlmRequest request) {
+    var body = new java.util.HashMap<String, Object>();
+    body.put("provider", Map.of("sort", "latency"));
+    body.put("usage", Map.of("include", true));
+    // Preserve the native DeepSeek bounded-transform policy across the aggregator transport.
+    // Omitting this lets hidden reasoning consume the reviewer's entire 4096-token output cap.
+    if (request.model() != null
+        && request.model().contains("deepseek")
+        && !deepSeekExtraBody(request).isEmpty()) {
+      body.put("reasoning", Map.of("enabled", false));
+    }
+    return Map.copyOf(body);
   }
 
   /**
@@ -2012,7 +2025,16 @@ public class LlmRouter {
             .physicalAttemptStartedCallback(r.physicalAttemptStartedCallback())
             .readTimeoutSeconds(admittedReadTimeoutSeconds(r, transportDeadline))
             .baseUrl(fireworksBaseUrl)
+            .extraBody(fireworksExtraBody(r))
             .build());
+  }
+
+  static Map<String, Object> fireworksExtraBody(LlmRequest request) {
+    return request.model() != null
+            && request.model().contains("deepseek")
+            && !deepSeekExtraBody(request).isEmpty()
+        ? Map.of("reasoning_effort", "none")
+        : Map.of();
   }
 
   /**

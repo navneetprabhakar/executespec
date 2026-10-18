@@ -46,7 +46,6 @@ final class VerificationSandboxRoutingService {
   private final SandboxProperties properties;
   private final PipelineRunRepository pipelineRuns;
   private final SandboxCommandJournalStore commandJournal;
-  private final Map<UUID, RunSandbox.Lease> heldLeases = new ConcurrentHashMap<>();
   private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
 
   VerificationSandboxRoutingService(
@@ -98,6 +97,12 @@ final class VerificationSandboxRoutingService {
                 SandboxPurpose.VERIFICATION,
                 "verify-exec:" + runId + ":" + phase + ":" + nonce),
             specFor(Path.of("/verification-owned-at-provision"), Duration.ofMinutes(10)));
+    Duration leaseDuration = max(properties.getLeaseDuration(), LEASE_HEADROOM);
+    RunSandbox.Lease lease = store.tryAcquire(sandbox.id(), OWNER, leaseDuration).orElse(null);
+    if (lease == null) {
+      lifecycle.cancel(sandbox.id());
+      throw failure("VERIFICATION_SANDBOX_LEASE_UNAVAILABLE");
+    }
     Path workspace = workspace(sandbox.id());
     try {
       Files.createDirectories(workspace);
@@ -108,13 +113,14 @@ final class VerificationSandboxRoutingService {
     }
     VerificationSandboxAuthority authority =
         new VerificationSandboxAuthority(
-            nonce, sandbox.id(), runId, attemptId, generation, phase, workspace);
-    sessions.put(nonce, new Session(authority, sandbox));
+            nonce, sandbox.id(), runId, attemptId, generation, phase, workspace, this::assertLive);
+    sessions.put(nonce, new Session(authority, sandbox, lease, leaseDuration));
     return authority;
   }
 
   void activate(VerificationSandboxAuthority authority, String materializedGeneration) {
     Session session = requireSession(authority);
+    assertLive(authority);
     if (!authority.generation().equals(materializedGeneration)) {
       throw failure("VERIFICATION_SANDBOX_GENERATION_MISMATCH");
     }
@@ -144,10 +150,7 @@ final class VerificationSandboxRoutingService {
     String beforeSnapshot = null;
     RunSandbox.Lease lease = null;
     try {
-      lease = leaseFor(session.sandbox, bounded);
-      if (lease == null) {
-        return SandboxExecResult.unavailable("verification sandbox is owned by another runtime");
-      }
+      lease = leaseFor(session, bounded);
       RunSandbox current = store.get(session.sandbox.id()).orElse(session.sandbox);
       if (current.purpose() != SandboxPurpose.VERIFICATION) {
         return SandboxExecResult.refused("VERIFICATION_SANDBOX_PURPOSE_MISMATCH");
@@ -191,7 +194,7 @@ final class VerificationSandboxRoutingService {
         dispatcher.failAndRelease(
             current, lease, "VERIFICATION_COMMAND_TIMEOUT", "command exceeded " + bounded);
         session.active = false;
-        heldLeases.remove(current.id());
+        session.failure = failure("VERIFICATION_SANDBOX_COMMAND_TIMED_OUT");
       }
       return result;
     } catch (RuntimeException cause) {
@@ -227,15 +230,53 @@ final class VerificationSandboxRoutingService {
   }
 
   void close(VerificationSandboxAuthority authority) {
-    Session session = sessions.remove(authority.capabilityId());
+    Session session = sessions.get(authority.capabilityId());
     if (session == null || session.authority != authority) return;
-    RunSandbox.Lease lease = heldLeases.remove(session.sandbox.id());
-    if (lease == null) {
-      lifecycle.cancel(session.sandbox.id());
-      return;
+    synchronized (session) {
+      if (session.closed) return;
+      session.closed = true;
+      sessions.remove(authority.capabilityId(), session);
+      RunSandbox current = store.get(session.sandbox.id()).orElse(session.sandbox);
+      dispatcher.release(current, session.lease, SandboxState.TERMINATED);
     }
-    RunSandbox current = store.get(session.sandbox.id()).orElse(session.sandbox);
-    dispatcher.release(current, lease, SandboxState.TERMINATED);
+  }
+
+  /** Covers materialization, model calls and reads, not only command execution. */
+  void renewSessions() {
+    for (Session session : sessions.values()) {
+      synchronized (session) {
+        if (session.closed || session.failure != null) continue;
+        try {
+          renew(session);
+        } catch (RuntimeException failure) {
+          session.failure = failure;
+          log.warn("verification session lease lost for sandbox {}", session.sandbox.id(), failure);
+        }
+      }
+    }
+  }
+
+  private void assertLive(VerificationSandboxAuthority authority) {
+    Session session = requireSession(authority);
+    synchronized (session) {
+      if (session.closed) throw failure("VERIFICATION_SANDBOX_AUTHORITY_STALE");
+      if (session.failure != null) throw session.failure;
+      try {
+        renew(session);
+      } catch (RuntimeException failure) {
+        session.failure = failure;
+        throw failure;
+      }
+    }
+  }
+
+  private void renew(Session session) {
+    if ((session.sandbox.expiresAt() != null
+            && !session.sandbox.expiresAt().isAfter(java.time.Instant.now()))
+        || store.cancellationRequested(session.lease)
+        || !store.heartbeat(session.lease, session.leaseDuration)) {
+      throw failure("VERIFICATION_SANDBOX_LEASE_LOST");
+    }
   }
 
   private Session requireSession(VerificationSandboxAuthority authority) {
@@ -258,14 +299,12 @@ final class VerificationSandboxRoutingService {
     return run;
   }
 
-  private RunSandbox.Lease leaseFor(RunSandbox sandbox, Duration timeout) {
-    Duration duration = max(properties.getLeaseDuration(), timeout.plus(LEASE_HEADROOM));
-    RunSandbox.Lease held = heldLeases.get(sandbox.id());
-    if (held != null && store.heartbeat(held, duration)) return held;
-    heldLeases.remove(sandbox.id());
-    RunSandbox.Lease acquired = store.tryAcquire(sandbox.id(), OWNER, duration).orElse(null);
-    if (acquired != null) heldLeases.put(sandbox.id(), acquired);
-    return acquired;
+  private RunSandbox.Lease leaseFor(Session session, Duration timeout) {
+    synchronized (session) {
+      session.leaseDuration = max(session.leaseDuration, timeout.plus(LEASE_HEADROOM));
+      assertLive(session.authority);
+      return session.lease;
+    }
   }
 
   private SandboxRuntimeSpec specFor(Path root, Duration timeout) {
@@ -331,11 +370,21 @@ final class VerificationSandboxRoutingService {
     private final VerificationSandboxAuthority authority;
     private final RunSandbox sandbox;
     private final List<UUID> commandReceiptIds = new CopyOnWriteArrayList<>();
+    private final RunSandbox.Lease lease;
+    private Duration leaseDuration;
+    private volatile RuntimeException failure;
+    private boolean closed;
     private volatile boolean active;
 
-    private Session(VerificationSandboxAuthority authority, RunSandbox sandbox) {
+    private Session(
+        VerificationSandboxAuthority authority,
+        RunSandbox sandbox,
+        RunSandbox.Lease lease,
+        Duration leaseDuration) {
       this.authority = authority;
       this.sandbox = sandbox;
+      this.lease = lease;
+      this.leaseDuration = leaseDuration;
     }
   }
 }

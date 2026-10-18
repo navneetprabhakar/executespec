@@ -24,7 +24,6 @@ import com.navneet.executespec.tool.BuildExecutionEvidence;
 import com.navneet.executespec.tool.BuildProjectTool;
 import com.navneet.executespec.tool.ExecutionContext;
 
-import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -67,7 +66,7 @@ public class TaskAcceptanceVerifier {
           null,
           List.of());
     }
-    if (!bootstrapArtifactsMatch(context.workspaceRoot(), contract)) {
+    if (!BootstrapArtifactIntegrity.matches(context.workspaceRoot(), contract)) {
       return new InitialFailure(
           "UNAVAILABLE",
           "INITIAL_BOOTSTRAP_ARTIFACT_DRIFT",
@@ -126,6 +125,14 @@ public class TaskAcceptanceVerifier {
           List.of());
     }
     if (test.isEmpty()) {
+      if ("OPTIONAL".equals(contract.testRequirement())) {
+        return new InitialFailure(
+            "ALREADY_PASSED",
+            "BASELINE_BUILD_PASSED",
+            bounded(buildOutput),
+            build.command(),
+            List.of());
+      }
       return new InitialFailure(
           "UNAVAILABLE",
           "INITIAL_TEST_COMMAND_UNAVAILABLE",
@@ -225,7 +232,8 @@ public class TaskAcceptanceVerifier {
             && exactResolvedBuild
             && frozenBuildMatches
             && requiredPathsPresent;
-    boolean bootstrapArtifactsMatch = bootstrapArtifactsMatch(context.workspaceRoot(), contract);
+    boolean bootstrapArtifactsMatch =
+        BootstrapArtifactIntegrity.matches(context.workspaceRoot(), contract);
     String outcome;
 
     boolean pythonHttpRuntimeRequired =
@@ -252,6 +260,7 @@ public class TaskAcceptanceVerifier {
         summary != null
             && testResult.get().exitCode() == 0
             && summary.getTotalTests() > 0
+            && summary.getPassed() > 0
             && summary.getFailed() == 0
             && summary.getErrors() == 0;
     boolean serverOwnedRuntimeCommand =
@@ -500,36 +509,6 @@ public class TaskAcceptanceVerifier {
         + value.substring(value.length() - 4_000);
   }
 
-  private static boolean bootstrapArtifactsMatch(
-      Path workspaceRoot, TaskAcceptanceContract contract) {
-    Path root = workspaceRoot.toAbsolutePath().normalize();
-    for (Map.Entry<String, String> artifact :
-        contract.immutableBootstrapArtifactDigests().entrySet()) {
-      try {
-        Path path = root.resolve(artifact.getKey()).normalize();
-        if (!path.startsWith(root)
-            || !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-            || Files.isSymbolicLink(path)
-            || hasSymlinkComponent(root, path)
-            || !artifact.getValue().equals(DigestUtils.sha256Hex(Files.readAllBytes(path)))) {
-          return false;
-        }
-      } catch (Exception failure) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private static boolean hasSymlinkComponent(Path root, Path path) {
-    Path current = root;
-    for (Path segment : root.relativize(path)) {
-      current = current.resolve(segment);
-      if (Files.isSymbolicLink(current)) return true;
-    }
-    return false;
-  }
-
   public record InitialFailure(
       String outcome,
       String code,
@@ -594,6 +573,11 @@ public class TaskAcceptanceVerifier {
 
     public boolean observed() {
       return "FAILURE_OBSERVED".equals(outcome);
+    }
+
+    /** A healthy baseline is valid change/repair input, never fabricated failing evidence. */
+    public boolean admits(TaskAcceptanceContract contract) {
+      return observed() || (contract.schemaVersion() >= 3 && "ALREADY_PASSED".equals(outcome));
     }
   }
 }

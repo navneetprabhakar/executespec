@@ -37,16 +37,15 @@ class BuildCommandResolverRnTest {
   }
 
   @Test
-  void plainNodeProjectStillUsesNpmBuild(@TempDir Path workspace) throws IOException {
-    // package.json alone (no app.json) must stay on the generic npm branch —
-    // regression guard: the RN branch must not shadow existing Node behaviour.
+  void plainNodeWithoutBuildScriptCannotClaimABuild(@TempDir Path workspace) throws IOException {
+    // An absent build script cannot become a successful optional npm no-op.
     Files.writeString(
         workspace.resolve("package.json"), "{\"dependencies\":{\"express\":\"4.19.2\"}}");
 
     BuildCommand cmd = resolver.resolve(workspace, null);
 
-    assertThat(cmd.command()).isEqualTo("npm run build --if-present");
-    assertThat(cmd.sourceDescription()).isEqualTo("inferred:npm");
+    assertThat(cmd.command()).isEqualTo("true");
+    assertThat(cmd.sourceDescription()).isEqualTo("fallback:no-op");
   }
 
   @Test

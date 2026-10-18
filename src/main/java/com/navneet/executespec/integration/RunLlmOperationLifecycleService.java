@@ -49,7 +49,7 @@ public class RunLlmOperationLifecycleService {
       int taskIndex,
       String immutableIdentity) {
     return claim(
-        context,
+        context.child(taskId),
         runId,
         "build-task:" + taskId,
         "RUN_BUILD_TASK",
@@ -64,7 +64,7 @@ public class RunLlmOperationLifecycleService {
       int taskIndex,
       String immutableIdentity) {
     return beginNew(
-        context,
+        context.child(taskId),
         runId,
         "build-task:" + taskId,
         "RUN_BUILD_TASK",

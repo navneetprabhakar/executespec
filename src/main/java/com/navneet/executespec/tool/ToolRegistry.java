@@ -481,6 +481,7 @@ public class ToolRegistry {
 
     @Override
     public String call(String toolInput) {
+      ctx.assertVerificationSandboxLive();
       // Local-hands/remote-brain: if this run executes tools on a connected client, dispatch there
       // and return the client's result envelope. No-op for the default server-executed pipeline
       // (remoteToolDispatcher null in tests, or isRemote false for every server-run).

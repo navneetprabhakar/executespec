@@ -22,6 +22,9 @@ what can execute. A successful build, passing repository tests, LLM review, and 
 verified score are different kinds of evidence; none alone proves every requested behavior.
 Unattended operation and generated-code execution require deliberate sandbox and spend policies.
 
+See the [BUILD execution contract](docs/architecture/build-path-contract.md) for acceptance,
+recovery, publication boundaries and the current bounded provider verification checkpoint.
+
 ## Local development
 
 Install JDK 21, Maven, Node.js, npm, and Docker. Set `JAVA_HOME` to JDK 21; on Homebrew macOS:
@@ -87,12 +90,37 @@ they are not enabled by the commands above. See [CONTRIBUTING.md](CONTRIBUTING.m
 
 The authenticated pipeline E2E is not part of normal `mvn verify`: Surefire excludes the `e2e`
 tag unless `-Pintegration` is explicit. Each live invocation runs exactly one lifecycle scenario
-(`happy`, `reject`, or `cancel`) on the non-frontier DeepSeek Flash route with a hard `$0.10`
-per-run cap. Reserve the UUID before starting the test so the provider guard can match the first
-planner dispatch:
+(`happy`, `reject`, `cancel`, or `build`) on an explicitly pinned provider route with a default `$0.10`
+per-run cap. `E2E_COST_CAP_USD` can raise that cap up to `$0.50` for a full reviewer pass;
+reserve the same maximum in the ledger before dispatch. Reserve the UUID before starting the test
+so the provider guard can match the first planner dispatch. The `build` scenario adds a generated Python library and independent held-out
+behavior checks inside a disposable strict sandbox.
+
+The default route is `DEEPSEEK/deepseek-v4-flash-native`. Set `E2E_PROVIDER` (case insensitive)
+and optionally `E2E_MODEL` to qualify another bounded route: `ANTHROPIC/claude-haiku-4-5-20251001`,
+`OPENAI/gpt-5.4-mini`, `GEMINI/gemini-3.5-flash-lite`, `OPENROUTER/deepseek-v4-flash`, or
+`FIREWORKS/deepseek-v4p1-flash-fw`. Other models are rejected before fixture startup. The reservation must
+match that exact provider/model/run tuple, and only that provider's credential is needed. This
+qualifies the selected route, not every model offered by the provider. If the platform Anthropic
+key requires workspace routing, set `ANTHROPIC_WORKSPACE_ID`; its header is attached only to that
+configured credential and is omitted for unrelated BYOK keys.
+
+Before reserving provider spend, validate the local toolchain with
+`docker/sandbox-toolchain/validate.sh <image-tag>`, push it to a registry, and set
+`EXECUTESPEC_E2E_SANDBOX_IMAGE` to its exact `repository@sha256:...` reference. Set
+`EXECUTESPEC_E2E_RUNTIME_UID` and `EXECUTESPEC_E2E_RUNTIME_GID` to the non-root host workspace owner's
+numeric ids. The fixture uses isolated PostgreSQL and Redis containers and enables runtime flags
+only inside that disposable database. Automatic preview/deployment is disabled.
+
+A key-free startup/runtime preflight is available with `E2E_RUNTIME_PREFLIGHT=true` and
+`mvn -Pintegration -Dtest=PipelineE2ETest -Dgroups=e2e test`. Provider cases deliberately skip
+without their separate scenario, key, and reservation. The preflight does not authorize LLM calls.
 
 ```bash
 export E2E_SCENARIO=happy
+export E2E_PROVIDER=DEEPSEEK
+export E2E_MODEL=deepseek-v4-flash-native
+export E2E_COST_CAP_USD=0.10
 export E2E_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 export RESERVATION_ID="$(
   node scripts/provider-budget-ledger.mjs reserve \
@@ -111,8 +139,17 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
 
 Use a fresh UUID and reservation for every scenario. Afterward, reconcile the reservation with the
 run's recorded cost or use `close-unknown` to charge the full reserved `$0.10` conservatively.
+Live fixtures retain the ignored generated workspace and write a minimal status/cost snapshot under
+`target/live-e2e-evidence/` for diagnosis; ordinary key-free fixtures clean up their workspace.
 Missing scenario, UUID, live-test profile, or reservation skips the provider-backed scenario; the
-router independently remains fail-closed.
+router independently remains fail-closed. The private snapshot includes report findings, task
+results and exact verification receipts; bounded transport errors redact configured credentials.
+Provider-free checks preserve diagnostic workspaces from earlier invocations.
+
+Verification sessions retain ownership during slow model/read phases. Their dedicated heartbeat
+uses `executespec.sandbox.verification-heartbeat-interval-ms` (default `10000`, maximum `30000`).
+The Fireworks defaults now use DeepSeek V4.1 Flash; obsolete saved explicit model pins require
+reselection. Historical run results remain unchanged.
 
 ## Code map
 
@@ -134,6 +171,27 @@ Generated web output under `src/main/resources/static/`, local workspaces, captu
 reports are ignored. Their source inputs and reproducible tools belong in Git.
 
 [Documentation](DOCS.md) · [Contributor instructions](AGENTS.md) · [Security](SECURITY.md)
+
+## BUILD verification boundaries
+
+BUILD tasks are accepted from deterministic build/test evidence on an exact workspace generation.
+New shared-kernel plans bootstrap once and can continue from a healthy baseline. Corrections retain
+the accepted task frontier and re-verify its required artifacts and tests. Unsupported shared-kernel
+runtime plans are rejected before approval. The deterministic bootstrap regression fixtures cover
+Python and non-HTTP Node JavaScript; full provider/runtime qualification remains separate.
+
+Local-hands BUILD submission is unavailable until client replies carry generation-bound acceptance
+and checkpoint receipts. Client capability discovery reports that restriction even when the local
+transport flag is enabled. Use remote BUILD execution for this path.
+
+Current runs persist their original design and continuation settings for recovery. A run lacking
+that immutable policy cannot resume through the new recovery path; start a fresh run rather than
+silently changing confirmation requirements. Historical artifacts remain readable.
+
+The local regression suites use deterministic provider substitutes and real build/test commands;
+PostgreSQL tests also exercise forward migrations and durable authority. Live provider end-to-end
+qualification requires an explicit API key and the reserved budget procedure above. No deployment
+or shared rollout flag is enabled by a local test.
 
 ## License
 

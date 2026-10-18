@@ -108,6 +108,28 @@ class RunValidationKickoff {
         reviewedWorkspaceGeneration);
   }
 
+  java.util.Optional<ValidationReport> generateCorrectionValidationReport(
+      ExecutionContext context,
+      ExecutionResult execution,
+      ReviewerResult review,
+      Plan plan,
+      String reviewedGeneration) {
+    if (context == null || context.verificationSandboxAuthority() == null) {
+      throw new IllegalStateException("VERIFICATION_SANDBOX_AUTHORITY_REQUIRED");
+    }
+    if (reviewedGeneration == null || reviewedGeneration.isBlank())
+      return java.util.Optional.empty();
+    return generateValidationReport(
+        context,
+        context.runId(),
+        execution,
+        review,
+        plan,
+        java.util.List.of(),
+        "correction-validation",
+        reviewedGeneration);
+  }
+
   /**
    * RL-2026-05-037 — overload accepting extra synthetic issues (breaking-change findings from the
    * contract gate) to append to the report's issue list so they surface in the run Issues panel.
@@ -170,7 +192,7 @@ class RunValidationKickoff {
       DeterministicHttpRequirementVerifier.Verification httpRequirementVerification =
           deterministicHttpRequirementVerifier.assertSatisfied(
               plan, run.getUserRequest(), workspace);
-      List<WorkerReport> provenanceClaims = workerProvenanceClaims(execResult);
+      List<WorkerReport> provenanceClaims = WorkerProvenanceClaims.from(execResult);
       RunChangeEvidenceService.ChangeEvidence changeEvidence =
           context == null
               ? runChangeEvidenceService.inspect(runId, provenanceClaims)
@@ -552,36 +574,6 @@ class RunValidationKickoff {
     return deterministicFailureCode == null || deterministicFailureCode.isBlank()
         ? "PARTIAL"
         : "FAILED";
-  }
-
-  private static List<WorkerReport> workerProvenanceClaims(ExecutionResult result) {
-    if (result == null || result.perTask() == null) return List.of();
-    java.util.regex.Pattern pathPattern =
-        java.util.regex.Pattern.compile("\\\"path\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
-    List<WorkerReport> claims = new java.util.ArrayList<>();
-    for (TaskOutcome outcome : result.perTask()) {
-      List<String> paths = new java.util.ArrayList<>();
-      for (var worker :
-          new com.navneet.executespec.engine.WorkerResult[] {
-            outcome.workerOutcome(), outcome.retryWorkerOutcome()
-          }) {
-        if (worker == null || worker.toolCallLog() == null) continue;
-        worker.toolCallLog().stream()
-            .filter(line -> line != null && line.endsWith("-> OK"))
-            .filter(line -> line.startsWith("writeFile(") || line.startsWith("editFile("))
-            .forEach(
-                line -> {
-                  java.util.regex.Matcher matcher = pathPattern.matcher(line);
-                  if (matcher.find()) paths.add(matcher.group(1));
-                });
-      }
-      WorkerReport claim = new WorkerReport();
-      claim.setTaskId(outcome.taskId());
-      claim.setFilesCreated(paths);
-      claim.setFilesModified(paths);
-      claims.add(claim);
-    }
-    return claims;
   }
 
   /** Compatibility seam retained for focused provenance tests. */

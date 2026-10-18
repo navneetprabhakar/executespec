@@ -152,6 +152,87 @@ public class RunLifecycleService {
         null);
   }
 
+  /** Compatibility constructor for callers predating exact recovery verification. */
+  public RunLifecycleService(
+      PipelineRunRepository runRepo,
+      AgentTaskRepository taskRepo,
+      SseBroadcaster broadcaster,
+      Metrics metrics,
+      GateStore gateStore,
+      RunControlPort controlPort,
+      AgentProperties agentProps,
+      ObjectMapper objectMapper,
+      PipelineExecutorPool pool,
+      SequentialExecutor executor,
+      ReviewerAgent reviewer,
+      RunCostTracker costTracker,
+      RunTokenAttributor tokenAttributor,
+      RunKeyContextStore keyContextStore,
+      WorkspaceRestoreService workspaceRestoreService,
+      RunPersistenceWriter persistenceWriter,
+      RunContextComposer contextComposer,
+      RunValidationKickoff validationKickoff,
+      ModelResolver modelResolver,
+      ValidationReportRepository validationReportRepository,
+      FeatureFlagService featureFlagService,
+      RemoteToolDispatcher remoteToolDispatcher,
+      OrgModelOverrideService orgModelOverrideService,
+      ModelRegistry modelRegistry,
+      OperationalReleasePolicy operationalReleasePolicy,
+      LlmExecutionPolicyFactory llmExecutionPolicyFactory,
+      PlanGateDecisionService planGateDecisionService,
+      PlanGateResumeStore planGateResumeStore,
+      RunLlmOperationLifecycleService runOperationLifecycle,
+      RunEffectiveRouteService effectiveRoutes,
+      com.navneet.executespec.contractsurface.BrownfieldHttpContractGuard
+          brownfieldHttpContractGuard,
+      CorrectionWorkspaceTransaction correctionWorkspaceTransaction,
+      ApprovedContinuationRouteAdmissionService approvedRouteAdmission,
+      CorrectionValidationAdmission correctionValidationAdmission,
+      com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
+          workspaceGenerationRecovery,
+      RunCancellationStore cancellationStore) {
+    this(
+        runRepo,
+        taskRepo,
+        broadcaster,
+        metrics,
+        gateStore,
+        controlPort,
+        agentProps,
+        objectMapper,
+        pool,
+        executor,
+        reviewer,
+        costTracker,
+        tokenAttributor,
+        keyContextStore,
+        workspaceRestoreService,
+        persistenceWriter,
+        contextComposer,
+        validationKickoff,
+        modelResolver,
+        validationReportRepository,
+        featureFlagService,
+        remoteToolDispatcher,
+        orgModelOverrideService,
+        modelRegistry,
+        operationalReleasePolicy,
+        llmExecutionPolicyFactory,
+        planGateDecisionService,
+        planGateResumeStore,
+        runOperationLifecycle,
+        effectiveRoutes,
+        brownfieldHttpContractGuard,
+        correctionWorkspaceTransaction,
+        approvedRouteAdmission,
+        correctionValidationAdmission,
+        workspaceGenerationRecovery,
+        cancellationStore,
+        null,
+        null);
+  }
+
   /**
    * Non-terminal status set used by the halt-all admin tool (M-010). Cheaper to query than scanning
    * every row; covers every status that {@link RunPipelineSupport#isTerminal(String)} rejects.
@@ -205,6 +286,8 @@ public class RunLifecycleService {
   private final com.navneet.executespec.workspacegeneration.WorkspaceGenerationRecoveryService
       workspaceGenerationRecovery;
   private final RunCancellationStore cancellationStore;
+  private final AcceptedGenerationVerificationRunner acceptedVerification;
+  private final BuildExecutionPolicyStore executionPolicies;
 
   public enum PlanApprovalOutcome {
     RESUME_QUEUED,
@@ -822,6 +905,7 @@ public class RunLifecycleService {
         return;
       }
       bindRunModelOverrides(row);
+      var executionPolicy = executionPolicies.require(runId);
       // Local-hands intent is durable; never fall back to server-side tools after a JVM restart.
       // A missing client therefore remains a bounded remote-tool wait/error, not an unsafe shell
       // execution. The feature flag is still an operator kill switch.
@@ -867,16 +951,13 @@ public class RunLifecycleService {
                       .enableSmokeTests(!localRun)
                       .localHandsMode(localRun)
                       .requireConfirmationBeforeExpensiveContinuation(
-                          continuation != null && continuation.requireContinuationConfirmation())
+                          executionPolicy.requireConfirmation())
                       .requireBenchmarkPriorForAutomaticContinuation(
-                          continuation != null && continuation.requireContinuationBenchmarkPrior())
+                          executionPolicy.requireBenchmark())
                       .routePinned(row.isRoutePinned())
-                      .lowComplexityWorkerStartTier(
-                          continuation == null
-                              ? null
-                              : continuation.lowComplexityWorkerStartTierOverride())
+                      .lowComplexityWorkerStartTier(executionPolicy.lowComplexityTier())
                       .originalGoal(row.getUserRequest())
-                      .designBlock(null) // not persisted on the row — runs without it on resume
+                      .designBlock(executionPolicy.designBlock())
                       .workspaceOrigin(
                           com.navneet.executespec.workspacegeneration.WorkspaceOriginResolver
                               .persistedOrHistorical(
@@ -954,18 +1035,26 @@ public class RunLifecycleService {
       operation =
           requireRunOperationLifecycle().claimReview(rootCtx, runId, provider, reviewerModel);
       ExecutionContext reviewContext = operation.context();
+      String frozenReviewerModel = reviewerModel;
       try {
         reviewResult =
-            reviewer.review(
-                InitialReviewerRequestPolicy.builder()
-                    .provider(provider)
-                    .model(reviewerModel)
-                    .context(reviewContext)
-                    .buildCommand(plan.buildCommand())
-                    .skipWiringPass(false)
-                    .originalGoal(row.getUserRequest())
-                    .requirements(plan.requirements())
-                    .build());
+            acceptedVerification.execute(
+                reviewContext,
+                "RECOVERY_REVIEWER",
+                disposableContext ->
+                    reviewer.review(
+                        InitialReviewerRequestPolicy.builder()
+                            .provider(provider)
+                            .model(frozenReviewerModel)
+                            .context(disposableContext)
+                            .buildCommand(plan.buildCommand())
+                            .skipWiringPass(false)
+                            .originalGoal(row.getUserRequest())
+                            .requirements(plan.requirements())
+                            .readOnly(true)
+                            .allowBuildManifestCreation(false)
+                            .approvedNewFiles(RunReviewerScope.approvedNewFiles(plan))
+                            .build()));
         persistenceWriter.persistReview(runId, reviewResult);
         operation = requireRunOperationLifecycle().completeAndClear(operation);
       } catch (Exception e) {
@@ -977,12 +1066,26 @@ public class RunLifecycleService {
           return;
         }
         log.warn("resume run={} reviewer failed — recording partial review", runId, e);
+        reviewResult =
+            ReviewerResult.builder().overall(ReviewerResult.Overall.REVIEW_FAILED).build();
         persistenceWriter.persistReviewFailure(runId, e);
         operation = requireRunOperationLifecycle().finishReviewAndClear(operation, true);
       }
 
+      ExecutionResult verifiedExecution = execResult;
+      ReviewerResult verifiedReview = reviewResult;
       var validationReport =
-          validationKickoff.generateValidationReport(runId, execResult, reviewResult, plan);
+          acceptedVerification.execute(
+              rootCtx,
+              "RECOVERY_VALIDATION",
+              disposableContext ->
+                  validationKickoff.generateValidationReport(
+                      disposableContext,
+                      verifiedExecution,
+                      verifiedReview,
+                      plan,
+                      List.of(),
+                      "recovery-validation"));
 
       String userRequest = row.getUserRequest();
       String prReviewComments = null; // not threaded for resumed runs
@@ -1456,13 +1559,13 @@ public class RunLifecycleService {
                   }
                   workspaceGenerationRecovery.assertAcceptedFrontier(
                       runId, rootCtx.workspaceRoot(), "APPROVED_CONTINUATION_VALIDATION");
-                  correctionValidationAdmission.regenerateAndAssertAcceptedGeneration(
-                      runId,
-                      result,
-                      reviewResult,
-                      plan,
-                      rootCtx.workspaceRoot(),
-                      postReviewerGeneration);
+                  String reviewedGeneration = postReviewerGeneration;
+                  acceptedVerification.execute(
+                      rootCtx,
+                      "APPROVED_CONTINUATION_VALIDATION",
+                      disposableContext ->
+                          correctionValidationAdmission.regenerateAndAssertAcceptedGeneration(
+                              disposableContext, result, reviewResult, plan, reviewedGeneration));
                 }
                 persistenceWriter.applyExecutionResultToTasks(runId, result);
                 if (reviewResult != null) {
@@ -1576,20 +1679,25 @@ public class RunLifecycleService {
     RunEffectiveRouteService.ReviewerAttemptFence reviewerFence =
         effectiveRoutes.captureReviewerAttemptFence(runId, callIndexFloor);
     try {
+      ExecutionContext acceptedReviewContext = reviewOperation.context();
       ReviewerResult reviewResult =
-          reviewer.review(
-              InitialReviewerRequestPolicy.builder()
-                  .provider(reviewerRoute.provider())
-                  .model(reviewerRoute.model())
-                  .strictProvider(true)
-                  .context(reviewOperation.context())
-                  .buildCommand(plan.buildCommand())
-                  .skipWiringPass(false)
-                  .readOnly(true)
-                  .originalGoal(
-                      runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
-                  .requirements(plan.requirements())
-                  .build());
+          acceptedVerification.execute(
+              acceptedReviewContext,
+              "APPROVED_CONTINUATION_REVIEWER",
+              disposableContext ->
+                  reviewer.review(
+                      InitialReviewerRequestPolicy.builder()
+                          .provider(reviewerRoute.provider())
+                          .model(reviewerRoute.model())
+                          .strictProvider(true)
+                          .context(disposableContext)
+                          .buildCommand(plan.buildCommand())
+                          .skipWiringPass(false)
+                          .readOnly(true)
+                          .originalGoal(
+                              runRepo.findById(runId).map(PipelineRun::getUserRequest).orElse(null))
+                          .requirements(plan.requirements())
+                          .build()));
       RunCostTracker.Snapshot afterReview = costTracker.snapshot(runId);
       RunEffectiveRouteService.AttemptRouteEvidence reviewerAttempt =
           effectiveRoutes.successfulReviewerAttemptAfter(reviewerFence);
@@ -2342,7 +2450,16 @@ public class RunLifecycleService {
     pool.submit(
         () -> {
           try {
-            validationKickoff.generateValidationReport(runId, null, null, null);
+            ExecutionContext context =
+                durableRunRootContext(runId, Path.of(agentProps.getWorkspace(), runId));
+            Plan plan = objectMapper.readValue(run.getPlanJson(), Plan.class);
+            ExecutionResult execution = persistenceWriter.reconstructExecResultFromTasks(runId);
+            acceptedVerification.execute(
+                context,
+                "RETRY_VALIDATION",
+                disposableContext ->
+                    validationKickoff.generateValidationReport(
+                        disposableContext, execution, null, plan, List.of(), "retry-validation"));
           } catch (Exception e) {
             log.error("RunOrchestrator retryValidation failed run={}", runId, e);
           }
@@ -2512,6 +2629,8 @@ public class RunLifecycleService {
       }
     }
 
+    Plan reviewPlan = parsedPlan;
+    String reviewBuildCommand = buildCommand;
     ReviewerResult reviewResult = null;
     boolean reviewFailed = false;
     try {
@@ -2522,20 +2641,27 @@ public class RunLifecycleService {
           reviewerModel.getModel(),
           buildCommand == null ? "(auto)" : buildCommand);
       reviewResult =
-          reviewer.review(
-              InitialReviewerRequestPolicy.builder()
-                  .provider(provider.name().toLowerCase())
-                  .model(reviewerModel.getModel())
-                  .context(rootCtx)
-                  .buildCommand(buildCommand)
-                  .skipWiringPass(false)
-                  .originalGoal(run.getUserRequest())
-                  .requirements(parsedPlan == null ? List.of() : parsedPlan.requirements())
-                  .build());
+          acceptedVerification.execute(
+              rootCtx,
+              "RE_REVIEW",
+              disposableContext ->
+                  reviewer.review(
+                      InitialReviewerRequestPolicy.builder()
+                          .provider(provider.name().toLowerCase())
+                          .model(reviewerModel.getModel())
+                          .context(disposableContext)
+                          .buildCommand(reviewBuildCommand)
+                          .skipWiringPass(false)
+                          .originalGoal(run.getUserRequest())
+                          .requirements(reviewPlan == null ? List.of() : reviewPlan.requirements())
+                          .readOnly(true)
+                          .allowBuildManifestCreation(false)
+                          .build()));
       persistenceWriter.persistReview(runId, reviewResult);
     } catch (Exception e) {
       reviewFailed = true;
       log.warn("RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
+      reviewResult = RunOrchestrator.reviewerFailedResult(e);
       persistenceWriter.persistReviewFailure(runId, e);
     } finally {
       requireRunOperationLifecycle().finishReviewAndClear(reviewOperation, reviewFailed);
@@ -2544,7 +2670,18 @@ public class RunLifecycleService {
     ExecutionResult execResult = persistenceWriter.reconstructExecResultFromTasks(runId);
 
     try {
-      validationKickoff.generateValidationReport(runId, null, reviewResult, null);
+      ReviewerResult finalReview = reviewResult;
+      acceptedVerification.execute(
+          rootCtx,
+          "RE_REVIEW_VALIDATION",
+          disposableContext ->
+              validationKickoff.generateValidationReport(
+                  disposableContext,
+                  execResult,
+                  finalReview,
+                  reviewPlan,
+                  List.of(),
+                  "re-review-validation"));
     } catch (Exception e) {
       log.warn(
           "RunOrchestrator reReview run={} report generation failed: {}", runId, e.getMessage());

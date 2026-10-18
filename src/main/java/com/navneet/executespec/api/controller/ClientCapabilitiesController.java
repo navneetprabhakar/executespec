@@ -39,7 +39,9 @@ public class ClientCapabilitiesController {
     // run endpoint then rejected — capability-driven clients read that as server drift.
     String authSource = resolveAuthSource(request);
     boolean pat = JwtAuthenticationFilter.AUTH_SOURCE_PAT.equals(authSource);
-    boolean currentRequestCanSubmitLocalHands = pat && localHandsEnabled;
+    // The transport flag cannot grant BUILD acceptance: local tool replies do not yet carry
+    // generation-bound verification/checkpoint receipts. Keep discovery aligned with admission.
+    boolean currentRequestCanSubmitLocalHands = false;
     return new ClientCapabilities(
         1,
         "agent-protocol-v2",
@@ -47,14 +49,19 @@ public class ClientCapabilitiesController {
         authSource,
         new LocalHands(
             true,
-            localHandsEnabled,
+            false,
             "PAT",
             pat,
             currentRequestCanSubmitLocalHands,
             "/api/runs",
             "/api/runs/{runId}/tool-results",
             List.of(
-                "Local-hands execution is accepted only for PAT-authenticated clients.",
+                localHandsEnabled
+                    ? "Local transport is enabled; BUILD submission still requires generation-bound"
+                        + " acceptance receipts."
+                    : "Local transport is disabled.",
+                "Use remote BUILD execution until local verification and checkpoint receipts are"
+                    + " supported.",
                 "The browser/JWT surface cannot submit local execution.")),
         new RemoteSandbox(
             true,

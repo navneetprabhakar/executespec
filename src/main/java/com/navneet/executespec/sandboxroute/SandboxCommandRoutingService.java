@@ -341,6 +341,10 @@ public class SandboxCommandRoutingService {
     return verificationRouter.execute(authority, argv, timeout);
   }
 
+  public void renewVerificationSessions() {
+    verificationRouter.renewSessions();
+  }
+
   /** Releases the physical runtime before its owned disposable workspace is deleted. */
   public void closeVerification(VerificationSandboxAuthority authority) {
     verificationRouter.close(authority);

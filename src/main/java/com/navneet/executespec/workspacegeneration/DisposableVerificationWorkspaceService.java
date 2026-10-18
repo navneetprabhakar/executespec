@@ -105,6 +105,7 @@ public class DisposableVerificationWorkspaceService {
               canonicalContext
                   .withWorkspaceRoot(disposable)
                   .withVerificationSandboxAuthority(sandbox));
+      sandbox.assertLive();
       FileSnapshot after = snapshot(disposable);
       authorityFence.run();
       String canonicalAfter = generations.captureGeneration(canonical);

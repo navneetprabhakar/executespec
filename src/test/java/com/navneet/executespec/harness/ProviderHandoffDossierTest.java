@@ -38,7 +38,11 @@ class ProviderHandoffDossierTest {
     assertThat(dossier.path("fromProvider").asText()).isEqualTo("anthropic");
     assertThat(dossier.path("toModel").asText()).isEqualTo("deepseek-v4");
     assertThat(ProviderHandoffDossier.recoveryNote(dossier))
-        .contains("CHANGE_PROVIDER", "Do not repeat the failed approach blindly");
+        .contains(
+            "CHANGE_PROVIDER",
+            "Do not repeat the failed approach blindly",
+            "missing import",
+            "UNTRUSTED_FROZEN_ACCEPTANCE_FAILURE");
   }
 
   @Test

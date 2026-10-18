@@ -22,6 +22,11 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class PipelineRun {
 
+  /** V403: immutable plan-bound BUILD inputs required for exact recovery. */
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  @Column(name = "build_execution_policy_json", columnDefinition = "jsonb")
+  private String buildExecutionPolicyJson;
+
   @Id private String runId; // UUID, set by harness
 
   @Column(columnDefinition = "TEXT")

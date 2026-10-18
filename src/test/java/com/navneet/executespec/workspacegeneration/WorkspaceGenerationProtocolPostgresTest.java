@@ -43,9 +43,9 @@ class WorkspaceGenerationProtocolPostgresTest {
     WorkspaceGenerationSchemaAttestor.Attestation schema =
         new WorkspaceGenerationSchemaAttestor(jdbc).attest();
     assertThat(schema.ready()).isTrue();
-    assertThat(schema.latestSuccessfulMigration()).isEqualTo("400");
+    assertThat(schema.latestSuccessfulMigration()).isEqualTo("403");
     assertThat(schema.artifacts())
-        .hasSize(62)
+        .hasSize(64)
         .allMatch(
             artifact ->
                 artifact.present()
@@ -58,9 +58,9 @@ class WorkspaceGenerationProtocolPostgresTest {
         .allMatch(ControlPlaneSchemaEvidenceExporter.AppliedMigration::success)
         .last()
         .extracting(ControlPlaneSchemaEvidenceExporter.AppliedMigration::version)
-        .isEqualTo("400");
+        .isEqualTo("403");
     assertThat(releaseSchema.definitions())
-        .hasSize(62)
+        .hasSize(64)
         .allMatch(
             definition ->
                 definition.present()
@@ -592,6 +592,13 @@ FROM workspace_generation_attempt WHERE id=?
         .rootCause()
         .hasMessageContaining("accepted workspace generation frontier is immutable");
 
+    jdbc.update(
+        "UPDATE agent_task SET status='COMPLETE',completed_at=NOW() WHERE task_id='run-v374_T1'");
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET"
+            + " task_transition_state='COMPLETED',task_transition_completed_at=NOW() WHERE id=?",
+        attemptId);
+
     UUID nextAttemptId = UUID.randomUUID();
     String nextCandidate = "6".repeat(64);
     String nextContract = "4".repeat(64);
@@ -665,6 +672,19 @@ FROM workspace_generation_attempt WHERE id=?
     // sequential BUILD attempt may be admitted.
     assertThat(operationReconciler.reconcile(nextAttemptId))
         .isEqualTo(WorkspaceGenerationOperationReconciler.Outcome.RECONCILED);
+
+    jdbc.update(
+        "UPDATE pipeline_run SET accepted_workspace_generation=?,accepted_task_index=1,"
+            + "accepted_generation_attempt_id=?,accepted_checkpoint_kind='GCS',"
+            + "accepted_checkpoint_key='gs://bucket/run-v374-next.zip',accepted_checkpoint_digest=?,accepted_checkpoint_completed_at=(SELECT"
+            + " checkpoint_completed_at FROM workspace_generation_attempt WHERE id=?) WHERE"
+            + " run_id=?",
+        nextCandidate,
+        nextAttemptId,
+        "7".repeat(64),
+        nextAttemptId,
+        runId);
+    assertAcceptedPrefixCorrection(jdbc, runId, workspaceToken, nextAttemptId, nextCandidate);
 
     assertThatThrownBy(
             () ->
@@ -878,6 +898,87 @@ VALUES (?,'run-v374','T3',2,1,'BUILD_TASK','ADMITTED','/tmp/run-v374',?,?)
                 Integer.class,
                 passingReceipt))
         .isZero();
+  }
+
+  private static void assertAcceptedPrefixCorrection(
+      JdbcTemplate jdbc,
+      String runId,
+      UUID workspaceToken,
+      UUID baseAttempt,
+      String baseGeneration) {
+    var frontier = new AcceptedWorkspaceFrontier(baseAttempt, 1, baseGeneration);
+    assertThatThrownBy(
+            () ->
+                WorkspaceGenerationPostgresFixture.insertPreparedCorrection(
+                    jdbc,
+                    UUID.randomUUID(),
+                    runId,
+                    "T1",
+                    0,
+                    2,
+                    workspaceToken,
+                    new AcceptedWorkspaceFrontier(baseAttempt, 1, "e".repeat(64)),
+                    "c".repeat(64)))
+        .rootCause()
+        .hasMessageContaining("accepted prefix changed");
+    UUID correction = UUID.randomUUID();
+    WorkspaceGenerationPostgresFixture.insertPreparedCorrection(
+        jdbc, correction, runId, "T1", 0, 2, workspaceToken, frontier, "c".repeat(64));
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "UPDATE workspace_generation_attempt SET frontier_task_index=0 WHERE id=?",
+                    correction))
+        .rootCause()
+        .hasMessageContaining("frontier binding is immutable");
+    String candidate = "9".repeat(64);
+    jdbc.update("UPDATE workspace_generation_attempt SET state='MUTATING' WHERE id=?", correction);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='VERIFYING',candidate_generation=? WHERE"
+            + " id=?",
+        candidate,
+        correction);
+    jdbc.update(
+        receiptInsert().replace("'FAILED',FALSE", "'PASSED',TRUE"),
+        UUID.randomUUID(),
+        correction,
+        candidate,
+        "c".repeat(64),
+        "5".repeat(64),
+        "6".repeat(64));
+    jdbc.update("UPDATE workspace_generation_attempt SET state='VERIFIED' WHERE id=?", correction);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='CHECKPOINTING' WHERE id=?", correction);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET"
+            + " checkpoint_kind='GCS',checkpoint_key='gs://bucket/correction.zip',"
+            + "checkpoint_generation=?,checkpoint_digest=?,checkpoint_storage_generation='fixture-generation',checkpoint_size_bytes=1024,checkpoint_crc32c='fixture-crc',checkpoint_etag='fixture-etag',checkpoint_completed_at=NOW()"
+            + " WHERE id=?",
+        candidate,
+        "7".repeat(64),
+        correction);
+    jdbc.update(
+        "UPDATE workspace_generation_attempt SET state='ACCEPTED',resolved_at=NOW() WHERE id=?",
+        correction);
+    jdbc.update(
+        "UPDATE pipeline_run SET accepted_workspace_generation=?,accepted_generation_attempt_id=?,"
+            + "accepted_checkpoint_key='gs://bucket/correction.zip',accepted_checkpoint_digest=?,accepted_checkpoint_completed_at=(SELECT"
+            + " checkpoint_completed_at FROM workspace_generation_attempt WHERE id=?) WHERE"
+            + " run_id=?",
+        candidate,
+        correction,
+        "7".repeat(64),
+        correction,
+        runId);
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT accepted_task_index,accepted_workspace_generation FROM pipeline_run WHERE"
+                    + " run_id=?",
+                runId))
+        .containsEntry("accepted_task_index", 1)
+        .containsEntry("accepted_workspace_generation", candidate);
+    assertThat(new WorkspaceGenerationOperationReconciler(jdbc).reconcile(correction))
+        .isEqualTo(WorkspaceGenerationOperationReconciler.Outcome.RECONCILED);
   }
 
   private static String receiptInsert() {
