@@ -96,14 +96,29 @@ reserve the same maximum in the ledger before dispatch. Reserve the UUID before 
 so the provider guard can match the first planner dispatch. The `build` scenario adds a generated Python library and independent held-out
 behavior checks inside a disposable strict sandbox.
 
-The default route is `DEEPSEEK/deepseek-v4-flash-native`. Set `E2E_PROVIDER` (case insensitive)
-and optionally `E2E_MODEL` to qualify another bounded route: `ANTHROPIC/claude-haiku-4-5-20251001`,
-`OPENAI/gpt-5.4-mini`, `GEMINI/gemini-3.5-flash-lite`, `OPENROUTER/deepseek-v4-flash`, or
-`FIREWORKS/deepseek-v4p1-flash-fw`. Other models are rejected before fixture startup. The reservation must
-match that exact provider/model/run tuple, and only that provider's credential is needed. This
-qualifies the selected route, not every model offered by the provider. If the platform Anthropic
-key requires workspace routing, set `ANTHROPIC_WORKSPACE_ID`; its header is attached only to that
-configured credential and is omitted for unrelated BYOK keys.
+The default route is `DEEPSEEK/deepseek-flash-native` (current V4.1 Flash). Set `E2E_PROVIDER`
+(case insensitive) and `E2E_MODEL` to one of these bounded current routes:
+
+| Provider | Primary fixture model | Secondary fixture model |
+| --- | --- | --- |
+| Anthropic | `claude-haiku-5-5` | `claude-sonnet-5-5` |
+| OpenAI | `gpt-6-luna` | `gpt-6.1-sol` |
+| Gemini | `gemini-3.8-flash` | `gemini-4-argon` |
+| DeepSeek | `deepseek-flash-native` | `deepseek-v4-pro-native` |
+| OpenRouter | `deepseek-v4.1-flash-1017` | `gemini-3.8-flash-or` |
+| Fireworks | `deepseek-v4p1-flash-1017-fw` | `glm-5p3-flash-fw` |
+
+The model catalog was refreshed against official documentation and authenticated discovery on
+2026-10-18. GPT-6 uses the Responses API with model-bound encrypted reasoning replay; other
+OpenAI-wire providers retain Chat Completions. New model entries are BYOK-only pending broader
+qualification; the canonical native Flash alias retains the existing managed/free eligibility. Gemini introductory pricing needs review before December 2026 (Argon) and
+January 2027 (Flash). Historical IDs remain readable for persisted runs.
+
+Other fixture models are rejected before startup. Each reservation must match the exact
+provider/model/run tuple, and only that provider's credential is needed. This qualifies the selected
+route, not every model offered by the provider. If the Anthropic key requires workspace routing,
+set `ANTHROPIC_WORKSPACE_ID`; its header is attached only to the matching configured platform key.
+
 
 Before reserving provider spend, validate the local toolchain with
 `docker/sandbox-toolchain/validate.sh <image-tag>`, push it to a registry, and set
@@ -119,13 +134,13 @@ without their separate scenario, key, and reservation. The preflight does not au
 ```bash
 export E2E_SCENARIO=happy
 export E2E_PROVIDER=DEEPSEEK
-export E2E_MODEL=deepseek-v4-flash-native
+export E2E_MODEL=deepseek-flash-native
 export E2E_COST_CAP_USD=0.10
 export E2E_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 export RESERVATION_ID="$(
   node scripts/provider-budget-ledger.mjs reserve \
     --provider deepseek \
-    --model deepseek-v4-flash-native \
+    --model deepseek-flash-native \
     --run "$E2E_RUN_ID" \
     --safe-max-usd 0.10
 )"
@@ -177,7 +192,8 @@ reports are ignored. Their source inputs and reproducible tools belong in Git.
 BUILD tasks are accepted from deterministic build/test evidence on an exact workspace generation.
 New shared-kernel plans bootstrap once and can continue from a healthy baseline. Corrections retain
 the accepted task frontier and re-verify its required artifacts and tests. Unsupported shared-kernel
-runtime plans are rejected before approval. The deterministic bootstrap regression fixtures cover
+runtime plans are rejected before approval. Python manifest-only bootstraps can use the declared
+project type and exact manifest path without repeating the language in task prose. The deterministic bootstrap regression fixtures cover
 Python and non-HTTP Node JavaScript; full provider/runtime qualification remains separate.
 
 Local-hands BUILD submission is unavailable until client replies carry generation-bound acceptance
@@ -192,6 +208,18 @@ The local regression suites use deterministic provider substitutes and real buil
 PostgreSQL tests also exercise forward migrations and durable authority. Live provider end-to-end
 qualification requires an explicit API key and the reserved budget procedure above. No deployment
 or shared rollout flag is enabled by a local test.
+
+Provider qualification also enforces explicit plan-task counts, maintained bootstrap configuration
+tests, artifact rebinding after plan repair, and PostgreSQL-compatible approval/resume money
+rounding. First-task retries require proven rollback to the initial workspace; publication still
+requires an accepted generation. Bounded Claude 5.5 classifier/accuracy calls use low-effort visible
+output settings while normal generation retains provider-default reasoning. Repository evidence
+preserves UTF-8 with legacy-encoding fallback, and read-only reviewers receive fresh server-run
+test evidence for the exact reviewed generation without receiving mutation tools. Explicitly
+requested text artifacts are included in assessment evidence, and quiet pytest results retain
+aggregate execution counts without fabricating per-test collection errors.
+The live library fixture checks fourteen independent ASCII and Unicode behavior cases, including
+lowercasing before ASCII filtering; passing only the generated candidate's own tests is insufficient.
 
 ## License
 

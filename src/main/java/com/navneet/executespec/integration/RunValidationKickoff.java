@@ -310,9 +310,10 @@ class RunValidationKickoff {
       com.navneet.executespec.smoketest.WorkspaceTestRunner.DetailedResult workspaceTestEvidence =
           null;
       String testsGenerationBefore =
-          correctionWorkspaceGeneration == null
-              ? null
-              : workspaceGenerationService.captureGeneration(workspace);
+          correctionWorkspaceGeneration != null
+                  || (context != null && context.verificationSandboxAuthority() != null)
+              ? workspaceGenerationService.captureGeneration(workspace)
+              : null;
       if (correctionWorkspaceGeneration != null
           && !correctionWorkspaceGeneration.equals(testsGenerationBefore)) {
         throw new IllegalStateException(
@@ -396,7 +397,9 @@ class RunValidationKickoff {
                 run.getUserRequest() == null ? "" : run.getUserRequest(),
                 plan == null ? java.util.List.of() : plan.requirements(),
                 deterministicReviewIssues,
-                validationContext == null ? null : validationContext.child("accuracy-assessment"));
+                validationContext == null ? null : validationContext.child("accuracy-assessment"),
+                ValidationAssessmentExecutionFacts.capture(
+                    context, plan, execResult, workspaceTestEvidence, testsGenerationBefore));
         review.setAccuracyReport(accuracy);
       } catch (Exception e) {
         log.warn("RunOrchestrator run={} accuracy assessment failed: {}", runId, e.getMessage());

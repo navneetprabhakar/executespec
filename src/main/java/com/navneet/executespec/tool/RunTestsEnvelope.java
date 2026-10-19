@@ -63,7 +63,7 @@ final class RunTestsEnvelope {
     Matcher sm = PYTEST_SUMMARY_LINE.matcher(output);
     while (sm.find()) summary = sm.group(1).trim();
     if (summary.isEmpty()) {
-      summary = exit == 0 ? "all passed" : "exit=" + exit;
+      summary = exit == 0 ? "test counts unavailable" : "exit=" + exit;
     }
     env.put("summary", summary);
     env.put("framework", "PYTEST");
@@ -83,15 +83,38 @@ final class RunTestsEnvelope {
       entry.put("message", msg == null ? "" : msg.trim());
     }
 
-    // For tests in the request that didn't appear in either list (e.g. collection error),
-    // mark them as "errored" so the LLM doesn't think they silently passed.
+    // Quiet pytest output normally omits individual node IDs. Aggregate positive execution
+    // counts are evidence that tests ran; omitted node IDs are not collection errors.
+    var counts =
+        com.navneet.executespec.smoketest.TestOutputParser.parse(
+            TestCommandResolver.Framework.PYTEST, output, exit);
+    boolean provenPassing =
+        exit == 0
+            && counts.isPresent()
+            && counts.get().getPassed() > 0
+            && counts.get().getFailed() == 0
+            && counts.get().getErrors() == 0;
+    if (counts.isPresent()) {
+      var count = counts.get();
+      env.put("tests_passed", count.getPassed());
+      env.put("tests_total", count.getTotalTests());
+      env.put("tests_failed", count.getFailed());
+      env.put("tests_errors", count.getErrors());
+      if (summary.equals("test counts unavailable")) summary = count.getPassed() + " passed";
+      env.put("summary", summary);
+    }
     java.util.Set<String> seen = new java.util.HashSet<>();
     for (JsonNode el : passed) seen.add(el.asText());
     for (JsonNode el : failed) seen.add(el.path("test_id").asText());
     ArrayNode errored = env.putArray("errored");
+    ArrayNode unverified = env.putArray("unreported_requested_ids");
     for (String id : requestedIds) {
-      if (!seen.contains(id)) errored.add(id);
+      if (!seen.contains(id)) {
+        if (provenPassing) unverified.add(id);
+        else errored.add(id);
+      }
     }
+    if (exit == 0 && passed.isEmpty() && !provenPassing) errored.add("PYTEST_EXECUTION_UNPROVEN");
 
     env.put("exit_code", exit);
     env.put("raw_tail", tailLines(output, RunTestsTool.RAW_TAIL_CHARS));

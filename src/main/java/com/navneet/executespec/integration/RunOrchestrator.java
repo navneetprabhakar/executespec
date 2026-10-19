@@ -2170,7 +2170,8 @@ public class RunOrchestrator implements RunControlPort {
           return;
         }
         log.error("RunOrchestrator run={} executor failed", runId, e);
-        terminate(runId, "FAILED", INTERNAL_ERROR_REASON, INTERNAL_ERROR_REASON, startedAt);
+        var diagnostic = RunFailureDiagnostic.from(e, INTERNAL_ERROR_REASON);
+        terminate(runId, "FAILED", diagnostic.code(), diagnostic.reason(), startedAt);
         return;
       }
       persistenceWriter.applyExecutionResultToTasks(runId, execResult);

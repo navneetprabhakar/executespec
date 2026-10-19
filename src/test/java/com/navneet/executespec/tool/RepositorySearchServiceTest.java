@@ -18,6 +18,19 @@ class RepositorySearchServiceTest {
   @TempDir Path root;
 
   @Test
+  void unicodeSearchMatchesTheActualUtf8SourceInsteadOfMojibake() throws Exception {
+    Files.writeString(root.resolve("test_main.py"), "assert slugify(\"İTEM\") == \"i-tem\"\n");
+    var result =
+        new RepositorySearchService()
+            .search(
+                root,
+                new RepositorySearchService.SearchRequest(
+                    "İTEM", RepositorySearchService.SearchMode.EXACT, true, null, null, 50, 0));
+    assertThat(result.hits()).hasSize(1);
+    assertThat(result.hits().getFirst().toString()).contains("İTEM").doesNotContain("Ä°TEM");
+  }
+
+  @Test
   void capturesRepositoryWideSnapshotWithoutFabricatedSearchTerm() throws Exception {
     Files.createDirectories(root.resolve("src"));
     Path source = root.resolve("src/Widget.java");

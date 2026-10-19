@@ -58,6 +58,16 @@ public class GreenfieldBaselinePlanner {
     }
 
     GreenfieldBaselinePlan.Kind kind = classify(requiredPaths, taskText(task));
+    if (kind == GreenfieldBaselinePlan.Kind.UNSUPPORTED
+        && plan != null
+        && "python".equalsIgnoreCase(plan.projectType())
+        && requiredPaths.stream()
+            .map(path -> Path.of(path).getFileName().toString())
+            .anyMatch(Set.of("requirements.txt", "pyproject.toml", "setup.cfg")::contains)) {
+      // A manifest-only bootstrap need not repeat the language in its prose. The declared Python
+      // project and its authoritative manifest identify the existing Python adapter together.
+      kind = GreenfieldBaselinePlan.Kind.PYTHON;
+    }
     Map<String, String> files =
         baselineFiles(kind, requiredPaths, HttpEndpointContract.from(task, plan));
     String runtimeSurface = runtimeSurface(kind, plan);

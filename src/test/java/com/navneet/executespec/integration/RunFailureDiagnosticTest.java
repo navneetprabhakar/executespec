@@ -10,6 +10,16 @@ import org.junit.jupiter.api.Test;
 class RunFailureDiagnosticTest {
 
   @Test
+  void unsupportedRuntimeHasAStableCustomerSafeReason() {
+    var failure =
+        new com.navneet.executespec.workspacegeneration.BuildPlanCapabilityPolicy
+            .UnsupportedRuntimeException("BUILD_PLAN_RUNTIME_UNSUPPORTED:T1:secret-path");
+    var diagnostic = RunFailureDiagnostic.from(failure, "INTERNAL_ERROR");
+    assertThat(diagnostic.code()).isEqualTo("BUILD_PLAN_RUNTIME_UNSUPPORTED");
+    assertThat(diagnostic.reason()).doesNotContain("secret-path");
+  }
+
+  @Test
   void preservesExactBrownfieldGateAcrossOuterPipelineUnwind() {
     var failure =
         new IllegalStateException(

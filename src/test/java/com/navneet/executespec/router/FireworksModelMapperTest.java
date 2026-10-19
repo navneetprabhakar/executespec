@@ -12,7 +12,11 @@ class FireworksModelMapperTest {
   void maps_fireworks_models_to_current_slugs() {
     assertThat(FireworksModelMapper.toSlug("deepseek-v4p1-flash-fw"))
         .isEqualTo("accounts/fireworks/models/deepseek-v4p1-flash");
-    assertThat(FireworksModelMapper.allowList()).hasSize(1);
+    assertThat(FireworksModelMapper.toSlug("deepseek-v4p1-flash-1017-fw"))
+        .isEqualTo("accounts/fireworks/models/deepseek-v4p1-flash-1017");
+    assertThat(FireworksModelMapper.toSlug("glm-5p3-flash-fw"))
+        .isEqualTo("accounts/fireworks/models/glm-5p3-flash");
+    assertThat(FireworksModelMapper.allowList()).hasSize(3);
   }
 
   @Test

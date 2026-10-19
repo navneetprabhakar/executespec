@@ -57,6 +57,6 @@ class SmartClassifierCacheKeyTest {
   @Test
   void keyIsNamespacedByClassifierPolicyVersion() throws Exception {
     assertThat(key("spec", List.of("r"), "p", "web", LlmProvider.ANTHROPIC, "mem"))
-        .startsWith("planner:classify:v3:");
+        .startsWith("planner:classify:v4:");
   }
 }

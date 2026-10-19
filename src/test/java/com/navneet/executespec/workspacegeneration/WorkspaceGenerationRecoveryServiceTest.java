@@ -49,6 +49,54 @@ class WorkspaceGenerationRecoveryServiceTest {
   @TempDir Path temp;
 
   @Test
+  void restoredInitialGenerationPermitsRetryButNeverPublication() throws Exception {
+    Path root = temp.resolve("initial-retry");
+    Files.createDirectories(root);
+    init(root);
+    Files.writeString(root.resolve("manifest.txt"), "baseline");
+    commit(root, "baseline");
+    String generation = new CorrectionWorkspaceTransaction().captureGeneration(root);
+    var attempts = mock(WorkspaceGenerationAttemptRepository.class);
+    var runs = mock(PipelineRunRepository.class);
+    var run =
+        PipelineRun.builder()
+            .runId("initial-retry")
+            .runMode("BUILD")
+            .acceptedTaskIndex(-1)
+            .acceptedWorkspaceGeneration(generation)
+            .build();
+    var rolledBack =
+        WorkspaceGenerationAttempt.builder()
+            .id(UUID.randomUUID())
+            .runId(run.getRunId())
+            .taskIndex(0)
+            .attemptKind(WorkspaceGenerationKind.BUILD_TASK)
+            .state(WorkspaceGenerationState.ROLLED_BACK)
+            .beforeGeneration(generation)
+            .resolvedAt(Instant.now())
+            .beforeCheckpointCompletedAt(Instant.now())
+            .beforeCheckpointKey("local:checkpoint")
+            .beforeCheckpointDigest("a".repeat(64))
+            .taskTransitionState("COMPLETED")
+            .operationTransitionState("COMPLETED")
+            .build();
+    when(runs.findById(run.getRunId())).thenReturn(Optional.of(run));
+    when(attempts.findTop20ByRunIdOrderByCreatedAtDesc(run.getRunId()))
+        .thenReturn(List.of(rolledBack));
+    var recovery = recovery(attempts, runs);
+    recovery.assertContinuationFrontier(run.getRunId(), root);
+    assertThatThrownBy(() -> recovery.assertAcceptedFrontier(run.getRunId(), root))
+        .hasMessage("WORKSPACE_GENERATION_FRONTIER_MISMATCH");
+    rolledBack.setOperationTransitionState("PENDING");
+    assertThatThrownBy(() -> recovery.assertContinuationFrontier(run.getRunId(), root))
+        .hasMessage("WORKSPACE_GENERATION_INITIAL_RETRY_UNPROVEN");
+    rolledBack.setOperationTransitionState("COMPLETED");
+    Files.writeString(root.resolve("manifest.txt"), "unaccepted mutation");
+    assertThatThrownBy(() -> recovery.assertContinuationFrontier(run.getRunId(), root))
+        .hasMessage("WORKSPACE_GENERATION_INITIAL_RETRY_UNPROVEN");
+  }
+
+  @Test
   void acceptedFrontierRequiresTheExactDedicatedCheckpointReceipt() {
     String runId = "run-frontier-receipt";
     UUID attemptId = UUID.randomUUID();

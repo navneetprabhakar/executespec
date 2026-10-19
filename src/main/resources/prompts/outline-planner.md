@@ -265,3 +265,12 @@ The plan schema:
 {{PR_REVIEW_COMMENTS}}
 
 Now call `submitOutline` with your plan.
+
+## Explicit decomposition and bootstrap verification
+
+If the customer explicitly requests a number of plan tasks, preserve that count and sequence.
+A Python bootstrap task must own the dependency manifest and maintained pytest configuration tests
+in touchesFiles. Test the manifest/configuration without importing future feature modules.
+Later feature tasks implement the behavior and add its functional tests. Server-owned acceptance
+tests do not count as repository-owned candidate tests. Do not emit a manifest-only bootstrap
+with no owned tests: it cannot meet the server's TEST acceptance contract.

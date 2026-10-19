@@ -20,6 +20,38 @@ class GreenfieldBaselineServiceTest {
   private final GreenfieldBaselineService service = new GreenfieldBaselineService();
 
   @Test
+  void declaredPythonManifestBootstrapDoesNotDependOnLanguageWordsInTaskProse() {
+    for (String manifest : List.of("requirements.txt", "pyproject.toml", "setup.cfg")) {
+      PlannedTask scaffold = task("Configure dependencies and checks", List.of(manifest));
+      Plan approved = Plan.builder().projectType("python").tasks(List.of(scaffold)).build();
+
+      GreenfieldBaselinePlan baseline =
+          service.plan(workspace, scaffold, approved, WorkspaceOrigin.GREENFIELD);
+
+      assertThat(baseline.kind()).isEqualTo(GreenfieldBaselinePlan.Kind.PYTHON);
+      assertThat(baseline.supported()).isTrue();
+      assertThat(baseline.requiredTaskPaths()).containsExactly(manifest);
+      assertThat(baseline.filesToCreate()).containsKey(".executespec/bootstrap/test_acceptance.py");
+    }
+    assertThat(workspace).isEmptyDirectory();
+  }
+
+  @Test
+  void projectLabelAloneDoesNotQualifyAmbiguousOrConflictingBootstrapOutputs() {
+    for (String output : List.of("README.md", "requirements.txt.bak", "app.ts")) {
+      PlannedTask scaffold = task("Configure dependencies and checks", List.of(output));
+      Plan approved = Plan.builder().projectType("python").tasks(List.of(scaffold)).build();
+      assertThat(
+              service.plan(workspace, scaffold, approved, WorkspaceOrigin.GREENFIELD).supported())
+          .isFalse();
+    }
+    PlannedTask scaffold = task("Configure dependencies and checks", List.of("requirements.txt"));
+    Plan unknown = Plan.builder().projectType("unknown").tasks(List.of(scaffold)).build();
+    assertThat(service.plan(workspace, scaffold, unknown, WorkspaceOrigin.GREENFIELD).supported())
+        .isFalse();
+  }
+
+  @Test
   void laterFeatureAndDocumentationTasksReuseTheQualifiedBootstrap() throws Exception {
     PlannedTask scaffold = task("Bootstrap Python library", List.of("main.py", "requirements.txt"));
     PlannedTask feature =

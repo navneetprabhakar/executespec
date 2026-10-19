@@ -144,7 +144,9 @@ test("authorizes only the exact reserved provider, model, and run scope", () => 
 
 test("denies a request whose safe maximum exceeds provider headroom", () => {
   assert.equal(run("init").status, 0);
-  assert.equal(reserve("openrouter", "9.75").status, 0);
+  const initialized = JSON.parse(fs.readFileSync(ledger, "utf8"));
+  const capUsd = initialized.providers.openrouter.capMicros / 1_000_000;
+  assert.equal(reserve("openrouter", String(capUsd - 0.25)).status, 0);
   const denied = reserve("openrouter", "0.250001");
   assert.equal(denied.status, 2);
   assert.match(denied.stderr, /Budget denied/);
@@ -191,6 +193,9 @@ test("rounds every positive sub-micro-dollar reservation upward", () => {
 
 test("concurrent reservations cannot both consume the same remaining headroom", async () => {
   assert.equal(run("init").status, 0);
+  const initialized = JSON.parse(fs.readFileSync(ledger, "utf8"));
+  const amountMicros = Math.floor(initialized.providers.openai.capMicros / 2) + 1_000_000;
+  const amountUsd = String(amountMicros / 1_000_000);
   const args = [
     script,
     "reserve",
@@ -201,7 +206,7 @@ test("concurrent reservations cannot both consume the same remaining headroom", 
     "--run",
     "parallel",
     "--safe-max-usd",
-    "6",
+    amountUsd,
   ];
   const environment = {
     ...process.env,
@@ -216,5 +221,6 @@ test("concurrent reservations cannot both consume the same remaining headroom", 
   const results = await Promise.all([invoke(), invoke()]);
   assert.equal(results.filter((code) => code === 0).length, 1);
   const persisted = JSON.parse(fs.readFileSync(ledger, "utf8"));
-  assert.equal(persisted.providers.openai.reservedMicros, 6_000_000);
+  assert.equal(persisted.providers.openai.reservedMicros, amountMicros);
+  assert.equal(reserve("openai", amountUsd).status, 2);
 });

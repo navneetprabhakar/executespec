@@ -32,6 +32,22 @@ public class AnthropicAttemptModelFactory {
   /** Package-private base-URL seam for transport-level tests. */
   AnthropicChatModel create(
       String apiKey, String model, Integer maxTokens, int readTimeoutSeconds, String baseUrl) {
+    return create(apiKey, model, maxTokens, readTimeoutSeconds, baseUrl, false);
+  }
+
+  public AnthropicChatModel createMetadata(
+      String apiKey, String model, Integer maxTokens, int readTimeoutSeconds) {
+    return create(
+        apiKey, model, maxTokens, readTimeoutSeconds, AnthropicApi.DEFAULT_BASE_URL, true);
+  }
+
+  AnthropicChatModel create(
+      String apiKey,
+      String model,
+      Integer maxTokens,
+      int readTimeoutSeconds,
+      String baseUrl,
+      boolean boundedMetadata) {
     if (apiKey == null || apiKey.isBlank()) {
       throw new IllegalStateException("Anthropic api-key not configured");
     }
@@ -47,6 +63,23 @@ public class AnthropicAttemptModelFactory {
     requestFactory.setReadTimeout(readTimeout);
     RestClient.Builder restClient =
         workspaceHeaders.apply(RestClient.builder().requestFactory(requestFactory), apiKey);
+    var overrides =
+        boundedMetadata
+            ? AnthropicModelOptions.metadataOverrides(model)
+            : java.util.Map.<String, Object>of();
+    if (!overrides.isEmpty()) {
+      // Spring AI 1.1 cannot encode Sonnet's between_tools enum. Restrict this wire extension to
+      // the already-admitted metadata attempt; retain the same auth, deadlines and billing seam.
+      restClient.requestInterceptor(
+          (request, body, execution) -> {
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            var payload = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(body);
+            overrides.forEach((key, value) -> payload.set(key, mapper.valueToTree(value)));
+            byte[] encoded = mapper.writeValueAsBytes(payload);
+            request.getHeaders().setContentLength(encoded.length);
+            return execution.execute(request, encoded);
+          });
+    }
     AnthropicApi api =
         AnthropicApi.builder()
             .apiKey(apiKey)

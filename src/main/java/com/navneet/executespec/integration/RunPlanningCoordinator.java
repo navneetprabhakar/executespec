@@ -671,7 +671,10 @@ class RunPlanningCoordinator {
       PlannerRecoveryRouteSelector.Policy recoveryPolicy) {
     Plan normalized = TaskExpanderAgent.normalizeFinalPlan(candidate);
     try {
-      return TaskExecutionBriefCompiler.compileExecutable(normalized, req.spec());
+      return TaskExecutionBriefCompiler.compileExecutable(
+          com.navneet.executespec.agent.SingleShotArtifactContract.bindRequiredPaths(
+              normalized, req.spec()),
+          req.spec());
     } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException firstRejection) {
       persistRejectedPlanDiagnostic(runId, normalized);
       List<String> violations =
@@ -723,7 +726,10 @@ class RunPlanningCoordinator {
 
       Plan repairedCandidate = TaskExpanderAgent.normalizeFinalPlan(repaired.patchedPlan());
       try {
-        return TaskExecutionBriefCompiler.compileExecutable(repairedCandidate, req.spec());
+        return TaskExecutionBriefCompiler.compileExecutable(
+            com.navneet.executespec.agent.SingleShotArtifactContract.bindRequiredPaths(
+                repairedCandidate, req.spec()),
+            req.spec());
       } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException exhausted) {
         persistRejectedPlanDiagnostic(runId, repairedCandidate);
         List<String> remaining =
@@ -797,7 +803,10 @@ class RunPlanningCoordinator {
     }
     Plan escalatedCandidate = TaskExpanderAgent.normalizeFinalPlan(escalated.patchedPlan());
     try {
-      return TaskExecutionBriefCompiler.compileExecutable(escalatedCandidate, req.spec());
+      return TaskExecutionBriefCompiler.compileExecutable(
+          com.navneet.executespec.agent.SingleShotArtifactContract.bindRequiredPaths(
+              escalatedCandidate, req.spec()),
+          req.spec());
     } catch (TaskExecutionBriefCompiler.ExecutablePlanContractException finalRejection) {
       persistRejectedPlanDiagnostic(runId, escalatedCandidate);
       throw new PlannerRecoveryPolicyBlockedException(

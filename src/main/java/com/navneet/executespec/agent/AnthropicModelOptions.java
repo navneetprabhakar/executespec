@@ -7,7 +7,13 @@ import java.util.Set;
 public final class AnthropicModelOptions {
 
   private static final Set<String> TEMPERATURE_DEPRECATED_PREFIXES =
-      Set.of("claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-5", "claude-fable-5");
+      Set.of(
+          "claude-opus-4-7",
+          "claude-opus-4-8",
+          "claude-sonnet-5",
+          "claude-fable-5",
+          "claude-opus-5",
+          "claude-haiku-5");
 
   private AnthropicModelOptions() {}
 
@@ -15,6 +21,22 @@ public final class AnthropicModelOptions {
     if (model == null || model.isBlank()) return false;
     String normalized = model.toLowerCase(Locale.ROOT);
     return TEMPERATURE_DEPRECATED_PREFIXES.stream().anyMatch(normalized::startsWith);
+  }
+
+  /** Bounded metadata calls need visible JSON rather than exhausting their budget on thinking. */
+  static java.util.Map<String, Object> metadataOverrides(String model) {
+    if (model == null) return java.util.Map.of();
+    String normalized = model.toLowerCase(Locale.ROOT);
+    String thinking;
+    if (normalized.startsWith("claude-sonnet-5-5")) thinking = "between_tools";
+    else if (normalized.startsWith("claude-haiku-5-5") || normalized.startsWith("claude-opus-5-5"))
+      thinking = "disabled";
+    else return java.util.Map.of();
+    return java.util.Map.of(
+        "thinking",
+        java.util.Map.of("type", thinking),
+        "output_config",
+        java.util.Map.of("effort", "low"));
   }
 
   public static boolean isTemperatureDeprecatedError(Throwable ex) {

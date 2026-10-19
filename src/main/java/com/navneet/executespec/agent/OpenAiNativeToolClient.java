@@ -165,11 +165,16 @@ public class OpenAiNativeToolClient {
     // a
     // 404 on `/v1/v1/chat/completions`. Append only the remainder when the base already carries
     // `/v1`.
+    boolean responses = OpenAiResponsesAdapter.required(request.model(), effectiveBaseUrl);
     String completionsPath =
         effectiveBaseUrl.replaceAll("/+$", "").endsWith("/v1")
             ? "/chat/completions"
             : CHAT_COMPLETIONS_PATH;
+    if (responses)
+      completionsPath =
+          effectiveBaseUrl.replaceAll("/+$", "").endsWith("/v1") ? "/responses" : "/v1/responses";
     ObjectNode body = buildRequestBody(request);
+    if (responses) body = OpenAiResponsesAdapter.request(objectMapper, body, request);
     log.info(
         "OpenAI-wire POST {} model={} tools={}",
         effectiveBaseUrl + completionsPath,
@@ -184,7 +189,7 @@ public class OpenAiNativeToolClient {
     // Streaming replaces one ambiguous deadline with a time-to-first-token signal that can actually
     // distinguish "not answering" from "answering slowly". The assembled body is byte-compatible
     // with the non-streaming shape, so parseResponse and every billing field below are unchanged.
-    if (streamingPolicy != null && streamingPolicy.openAiWireEnabled()) {
+    if (!responses && streamingPolicy != null && streamingPolicy.openAiWireEnabled()) {
       JsonNode streamed =
           OpenAiWireStreamTransport.stream(
               client,
@@ -251,7 +256,9 @@ public class OpenAiNativeToolClient {
     if (response == null) {
       throw new IllegalStateException("OpenAI returned empty response body");
     }
-    return parseResponse(response, request.model());
+    return parseResponse(
+        responses ? OpenAiResponsesAdapter.response(objectMapper, response) : response,
+        request.model());
   }
 
   /**
@@ -358,7 +365,10 @@ public class OpenAiNativeToolClient {
   }
 
   private static boolean rejectsSamplingTemperature(String model) {
-    return model != null && model.startsWith("gpt-5.6-");
+    return model != null
+        && (model.startsWith("gpt-5.6-")
+            || model.startsWith("gpt-6-")
+            || model.startsWith("gpt-6.1-"));
   }
 
   static boolean supportsToolChoice(OpenAiToolCallRequest request) {
@@ -445,6 +455,15 @@ public class OpenAiNativeToolClient {
         properties = java.util.Map.of(REASONING_CONTENT_META_KEY, reasoningNode.asText());
       }
 
+      if (message.has(OpenAiResponsesAdapter.OUTPUT)) {
+        properties = new java.util.HashMap<>(properties == null ? java.util.Map.of() : properties);
+        properties.put(
+            OpenAiResponsesAdapter.OUTPUT,
+            objectMapper.convertValue(
+                message.get(OpenAiResponsesAdapter.OUTPUT), java.util.List.class));
+        properties.put(
+            OpenAiResponsesAdapter.MODEL, message.path(OpenAiResponsesAdapter.MODEL).asText());
+      }
       AssistantMessage.Builder builder =
           AssistantMessage.builder().content(content).toolCalls(toolCalls);
       if (properties != null) builder.properties(properties);

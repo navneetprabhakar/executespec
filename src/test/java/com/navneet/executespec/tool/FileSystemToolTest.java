@@ -27,6 +27,25 @@ class FileSystemToolTest {
     Files.createDirectories(tempDir.resolve("test-run"));
   }
 
+  @Test
+  void utf8SourceAndLineRangesPreserveUnicodeTestLiterals() throws Exception {
+    String source = "assert slugify(\"İTEM\") == \"i-tem\"\n# Café 東京 Straße\n";
+    Files.writeString(tempDir.resolve("test-run/test_main.py"), source);
+    assertThat(fsTool.readFile("test-run", "test_main.py")).isEqualTo(source);
+    assertThat(fsTool.readFileRange("test-run", "test_main.py", 1, 2))
+        .contains("İTEM", "Café 東京 Straße")
+        .doesNotContain("Ä°TEM");
+  }
+
+  @Test
+  void legacyLatin1SourceRemainsReadableWithoutCorruptingUtf8() throws Exception {
+    Files.write(
+        tempDir.resolve("test-run/legacy.py"),
+        "# café\n".getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+    assertThat(fsTool.readFile("test-run", "legacy.py")).isEqualTo("# café\n");
+    assertThat(fsTool.readFileRange("test-run", "legacy.py", 1, 1)).contains("café");
+  }
+
   @Nested
   @DisplayName("Workspace files are readable (no credential blocking)")
   class WorkspaceFilesReadable {

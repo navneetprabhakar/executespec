@@ -387,15 +387,7 @@ public class RepositorySearchService {
         if (previous != null && previous.contentHash.equals(contentHash)) {
           return previous.lines;
         }
-        // Decode with ISO-8859-1, which maps every byte 0..255 and NEVER throws. The prior
-        // strict-UTF-8 readAllLines threw MalformedInputException on any latin-1 / UTF-16 /
-        // Windows-1252 / stray-byte source file; that IOException was caught below and turned into
-        // a
-        // null → the file was silently dropped from EVERY search, so the model concluded a symbol
-        // did not exist and wrote a duplicate. ASCII patterns (the overwhelming majority of code
-        // search) still match byte-for-byte; the content-hash fence below is a byte digest and is
-        // unaffected by the decode charset.
-        List<String> current = Files.readAllLines(file, StandardCharsets.ISO_8859_1);
+        List<String> current = RepositoryTextCodec.lines(file);
         String afterReadHash = contentHash(file);
         if (!contentHash.equals(afterReadHash)) {
           removeSnapshot(file);

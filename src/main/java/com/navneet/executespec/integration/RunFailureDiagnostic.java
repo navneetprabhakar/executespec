@@ -23,6 +23,15 @@ record RunFailureDiagnostic(String code, String reason) {
     while (!pending.isEmpty() && seen.size() < 32) {
       Throwable cursor = pending.removeFirst();
       if (!seen.add(cursor)) continue;
+      if (cursor
+          instanceof
+          com.navneet.executespec.workspacegeneration.BuildPlanCapabilityPolicy
+              .UnsupportedRuntimeException) {
+        return new RunFailureDiagnostic(
+            "BUILD_PLAN_RUNTIME_UNSUPPORTED",
+            "The generated plan does not match a qualified BUILD runtime; revise the plan before"
+                + " execution.");
+      }
       if (cursor instanceof BrownfieldHttpContractGuard.ContractCompatibilityException contract) {
         return new RunFailureDiagnostic(contract.code(), contract.getMessage());
       }

@@ -2,12 +2,14 @@
   "schemaVersion": 1,
   "currency": "USD",
   "providers": {
-    "anthropic": 10,
-    "openai": 10,
-    "gemini": 10,
+    "anthropic": 11,
+    "openai": 12,
+    "gemini": 9,
     "deepseek": 10,
-    "openrouter": 10,
+    "openrouter": 8,
     "fireworks": 10
   },
-  "forbiddenProviders": ["sarvam"]
+  "forbiddenProviders": [
+    "sarvam"
+  ]
 }

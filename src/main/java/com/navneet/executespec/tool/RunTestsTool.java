@@ -181,7 +181,7 @@ public class RunTestsTool implements Tool {
     },
     "command": {
       "type": "string",
-      "description": "Advanced: run this exact test command instead (must start with a known runner: pytest / go test / npm test / cargo test / mvn / gradle). Use only when the framework filters above cannot express what you need."
+      "description": "Advanced: run this exact test command instead (must start with a known runner: pytest / go test / npm test / cargo test / mvn / gradle). Mutually exclusive with tests/test_ids. Use only when the framework filters above cannot express what you need."
     },
     "timeoutSeconds": {
       "type": "integer",
@@ -220,6 +220,13 @@ public class RunTestsTool implements Tool {
     }
     String commandOverride =
         args.hasNonNull("command") ? args.get("command").asText("").trim() : "";
+
+    if (!commandOverride.isEmpty() && !testIds.isEmpty()) {
+      return ToolResult.err(
+          ToolResult.ErrorKind.INVALID_ARGS,
+          "command and tests/test_ids are mutually exclusive; choose an exact command or structured"
+              + " test selectors");
+    }
 
     // ---- resolve framework from workspace markers (bind-mounted, so container runs resolve
     // host-side too). Pytest-shaped ids force PYTEST even without markers (legacy behavior). ----

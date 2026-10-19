@@ -42,9 +42,9 @@ class ProviderModelCatalogConfigurationTest {
             "kimi-k2.7-code-fw");
 
     assertThat(map(providers.get("fireworks")))
-        .containsEntry("planning", "deepseek-v4p1-flash-fw")
-        .containsEntry("workhorse", "deepseek-v4p1-flash-fw")
-        .containsEntry("lightweight", "deepseek-v4p1-flash-fw");
+        .containsEntry("planning", "deepseek-v4p1-flash-1017-fw")
+        .containsEntry("workhorse", "deepseek-v4p1-flash-1017-fw")
+        .containsEntry("lightweight", "deepseek-v4p1-flash-1017-fw");
     assertThat(aliases).containsEntry("gpt-5.5-mini", "gpt-5.6-luna");
     assertThat(models.keySet())
         .contains("deepseek-v4p1-flash-fw")
@@ -59,6 +59,50 @@ class ProviderModelCatalogConfigurationTest {
           .as("managed AI must remain metered for %s", conservativelyPricedModel)
           .containsEntry("managed-ai-enabled", true);
     }
+  }
+
+  @Test
+  void currentRoutesHaveExplicitMetadataAndVerifiedGatewayMappings() throws Exception {
+    var matrix = map(loadYaml().get("model-matrix"));
+    var models = normalizedKeys(map(matrix.get("models")));
+    var providers = map(matrix.get("providers"));
+    assertThat(map(matrix.get("free-tier"))).containsEntry("model", "deepseek-flash-native");
+    assertThat(map(models.get("deepseek-flash-native"))).containsEntry("managed-ai-enabled", true);
+    assertThat(map(map(models.get("deepseek-v4-flash-native")).get("pricing")))
+        .containsEntry("input-per-1m", 0.30);
+    for (String model :
+        java.util.List.of(
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
+            "gpt-6.1-sol",
+            "gpt-6-luna",
+            "gemini-4-argon",
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-or",
+            "deepseek-v4.1-flash-1017",
+            "deepseek-v4p1-flash-1017-fw",
+            "glm-5p3-flash-fw")) {
+      assertThat(map(models.get(model))).containsEntry("managed-ai-enabled", false);
+      assertThat(map(models.get(model)).get("context-limit")).isInstanceOf(Number.class);
+      assertThat(map(models.get(model)).get("max-output-tokens")).isInstanceOf(Number.class);
+    }
+    assertThat(map(providers.get("anthropic"))).containsEntry("workhorse", "claude-sonnet-5-5");
+    assertThat(map(providers.get("openai"))).containsEntry("workhorse", "gpt-6.1-sol");
+    assertThat(map(providers.get("gemini"))).containsEntry("workhorse", "gemini-3.8-flash");
+    assertThat(map(providers.get("deepseek")))
+        .containsEntry("lightweight", "deepseek-flash-native");
+    assertThat(OpenRouterModelMapper.toSlug("deepseek-v4.1-flash-1017"))
+        .isEqualTo("deepseek/deepseek-v4.1-flash-1017");
+    assertThat(OpenRouterModelMapper.toSlug("gemini-3.8-flash-or"))
+        .isEqualTo("google/gemini-3.8-flash");
+    assertThat(FireworksModelMapper.toSlug("deepseek-v4p1-flash-1017-fw"))
+        .isEqualTo("accounts/fireworks/models/deepseek-v4p1-flash-1017");
+    assertThat(FireworksModelMapper.toSlug("glm-5p3-flash-fw"))
+        .isEqualTo("accounts/fireworks/models/glm-5p3-flash");
+    assertThat(map(map(models.get("gemini-3.8-flash")).get("pricing")))
+        .containsEntry("input-per-1m", 0.75);
+    assertThat(map(map(models.get("gemini-3.8-flash-or")).get("pricing")))
+        .containsEntry("input-per-1m", 0.825);
   }
 
   private static Map<String, Object> loadYaml() throws Exception {

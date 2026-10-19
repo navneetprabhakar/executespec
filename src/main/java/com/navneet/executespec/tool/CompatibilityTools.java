@@ -1128,10 +1128,7 @@ final class LspFallbackTool implements Tool {
       }
       String text;
       try {
-        // ISO-8859-1 maps every byte and never throws; the previous strict-UTF-8 readString threw
-        // (and was swallowed) on any latin-1 / UTF-16 / stray-byte file, dropping its references
-        // silently. ASCII identifier search is unaffected.
-        text = Files.readString(file, java.nio.charset.StandardCharsets.ISO_8859_1);
+        text = RepositoryTextCodec.read(file);
       } catch (Exception ignored) {
         unreadableSkipped++;
         continue;

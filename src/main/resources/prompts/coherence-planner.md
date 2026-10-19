@@ -178,3 +178,10 @@ Full assembled plan (tasks with descriptions, hardConstraints, meetsRequirements
   mapped translation is part of the contract.
 
 Produce the patch list now.
+
+- `ADD_BOOTSTRAP_FILE` — { taskId, to, reason }. Adds a missing Python dependency manifest or
+  maintained pytest configuration-test path to a bootstrap task's touchesFiles (maximum 24).
+  Allowed files are requirements.txt, pyproject.toml, setup.cfg, test_*.py, or *_test.py.
+  Absolute/traversal/server-owned paths and production modules are forbidden. Use this with
+  REPLACE_DESCRIPTION_TEXT when repairing a manifest-only bootstrap: require configuration
+  assertions without importing future feature modules. This changes hints, not artifact authority.
