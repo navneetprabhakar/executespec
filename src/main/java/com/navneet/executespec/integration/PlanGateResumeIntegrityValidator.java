@@ -1,6 +1,5 @@
 package com.navneet.executespec.integration;
 
-import java.math.BigDecimal;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -199,19 +198,11 @@ class PlanGateResumeIntegrityValidator {
   }
 
   private static String estimateHighUsd(PipelineRun run) {
-    double value =
-        run.getCostEstimateHigh() != null
-            ? run.getCostEstimateHigh()
-            : run.getHardCapUsd() == null ? 0.0 : run.getHardCapUsd();
-    return BigDecimal.valueOf(value).setScale(6, java.math.RoundingMode.HALF_UP).toPlainString();
+    return PlanGateDecisionEvidence.decimal(PlanGateDecisionEvidence.estimateHighUsd(run));
   }
 
   private static String hardCapUsd(PipelineRun run) {
-    return run.getHardCapUsd() == null
-        ? null
-        : BigDecimal.valueOf(run.getHardCapUsd())
-            .setScale(6, java.math.RoundingMode.HALF_UP)
-            .toPlainString();
+    return PlanGateDecisionEvidence.decimal(run.getHardCapUsd());
   }
 
   private static PlanGateResumeStore.PoisonMessageException poison(String reason) {

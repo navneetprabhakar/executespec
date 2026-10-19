@@ -43,6 +43,26 @@ class CoherencePlannerPatchSafetyTest {
   }
 
   @Test
+  void bootstrapRepairAddsOnlyBoundedManifestAndCandidateTestHints() {
+    var result =
+        apply(
+            planWith("requirements.txt"),
+            """
+{"patches":[
+  {"kind":"ADD_BOOTSTRAP_FILE","taskId":"T1","to":"tests/test_configuration.py","reason":"maintained bootstrap proof"},
+  {"kind":"ADD_BOOTSTRAP_FILE","taskId":"T1","to":"tests/test_configuration.py","reason":"duplicate"},
+  {"kind":"ADD_BOOTSTRAP_FILE","taskId":"T1","to":"main.py","reason":"forbidden production injection"},
+  {"kind":"ADD_BOOTSTRAP_FILE","taskId":"T1","to":"../test_escape.py","reason":"unsafe path"},
+  {"kind":"ADD_BOOTSTRAP_FILE","taskId":"T1","to":".executespec/bootstrap/test_acceptance.py","reason":"server owned"}
+]}
+""");
+    assertThat(result.patchesApplied()).isEqualTo(1);
+    assertThat(result.patchedPlan().tasks().getFirst().touchesFiles())
+        .containsExactly("requirements.txt", "tests/test_configuration.py");
+    assertThat(result.patchedPlan().tasks().getFirst().requiredArtifacts()).isEmpty();
+  }
+
+  @Test
   void onlyProtocolShapeFailuresAreRepairable() {
     Plan plan = planWith("src/A.java");
     assertThat(

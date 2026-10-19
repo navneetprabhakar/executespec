@@ -19,6 +19,20 @@ class SearchFilesToolRipgrepTest {
   private final ObjectMapper json = new ObjectMapper();
 
   @Test
+  void javaFallbackPreservesUnicodeMatches(@TempDir Path workspace) throws Exception {
+    Files.writeString(workspace.resolve("test_main.py"), "assert slugify(\"İTEM\") == \"i-tem\"\n");
+    var result =
+        new SearchFilesFallbackWalk(new com.navneet.executespec.security.ContextSanitizer())
+            .collect(
+                workspace, null, java.util.regex.Pattern.compile("İTEM"), workspace.toRealPath());
+    assertThat(result.matches())
+        .singleElement()
+        .asString()
+        .contains("İTEM")
+        .doesNotContain("Ä°TEM");
+  }
+
+  @Test
   void exactTextSearchUsesRipgrepBeforeTheWholeRepositoryJavaIndex(@TempDir Path workspace)
       throws Exception {
     assumeRipgrep();

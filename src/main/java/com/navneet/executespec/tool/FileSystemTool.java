@@ -167,11 +167,7 @@ public class FileSystemTool {
           String path) {
     try {
       Path resolved = safeResolve(runId, path);
-      // ISO-8859-1 maps every byte and never throws. Strict UTF-8 (the default) threw on any
-      // latin-1 / UTF-16 / stray-byte source file, and the accuracy assessor reading this saw
-      // "Cannot read <path>" — indistinguishable from a missing file — so it could grade a present
-      // file as absent. ASCII content is byte-identical either way.
-      return Files.readString(resolved, java.nio.charset.StandardCharsets.ISO_8859_1);
+      return RepositoryTextCodec.read(resolved);
     } catch (SecurityException e) {
       return "ACCESS DENIED: " + e.getMessage();
     } catch (IOException e) {
@@ -190,10 +186,7 @@ public class FileSystemTool {
       int requestedEnd = Math.max(start, endLine);
       int totalLines = 0;
       List<String> selected = new java.util.ArrayList<>();
-      // ISO-8859-1 never throws on non-UTF-8 bytes — a legacy-encoded source file stays readable
-      // instead of collapsing to "Cannot read" (a false "absent/corrupt" signal to the assessor).
-      try (BufferedReader reader =
-          Files.newBufferedReader(resolved, java.nio.charset.StandardCharsets.ISO_8859_1)) {
+      try (BufferedReader reader = RepositoryTextCodec.reader(resolved)) {
         String line;
         while ((line = reader.readLine()) != null) {
           totalLines++;

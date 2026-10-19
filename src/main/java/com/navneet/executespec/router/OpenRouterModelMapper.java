@@ -21,6 +21,17 @@ public final class OpenRouterModelMapper {
 
   private static final Map<String, String> SLUGS =
       Map.ofEntries(
+          Map.entry("gemini-3.8-flash-or", "google/gemini-3.8-flash"),
+          Map.entry("claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"),
+          Map.entry("claude-haiku-5-5", "anthropic/claude-haiku-5.5"),
+          Map.entry("claude-opus-5-5", "anthropic/claude-opus-5.5"),
+          Map.entry("claude-fable-5-1", "anthropic/claude-fable-5.1"),
+          Map.entry("gpt-6.1-sol", "openai/gpt-6.1-sol"),
+          Map.entry("gpt-6-luna", "openai/gpt-6-luna"),
+          Map.entry("gpt-6-astra", "openai/gpt-6-astra"),
+          Map.entry("gemini-4-argon", "google/gemini-4-argon"),
+          Map.entry("gemini-3.8-flash", "google/gemini-3.8-flash"),
+          Map.entry("deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash-1017"),
           Map.entry("claude-opus-4-6", "anthropic/claude-opus-4.6"),
           Map.entry("claude-opus-4-7", "anthropic/claude-opus-4.7"),
           Map.entry("claude-opus-4-8", "anthropic/claude-opus-4.8"),

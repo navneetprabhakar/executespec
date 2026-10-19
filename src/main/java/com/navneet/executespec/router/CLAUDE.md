@@ -94,3 +94,15 @@ redirects are removed from selectable configuration and the mapper; explicit old
 transport instead of being silently replaced. Historical saved run labels/costs are not rewritten.
 Current pricing and context come from the Fireworks model page linked in YAML. The bounded
 three-task BUILD fixture passes with this route; catalogue presence alone is not qualification.
+
+
+## Current model catalog (2026-10-18)
+
+Active defaults now use Sonnet 5.5/Haiku 5.5, GPT-6.1 Sol/GPT-6 Luna, Gemini 4 Argon/3.8 Flash,
+native DeepSeek V4 Pro/current Flash, and release-pinned V4.1 Flash 1017 gateway routes.
+Fireworks also exposes GLM 5.3 Flash. The maintained README lists both bounded fixture routes per
+provider; exact pins and existing authorization/budget gates still apply. New model metadata is
+BYOK-only until broader managed-AI qualification, except the current native Flash alias, which
+retains the already-served Flash route eligibility. Historical rows and immutable usage stay intact.
+Native Gemini pricing and OpenRouter's Gemini gateway pricing use separate rows. Refresh Argon's
+introductory rates before 2026-12-01 and Flash's before 2027-01-01.

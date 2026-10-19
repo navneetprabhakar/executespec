@@ -76,7 +76,7 @@ public class SmartClassifierAgent {
   private static final int HEURISTIC_FAST_PATH_CHAR_CAP = 150;
 
   /** LLM verifier max tokens — JSON output should easily fit in 500. */
-  private static final int LLM_MAX_TOKENS = 500;
+  private static final int LLM_MAX_TOKENS = 2048;
 
   /** Redis cache TTL for the {spec,repos,projectId} → ClassificationResult mapping. */
   private static final Duration CACHE_TTL = Duration.ofHours(1);
@@ -88,7 +88,7 @@ public class SmartClassifierAgent {
    * heuristic thresholds or {@code smart-classifier.md} contract changes; otherwise a deployment
    * can continue routing from an obsolete pre-deploy verdict for the full cache TTL.
    */
-  private static final String CACHE_PREFIX = "planner:classify:v3:";
+  private static final String CACHE_PREFIX = "planner:classify:v4:";
 
   /**
    * Words that, when present in the spec, force the heuristic to defer to the LLM verifier even
@@ -238,7 +238,9 @@ public class SmartClassifierAgent {
         if (cached != null && !cached.isBlank()) {
           ClassificationResult fromCache = parseCached(cached);
           if (fromCache != null) {
-            fromCache = normalizeSubmittedScope(fromCache, repoCount);
+            fromCache =
+                ExplicitTaskCountContract.normalizeClassification(
+                    normalizeSubmittedScope(fromCache, repoCount), spec);
             log.info(
                 "SmartClassifier cache hit project={} key={} → {}",
                 projectId,
@@ -256,7 +258,7 @@ public class SmartClassifierAgent {
     HeuristicVerdict heuristic = runHeuristic(spec, repoCount);
 
     // Heuristic fast path — only when the heuristic is confidently SINGLE_SHOT.
-    if (heuristic.fastPath) {
+    if (heuristic.fastPath && ExplicitTaskCountContract.requestedCount(spec) <= 1) {
       ClassificationResult result =
           new ClassificationResult(
               heuristic.strategy,
@@ -285,6 +287,7 @@ public class SmartClassifierAgent {
                 aiProvider,
                 executionContext),
             repoCount);
+    verified = ExplicitTaskCountContract.normalizeClassification(verified, spec);
     // RR-1201 — never cache a TRANSIENT fallback. Model-resolve, prompt-assembly, empty-body,
     // JSON-parse and transport failures all return a LLM_FALLBACK_TO_HEURISTIC verdict; caching it
     // for the full TTL would suppress verifier recovery for every identical key for an hour after

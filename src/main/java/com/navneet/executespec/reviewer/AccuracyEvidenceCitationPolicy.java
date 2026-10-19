@@ -81,6 +81,14 @@ final class AccuracyEvidenceCitationPolicy {
   private AccuracyEvidenceCitationPolicy() {}
 
   static void validate(FileSystemTool files, String runId, AccuracyReport report) {
+    validate(files, runId, report, java.util.Set.of());
+  }
+
+  static void validate(
+      FileSystemTool files,
+      String runId,
+      AccuracyReport report,
+      java.util.Set<String> requestedArtifacts) {
     if (report == null || files == null || runId == null || runId.isBlank()) {
       if (report != null) {
         report.setEvidenceLocations(List.of());
@@ -103,7 +111,7 @@ final class AccuracyEvidenceCitationPolicy {
       collectInline(endpoint, report.getEndpointCoverage().getImplemented());
       collectInline(endpoint, report.getEndpointCoverage().getMissing());
     }
-    List<String> validSpec = validateCandidates(files, runId, spec);
+    List<String> validSpec = validateCandidates(files, runId, spec, requestedArtifacts);
     List<String> validEndpoint = validateCandidates(files, runId, endpoint);
     List<String> validTest =
         validateCandidates(files, runId, candidates(report.getTestEvidenceLocations()));
@@ -129,10 +137,18 @@ final class AccuracyEvidenceCitationPolicy {
 
   private static List<String> validateCandidates(
       FileSystemTool files, String runId, LinkedHashSet<String> candidates) {
+    return validateCandidates(files, runId, candidates, java.util.Set.of());
+  }
+
+  private static List<String> validateCandidates(
+      FileSystemTool files,
+      String runId,
+      LinkedHashSet<String> candidates,
+      java.util.Set<String> requestedArtifacts) {
     List<String> valid = new ArrayList<>();
     for (String candidate : candidates) {
       if (valid.size() >= MAX_CITATIONS) break;
-      String canonical = validateOne(files, runId, candidate);
+      String canonical = validateOne(files, runId, candidate, requestedArtifacts);
       if (canonical != null) valid.add(canonical);
     }
     return List.copyOf(valid);
@@ -157,7 +173,8 @@ final class AccuracyEvidenceCitationPolicy {
     }
   }
 
-  private static String validateOne(FileSystemTool files, String runId, String raw) {
+  private static String validateOne(
+      FileSystemTool files, String runId, String raw, java.util.Set<String> requestedArtifacts) {
     if (raw == null) return null;
     String candidate = raw.trim().replace('\\', '/');
     Matcher matcher = LOCATION.matcher(candidate);
@@ -167,7 +184,7 @@ final class AccuracyEvidenceCitationPolicy {
         || path.startsWith("/")
         || path.contains("../")
         || path.equals("..")
-        || !eligibleSourcePath(path)) {
+        || !(eligibleSourcePath(path) || eligibleRequestedArtifact(path, requestedArtifacts))) {
       return null;
     }
     int start;
@@ -187,6 +204,15 @@ final class AccuracyEvidenceCitationPolicy {
         || Integer.parseInt(header.group(2)) != end
         || end > Integer.parseInt(header.group(3))) return null;
     return path + ":" + start + (end == start ? "" : "-" + end);
+  }
+
+  private static boolean eligibleRequestedArtifact(String path, java.util.Set<String> requested) {
+    if (!requested.contains(path)) return false;
+    for (String segment : path.split("/")) {
+      if (EXCLUDED_SEGMENTS.contains(segment.toLowerCase(java.util.Locale.ROOT))) return false;
+    }
+    String name = path.substring(path.lastIndexOf('/') + 1).toLowerCase(java.util.Locale.ROOT);
+    return !name.startsWith(".env") && name.matches(".*\\.(txt|csv|tsv)");
   }
 
   private static boolean eligibleSourcePath(String path) {

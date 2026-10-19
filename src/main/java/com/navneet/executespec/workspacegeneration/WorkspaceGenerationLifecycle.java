@@ -179,7 +179,7 @@ public class WorkspaceGenerationLifecycle {
   /** Admission fence for a replacement BUILD attempt before its task row may be reopened. */
   public void assertContinuationReady(String runId, Path workspaceRoot) {
     recoveryService.recoverRunOrThrow(runId);
-    recoveryService.assertAcceptedFrontier(runId, workspaceRoot, "BUILD_CONTINUATION");
+    recoveryService.assertContinuationFrontier(runId, workspaceRoot);
   }
 
   /** Synchronous convergence hook for supervisor failures before a Prepared handle is returned. */

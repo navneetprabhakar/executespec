@@ -22,7 +22,7 @@ import lombok.Builder;
  *     smaller than worker's 40 since review passes are typically shorter)
  * @param skipWiringPass if true, only run the general review pass
  */
-@Builder
+@Builder(toBuilder = true)
 public record ReviewerRequest(
     String provider,
     String model,
@@ -46,7 +46,9 @@ public record ReviewerRequest(
      * instead of the plan being killed at compile time over a heuristic that may be a false
      * positive. Empty when the plan compiled with no advisory findings.
      */
-    List<String> planAdvisories) {
+    List<String> planAdvisories,
+    /** Fresh server-run test proof for this immutable read-only review workspace. */
+    String serverVerificationEvidence) {
 
   public ReviewerRequest {
     if (provider == null || provider.isBlank())

@@ -43,6 +43,14 @@ public final class TaskExecutionBriefCompiler {
         new ArrayList<>(TaskExpanderAgent.structuralPlanContractViolations(compiled));
     fatal.addAll(PlannerOutputUtils.validateRequirementCoverage(compiled));
     fatal.addAll(PlanSourceHttpRouteGate.violations(originalRequest, compiled));
+    int requestedCount = ExplicitTaskCountContract.requestedCount(originalRequest);
+    if (requestedCount > 0 && compiled.tasks().size() != requestedCount) {
+      fatal.add(
+          "explicit customer plan task count="
+              + requestedCount
+              + "; preserve the requested decomposition");
+    }
+    fatal.addAll(PlanBootstrapVerificationContract.violations(compiled));
     if (!fatal.isEmpty()) throw contractFailure(String.join("; ", fatal));
 
     // ADVISORY set — the heuristic natural-language contradiction detectors (the ~30-gate

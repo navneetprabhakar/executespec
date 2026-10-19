@@ -75,7 +75,7 @@ class PipelineE2EContractTest {
         .contains("-Pintegration,live-llm-test")
         .contains("-Dtest=PipelineE2ETest")
         .contains("--provider deepseek")
-        .contains("--model deepseek-v4-flash-native")
+        .contains("--model deepseek-flash-native")
         .contains("--safe-max-usd 0.10");
   }
 }

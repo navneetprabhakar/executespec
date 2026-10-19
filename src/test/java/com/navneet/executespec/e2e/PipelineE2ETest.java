@@ -133,7 +133,7 @@ class PipelineE2ETest {
 Build a small Python library with three sequential plan tasks: bootstrap the library/tests,
 implement slug behavior including edge cases, then write its README. Use main.py exporting
 slugify(text: str) -> str, requirements.txt pinning pytest==8.3.5, test_main.py and README.md.
-slugify lowercases text, replaces each run of non-ASCII-alphanumeric characters with one
+slugify first lowercases the entire text, then replaces each run outside ASCII a-z and 0-9 with one
 hyphen, and strips leading/trailing hyphens. Empty or punctuation-only text returns empty.
 Include maintained pytest happy-path and edge-case tests, and run them before completion.
 This is a library, not an HTTP service or CLI application.
@@ -313,13 +313,12 @@ This is a library, not an HTTP service or CLI application.
         .isEqualTo(HttpStatus.OK);
     assertThat(awaitTerminal(runId, WORK_TIMEOUT)).isEqualTo("COMPLETE");
     var detail = getDetail(runId);
-    assertThat(detail.getTasks()).isNotEmpty();
+    assertThat(detail.getTasks())
+        .as("the fixture explicitly requests three sequential plan tasks")
+        .hasSize(3);
     var report = awaitReport(runId);
     assertThat(report.verificationLedger()).isNotEmpty();
-    assertHeldOutPython(
-        runId,
-        "import main; assert main.slugify('  Hello, WORLD!! ') == 'hello-world';"
-            + " assert main.slugify('---') == ''; assert main.slugify('a___b') == 'a-b'");
+    assertHeldOutPython(runId, PipelineE2EHeldOutAssertions.slugify());
   }
 
   private void assertHeldOutPython(String runId, String assertions) {

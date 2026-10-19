@@ -371,3 +371,14 @@ Ignored-artifact cleanup removes cache-local `.gitignore` files last, deepest fi
 a self-ignoring cache: deleting its rule file first would make later cache entries appear to change
 classification. Each deletion still rechecks current Git classification and workspace authority;
 external rule changes remain a hard refusal. Regression coverage includes both cases.
+
+Initial-task continuation uses a distinct retry-only frontier check. Before any task is accepted,
+the current generation must equal both the seeded run frontier (index -1) and the latest resolved
+ROLLED_BACK task-zero before-generation, with completed before-checkpoint, task-transition and
+operation-transition evidence. This does not satisfy `assertAcceptedFrontier`: publication and
+accepted-generation consumers still require an actual accepted attempt and its exact checkpoint.
+
+A manifest-only bootstrap can resolve the existing Python adapter from the declared Python project
+and an authoritative `requirements.txt`, `pyproject.toml`, or `setup.cfg` output, even when task
+prose omits language names. This fallback applies only after path/prose classification is unresolved;
+explicit conflicting source types, unknown project labels, and arbitrary outputs remain unqualified.

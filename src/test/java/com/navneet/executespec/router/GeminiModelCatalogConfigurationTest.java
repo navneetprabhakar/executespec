@@ -20,8 +20,8 @@ class GeminiModelCatalogConfigurationTest {
     Map<String, Object> aliases = map(matrix.get("legacy-aliases"));
 
     assertThat(gemini)
-        .containsEntry("planning", "gemini-3.5-flash")
-        .containsEntry("workhorse", "gemini-3.5-flash")
+        .containsEntry("planning", "gemini-4-argon")
+        .containsEntry("workhorse", "gemini-3.8-flash")
         .containsEntry("lightweight", "gemini-3.5-flash-lite");
     assertThat(models.keySet())
         .contains(

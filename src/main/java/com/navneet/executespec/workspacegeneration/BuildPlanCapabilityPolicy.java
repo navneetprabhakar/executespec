@@ -16,9 +16,15 @@ public final class BuildPlanCapabilityPolicy {
     for (var task : plan.tasks()) {
       GreenfieldBaselinePlan baseline = planner.plan(workspace, task, plan, origin);
       if (!baseline.supported()) {
-        throw new IllegalStateException(
+        throw new UnsupportedRuntimeException(
             "BUILD_PLAN_RUNTIME_UNSUPPORTED:" + task.id() + ":" + baseline.kind());
       }
+    }
+  }
+
+  public static final class UnsupportedRuntimeException extends IllegalStateException {
+    public UnsupportedRuntimeException(String message) {
+      super(message);
     }
   }
 }
