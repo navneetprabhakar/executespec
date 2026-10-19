@@ -1,7 +1,6 @@
 package com.navneet.executespec.tool;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -158,12 +157,7 @@ final class SearchFilesFallbackWalk {
               return FileVisitResult.CONTINUE;
             }
             try {
-              // Decode with ISO-8859-1, which maps every byte 0..255 and NEVER throws. The prior
-              // strict-UTF-8 readAllLines threw MalformedInputException on any latin-1 / UTF-16 /
-              // Windows-1252 / stray-byte source file, and that throw was swallowed below — so a
-              // whole file with a legacy encoding vanished from search with no signal. ASCII
-              // patterns (the overwhelming majority of code search) still match byte-for-byte.
-              List<String> lines = Files.readAllLines(file, StandardCharsets.ISO_8859_1);
+              List<String> lines = RepositoryTextCodec.lines(file);
               for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);
                 // RR-644 — never feed a pathologically long line to the backtracking matcher.

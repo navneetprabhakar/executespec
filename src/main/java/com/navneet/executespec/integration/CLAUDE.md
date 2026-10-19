@@ -33,3 +33,8 @@ A superseded or stopped parent cannot retain authority obtained earlier in the o
 BUILD operation claims derive `context.child(taskId)` before binding the physical operation lease.
 Both initial and replacement claims preserve the durable run reference while replacing the run-level
 placeholder task identity, so initial verification and worker dispatch match the generation capability.
+
+Approval and resume share `PlanGateDecisionEvidence.decimal` for PostgreSQL float8/numeric
+rounding parity. A valid immutable approval must remain resumable at six-decimal boundaries.
+Executor unwind preserves deterministic workspace diagnostic codes instead of replacing them
+with INTERNAL_ERROR; unqualified runtime plans have a safe BUILD_PLAN_RUNTIME_UNSUPPORTED code.

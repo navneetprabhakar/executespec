@@ -24,7 +24,13 @@ public final class FireworksModelMapper {
   private static final String P = "accounts/fireworks/models/";
 
   private static final Map<String, String> SLUGS =
-      Map.of("deepseek-v4p1-flash-fw", P + "deepseek-v4p1-flash");
+      Map.of(
+          "deepseek-v4p1-flash-fw",
+          P + "deepseek-v4p1-flash",
+          "deepseek-v4p1-flash-1017-fw",
+          P + "deepseek-v4p1-flash-1017",
+          "glm-5p3-flash-fw",
+          P + "glm-5p3-flash");
 
   /**
    * @return the Fireworks slug for a matrix model id; an id that already looks like a full

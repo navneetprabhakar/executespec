@@ -308,6 +308,18 @@ SCORE COMPUTATION GUIDANCE:
       List<RequirementSpec> requirements,
       List<ReviewIssue> issues,
       ExecutionContext operationContext) {
+    return assess(runId, provider, model, originalGoal, requirements, issues, operationContext, "");
+  }
+
+  public AccuracyReport assess(
+      String runId,
+      String provider,
+      ResolvedModel model,
+      String originalGoal,
+      List<RequirementSpec> requirements,
+      List<ReviewIssue> issues,
+      ExecutionContext operationContext,
+      String serverExecutionEvidence) {
     log.info(
         "[AccuracyAssessment] Starting assessment for run {} using {}", runId, model.getModel());
 
@@ -315,7 +327,7 @@ SCORE COMPUTATION GUIDANCE:
       String fileTree = getFileTree(runId);
       String keyFileSnippets = buildKeyFileSnippets(runId, fileTree);
       String testFileSnippets = buildTestFileSnippets(runId, fileTree);
-      String configFileSnippets = buildConfigFileSnippets(runId, fileTree);
+      String configFileSnippets = buildConfigFileSnippets(runId, fileTree, originalGoal);
       String issuesSummary = buildIssuesSummary(issues);
       String userMessage =
           buildAssessmentPrompt(
@@ -326,6 +338,10 @@ SCORE COMPUTATION GUIDANCE:
               testFileSnippets,
               configFileSnippets,
               issuesSummary);
+      if (serverExecutionEvidence != null && !serverExecutionEvidence.isBlank()) {
+        userMessage +=
+            "\n\n" + PromptTrustBoundary.wrap("SERVER_EXECUTION_EVIDENCE", serverExecutionEvidence);
+      }
 
       List<Message> messages = new ArrayList<>();
       messages.add(new SystemMessage(SYSTEM_PROMPT));
@@ -418,7 +434,11 @@ SCORE COMPUTATION GUIDANCE:
       removeInventedEndpointCoverage(originalGoal, requirements, report);
       AccuracyReportTruthPolicy.enforceConsistency(report);
       AccuracyReportTruthPolicy.enforceDeterministicFailures(report, issues);
-      AccuracyEvidenceCitationPolicy.validate(fileSystemTool, runId, report);
+      AccuracyEvidenceCitationPolicy.validate(
+          fileSystemTool,
+          runId,
+          report,
+          java.util.Set.copyOf(requestedArtifactEvidencePaths(fileTree, originalGoal)));
 
       log.info(
           "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"
@@ -791,7 +811,11 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * silently treated as a valid workflow.
    */
   private String buildConfigFileSnippets(String runId, String fileTree) {
-    List<String> candidates = inferConfigEvidencePaths(fileTree);
+    return buildConfigFileSnippets(runId, fileTree, "");
+  }
+
+  private String buildConfigFileSnippets(String runId, String fileTree, String originalGoal) {
+    List<String> candidates = requestedArtifactEvidencePaths(fileTree, originalGoal);
     if (candidates.isEmpty()) return "";
 
     StringBuilder sb = new StringBuilder();
@@ -806,6 +830,11 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
         int remaining = CONFIG_SNIPPETS_CHAR_CAP - totalChars;
         if (snip.length() > remaining) snip = snip.substring(0, remaining);
         sb.append("### ").append(path).append("\n");
+        sb.append("[fileLines=")
+            .append(content.lines().count())
+            .append("; snippetComplete=")
+            .append(snip.equals(content))
+            .append("]\n");
         if (yamlProblem != null) {
           sb.append("[INVALID YAML: ").append(yamlProblem).append("]\n");
         }
@@ -1048,6 +1077,38 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
                 .thenComparing(s -> s))
         .limit(CONFIG_FILE_CAP)
         .toList();
+  }
+
+  List<String> requestedArtifactEvidencePaths(String fileTree, String originalGoal) {
+    java.util.LinkedHashSet<String> paths = new java.util.LinkedHashSet<>();
+    if (fileTree != null && originalGoal != null && !originalGoal.isBlank()) {
+      fileTree
+          .lines()
+          .map(String::trim)
+          .map(AccuracyAssessmentService::normalizeTreePath)
+          .filter(path -> !path.startsWith("/") && !path.contains("..") && path.length() <= 240)
+          .filter(
+              path ->
+                  path.matches(
+                      "(?i)[A-Za-z0-9_./@+-]+\\.(txt|csv|tsv|md|markdown|rst|json|yaml|yml|toml|ini|cfg|xml)"))
+          .filter(
+              path ->
+                  !path.matches(
+                      "(?i).*(?:^|/)(?:node_modules|vendor|target|build|dist|coverage|\\.git|\\.executespec)(?:/|$).*"))
+          .filter(
+              path ->
+                  java.util.regex.Pattern.compile(
+                          "(?<![A-Za-z0-9_./-])"
+                              + java.util.regex.Pattern.quote(path)
+                              + "(?![A-Za-z0-9_./-])")
+                      .matcher(originalGoal)
+                      .find())
+          .sorted()
+          .limit(CONFIG_FILE_CAP)
+          .forEach(paths::add);
+    }
+    paths.addAll(inferConfigEvidencePaths(fileTree));
+    return paths.stream().limit(CONFIG_FILE_CAP).toList();
   }
 
   private static int configEvidencePriority(String path) {

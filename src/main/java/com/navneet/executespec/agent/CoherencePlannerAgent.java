@@ -413,6 +413,13 @@ public class CoherencePlannerAgent {
                     + "' · "
                     + reason);
           }
+          case "ADD_BOOTSTRAP_FILE" -> {
+            String path = patch.path("to").asText("").trim();
+            if (CoherenceBootstrapFilePatch.apply(task, path)) {
+              applied++;
+              summaries.add(taskId + " added bootstrap file " + path + " · " + reason);
+            }
+          }
           case "MOVE_FILE_TO_REPO_SUBDIR" -> {
             String from = patch.path("from").asText("").trim();
             String to = patch.path("to").asText("").trim();
@@ -509,7 +516,7 @@ public class CoherencePlannerAgent {
       "items": {
         "type": "object",
         "properties": {
-          "kind": {"type": "string", "description": "ADD_MEETS_REQUIREMENT | ADD_DEPENDS_ON | REMOVE_DEPENDS_ON | FIX_HARD_CONSTRAINT_CONFLICT | REMOVE_HARD_CONSTRAINT | REPLACE_DESCRIPTION_TEXT | MOVE_FILE_TO_REPO_SUBDIR"},
+          "kind": {"type": "string", "description": "ADD_MEETS_REQUIREMENT | ADD_DEPENDS_ON | REMOVE_DEPENDS_ON | FIX_HARD_CONSTRAINT_CONFLICT | REMOVE_HARD_CONSTRAINT | REPLACE_DESCRIPTION_TEXT | ADD_BOOTSTRAP_FILE | MOVE_FILE_TO_REPO_SUBDIR"},
           "taskId": {"type": "string"},
           "requirementId": {"type": "string", "description": "For ADD_MEETS_REQUIREMENT"},
           "dependsOnTaskId": {"type": "string", "description": "For ADD/REMOVE_DEPENDS_ON"},
@@ -518,7 +525,7 @@ public class CoherencePlannerAgent {
           "oldText": {"type": "string", "description": "Exact existing description substring for REPLACE_DESCRIPTION_TEXT"},
           "newText": {"type": "string", "description": "Contract-compatible replacement substring for REPLACE_DESCRIPTION_TEXT"},
           "from": {"type": "string", "description": "For MOVE_FILE_TO_REPO_SUBDIR"},
-          "to": {"type": "string", "description": "For MOVE_FILE_TO_REPO_SUBDIR"},
+          "to": {"type": "string", "description": "For MOVE_FILE_TO_REPO_SUBDIR or ADD_BOOTSTRAP_FILE"},
           "reason": {"type": "string", "maxLength": 160}
         },
         "required": ["kind", "taskId", "reason"]

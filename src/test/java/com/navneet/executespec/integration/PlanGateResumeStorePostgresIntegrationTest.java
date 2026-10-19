@@ -711,11 +711,28 @@ class PlanGateResumeStorePostgresIntegrationTest extends PostgresIntegrationBase
     assertThat(gateReceipt(fixture.runId())).isEqualTo(receipt);
   }
 
+  @Test
+  void postgresRoundedApprovalReceiptSurvivesResumePreflightAndHandoff() {
+    Fixture fixture = approvedFixture(CONTINUATION, 0.5961704999999999d);
+    String receipt = gateReceipt(fixture.runId());
+    assertThat(receipt).contains("\"estimateHighUsd\":\"0.596171\"");
+    Instant now = Instant.now();
+    var lease = store.claimNext("rounding-regression", now, Duration.ofMinutes(2)).orElseThrow();
+    store.preflight(lease, now.plusSeconds(1));
+    store.handoff(lease, now.plusSeconds(2));
+    assertTuple(fixture.runId(), "WORKING", "COMPLETED");
+    assertThat(gateReceipt(fixture.runId())).isEqualTo(receipt);
+  }
+
   private Fixture approvedFixture() {
     return approvedFixture(CONTINUATION);
   }
 
   private Fixture approvedFixture(String continuation) {
+    return approvedFixture(continuation, 4.5);
+  }
+
+  private Fixture approvedFixture(String continuation, double highEstimate) {
     String runId = PREFIX + UUID.randomUUID();
     String ownerId = PREFIX + "owner-" + UUID.randomUUID();
     String orgId = PREFIX + "org-" + UUID.randomUUID();
@@ -749,14 +766,15 @@ class PlanGateResumeStorePostgresIntegrationTest extends PostgresIntegrationBase
         "ANTHROPIC");
     jdbc.update(
         """
-        INSERT INTO pipeline_run
-          (run_id,status,started_at,user_request,plan_json,credits_charged,cost_estimate_high,
-           created_by_user_id,org_id,billing_org_id,project_id,ai_provider)
-        VALUES (?, 'PLANNING', ?, 'Original requirement', ?, 3, 4.5, ?, ?, ?, ?, 'anthropic')
-        """,
+INSERT INTO pipeline_run
+  (run_id,status,started_at,user_request,plan_json,credits_charged,cost_estimate_high,
+   created_by_user_id,org_id,billing_org_id,project_id,ai_provider,build_protocol_version)
+VALUES (?, 'PLANNING', ?, 'Original requirement', ?, 3, ?, ?, ?, ?, ?, 'anthropic', 'LEGACY_V1')
+""",
         runId,
         Timestamp.from(Instant.now()),
         PLAN_JSON,
+        highEstimate,
         ownerId,
         orgId,
         orgId,
@@ -781,21 +799,21 @@ class PlanGateResumeStorePostgresIntegrationTest extends PostgresIntegrationBase
                 .build(),
             null);
     when(apiKeys.resolveWithProvenance(ownerId)).thenReturn(credentials(orgId));
-    when(managedAi.assertCanApproveEstimatedSpend(ownerId, orgId, false, 4.5))
+    when(managedAi.assertCanApproveEstimatedSpend(ownerId, orgId, false, highEstimate))
         .thenReturn(
             new ManagedAiUsageService.ApprovalEvaluation(
                 "ALLOWED", "MANAGED", 2000L, 1900L, 100L, 25.0, 23.0));
-    when(governance.evaluateApprovalCost(eq(orgId), eq(4.5), any(AppUserDetails.class)))
+    when(governance.evaluateApprovalCost(eq(orgId), eq(highEstimate), any(AppUserDetails.class)))
         .thenReturn(
             new GovernanceGuard.OrgCostEvaluation(
-                "ALLOWED", new BigDecimal("10.00"), 4.5, "BELOW_THRESHOLD"));
-    when(governance.evaluateProjectSpendCap(projectId, 4.5))
+                "ALLOWED", new BigDecimal("10.00"), highEstimate, "BELOW_THRESHOLD"));
+    when(governance.evaluateProjectSpendCap(projectId, highEstimate))
         .thenReturn(
             new GovernanceGuard.ProjectSpendEvaluation(
                 "ALLOWED",
                 new BigDecimal("25.00"),
                 BigDecimal.ZERO,
-                new BigDecimal("4.5"),
+                BigDecimal.valueOf(highEstimate),
                 "WITHIN_CAP"));
     PlanApprovalService.Command approve =
         new PlanApprovalService.Command(

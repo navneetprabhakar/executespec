@@ -941,6 +941,25 @@ class LlmRouterTest {
   }
 
   @Test
+  void currentAnthropicMetadataRoleUsesTheBoundedMetadataTransport() {
+    build();
+    AnthropicChatModel anthropic = mock(AnthropicChatModel.class);
+    when(anthropicAttemptModelFactory.createMetadata(
+            nullable(String.class), anyString(), nullable(Integer.class), anyInt()))
+        .thenReturn(anthropic);
+    when(anthropic.call(any(Prompt.class))).thenReturn(ok());
+    router.call(
+        req("anthropic", "claude-sonnet-5-5").toBuilder()
+            .maxTokens(2048)
+            .toolsOverride(List.of())
+            .agentRole("AccuracyAssessmentService")
+            .stepId("accuracy-assessment")
+            .build());
+    verify(anthropicAttemptModelFactory)
+        .createMetadata(nullable(String.class), eq("claude-sonnet-5-5"), eq(2048), anyInt());
+  }
+
+  @Test
   void directOperationContextRequestUsesYamlOutputCapWhenAnthropicCallerOmitsMaxTokens() {
     build();
     when(registry.maxOutputForModel("claude-sonnet-4-6")).thenReturn(8192);

@@ -361,3 +361,41 @@ Local socket tests verify header inclusion, omission for BYOK, and unset-workspa
 and reviewer task IDs. OpenRouter translates that policy to `reasoning.enabled=false`; Fireworks
 uses `reasoning_effort=none`. Provider-routing/usage hints survive. A live verification capability
 is checked before a provider call and before each physical dispatch, including transient retries.
+
+
+## Current provider transport compatibility (2026-10-18)
+
+`OpenAiResponsesAdapter` translates direct GPT-6/6.1 requests into the Responses contract inside
+`OpenAiNativeToolClient`; router admission, physical-attempt callbacks, bounded HTTP decoding,
+usage, cached tokens and reasoning-token accounting remain shared. Stateless requests use
+`store:false`, preserve encrypted output with its originating model, and replay function-call IDs
+with tool results. Partial or refused output cannot dispatch tool calls. Gateway and historical
+OpenAI models retain Chat Completions, and the existing Chat SSE switch does not apply to Responses.
+
+Anthropic 5.5 models omit deprecated temperature fields. Forced-tool salvage skips models whose
+current API rejects forced tool choice and falls through to the existing normal tool transport.
+
+## Provider qualification fixes (2026-10-18)
+
+Explicit customer plan-task counts bound classification (including cache/fallback) and final
+compilation. SINGLE_SHOT cannot erase an explicit multi-task decomposition; classifier cache v4
+and a 2,048-token JSON ceiling prevent stale verdicts and common truncation. Python bootstrap
+preflight requires owned configuration tests plus an authoritative artifact; normal same-route
+plan repair applies before approval. Rebind customer/platform artifacts after every ownership
+repair so the acceptance contract does not retain rejected task ownership.
+
+For current Claude 5.5 classifier/accuracy metadata attempts only, the existing admitted Anthropic
+transport adds low effort and Sonnet `between_tools` or Haiku/Opus `disabled` thinking. Spring AI
+1.1.6 lacks the Sonnet enum, so the deadline-bound factory extends its serialized request in a
+scoped interceptor. Worker/reviewer generation retains provider-default reasoning.
+
+`AnthropicVisibleResponse` collapses visible text/tool generations after each successful admitted
+Anthropic attempt and removes Spring AI thinking/redacted-thinking generations (`signature`/`data`).
+This prevents first-result readers from treating a thinking block as the answer, keeps private
+reasoning out of worker/UI text, and preserves the original response usage and stop reason.
+
+Outline admission always requires a non-empty executable task array, independently of the optional
+validation-v3 graph gate. Empty/missing-task native payloads enter the existing single same-route
+schema retry (`planner.outline.schema-repair`); a second empty result fails planning without scope
+collapse or entering a coherence patcher that cannot create tasks. Provider/auth/timeouts remain
+outside schema retry.

@@ -228,6 +228,13 @@ public class ReviewerAgent {
     // SWE-bench parallel: gold tests are the spec for patch-mode; the build error is the spec
     // for build-mode. Inject it verbatim into the user prompt and the LLM has a concrete target.
     String preReviewBuildError = capturePreReviewBuildError(req);
+    if (Boolean.TRUE.equals(req.readOnly())) {
+      req =
+          req.toBuilder()
+              .serverVerificationEvidence(
+                  ReviewerVerificationEvidence.capture(workspaceTestRunner, req.context()))
+              .build();
+    }
 
     log.info(
         "ReviewerAgent START run={} task={} provider={} model={} skipWiring={} preBuildFailing={}",
@@ -748,6 +755,11 @@ public class ReviewerAgent {
   static String composeReviewerUserPrompt(ReviewerRequest req, String preBuildError) {
     String contractEvidence = reviewerContractEvidence(req);
     String prefix = contractEvidence.isBlank() ? "" : contractEvidence + "\n\n";
+    if (req != null && req.serverVerificationEvidence() != null) {
+      prefix +=
+          PromptTrustBoundary.wrap("SERVER_VERIFICATION_EVIDENCE", req.serverVerificationEvidence())
+              + "\n\n";
+    }
     if (req != null && Boolean.TRUE.equals(req.readOnly())) {
       return prefix
           + """
@@ -1185,25 +1197,7 @@ exit=0 — the harness will reject premature completions.
    * provider/model even when the ordinary initial-review policy allowed router failover.
    */
   static ReviewerRequest strictProtocolRecoveryRequest(ReviewerRequest request) {
-    return ReviewerRequest.builder()
-        .provider(request.provider())
-        .model(request.model())
-        .strictProvider(true)
-        .context(request.context())
-        .buildCommand(request.buildCommand())
-        .maxIterationsPerPass(request.maxIterationsPerPass())
-        .skipWiringPass(request.skipWiringPass())
-        .brownfield(request.brownfield())
-        .allowedRepoRoots(request.allowedRepoRoots())
-        .approvedNewFiles(request.approvedNewFiles())
-        .allowBuildManifestCreation(request.allowBuildManifestCreation())
-        // Protocol recovery exists only to obtain the missing typed verdict. It must never inherit
-        // mutation authority from older resume/manual-review callers: malformed reviewer output is
-        // not evidence that customer code needs another edit.
-        .readOnly(true)
-        .originalGoal(request.originalGoal())
-        .requirements(request.requirements())
-        .build();
+    return request.toBuilder().strictProvider(true).readOnly(true).build();
   }
 
   /**

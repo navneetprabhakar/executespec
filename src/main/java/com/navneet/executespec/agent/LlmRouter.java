@@ -1566,6 +1566,9 @@ public class LlmRouter {
     // Fail-safe: null result → fall through to the normal AnthropicChatModel path, so this can
     // never regress production Anthropic traffic and only runs on an already-failing salvage call.
     if ("required".equals(r.toolChoice())
+        && !(r.model().startsWith("claude-sonnet-5-5")
+            || r.model().startsWith("claude-haiku-5-5")
+            || r.model().startsWith("claude-opus-5-5"))
         && anthropicForcedToolClient.canAttempt(r.messages(), tools, apiKey)) {
       // The forced-tool seam can return a paid but semantically unusable HTTP 200 and then fall
       // through to the normal Anthropic transport. Admit each physical request independently so
@@ -1738,6 +1741,7 @@ public class LlmRouter {
       PhysicalAttemptChain auditContext,
       PhysicalDispatch attempt,
       long startedAt) {
+    response = AnthropicVisibleResponse.normalize(response);
     if (auditContext == null || attempt == null) {
       return new CanonicalDispatchResult(
           response, null, null, true, auditContext == null ? null : auditContext.legacySource());
@@ -1814,6 +1818,12 @@ public class LlmRouter {
     int timeoutSeconds =
         admittedReadTimeoutSeconds(
             request, physicalAttempt == null ? null : physicalAttempt.transportDeadline());
+    if (!AnthropicModelOptions.metadataOverrides(request.model()).isEmpty()
+        && ("SmartClassifierAgent".equals(request.agentRole())
+            || "AccuracyAssessmentService".equals(request.agentRole()))) {
+      return anthropicAttemptModelFactory.createMetadata(
+          key, request.model(), maxTokens, timeoutSeconds);
+    }
     return anthropicAttemptModelFactory.create(key, request.model(), maxTokens, timeoutSeconds);
   }
 

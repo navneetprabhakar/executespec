@@ -59,6 +59,28 @@ class PlanGateResumeStoreTest {
   }
 
   @Test
+  void resumeUsesTheSamePostgresCompatibleMoneyRoundingAsApproval() {
+    PipelineRun run = approvedRun();
+    GateRecord gate = approvedGate(run);
+    run.setCostEstimateHigh(0.5961704999999999d);
+    run.setHardCapUsd(0.19872349999999997d);
+    String json =
+        gate.getApprovalEvidenceJson()
+            .replace("\"estimateHighUsd\":\"5.000000\"", "\"estimateHighUsd\":\"0.596171\"")
+            .replace("\"hardCapUsd\":\"5.000000\"", "\"hardCapUsd\":\"0.198724\"");
+    gate.setApprovalEvidenceJson(json);
+    gate.setApprovalEvidenceDigest(DecisionEvidenceV1.sha256(json));
+    var outbox = processingOutbox(Instant.parse("2026-07-28T01:01:00Z"));
+    new PlanGateResumeIntegrityValidator(requirementContractRepository).validate(run, gate, outbox);
+    run.setCostEstimateHigh(0.596172d);
+    assertThatThrownBy(
+            () ->
+                new PlanGateResumeIntegrityValidator(requirementContractRepository)
+                    .validate(run, gate, outbox))
+        .hasMessageContaining("CROSS_ROW_MISMATCH");
+  }
+
+  @Test
   void claimAssignsOwnerTokenExpiryAndIncrementsAttempt() {
     Instant now = Instant.parse("2026-07-28T01:00:00Z");
     PlanGateResumeOutbox outbox = readyOutbox();

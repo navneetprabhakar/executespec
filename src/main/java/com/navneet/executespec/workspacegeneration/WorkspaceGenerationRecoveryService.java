@@ -113,25 +113,22 @@ public class WorkspaceGenerationRecoveryService {
     var run =
         runs.findById(runId)
             .orElseThrow(() -> new IllegalStateException("WORKSPACE_GENERATION_RUN_MISSING"));
-    if (!com.navneet.executespec.state.RunMode.BUILD.equalsIgnoreCase(run.getRunMode())) return;
-    if (run.getAcceptedWorkspaceGeneration() == null
-        || !run.getAcceptedWorkspaceGeneration().equals(currentGeneration)
-        || run.getAcceptedGenerationAttemptId() == null) {
-      telemetry.control(
-          runId,
-          null,
-          run.getAcceptedGenerationAttemptId(),
-          "DOWNSTREAM_ADMISSION",
-          "DENIED_FRONTIER_MISMATCH",
-          boundary);
-      throw new IllegalStateException("WORKSPACE_GENERATION_FRONTIER_MISMATCH");
+    WorkspaceGenerationFrontierVerifier.assertAccepted(
+        runId, currentGeneration, run, attempts, telemetry, boundary);
+  }
+
+  /** Retry-only authority for a restored first attempt; this is never publication authority. */
+  public void assertContinuationFrontier(String runId, Path workspaceRoot) {
+    assertNoUnresolvedAttempt(runId, "BUILD_CONTINUATION");
+    PipelineRun run = runs.findById(runId).orElseThrow();
+    if (run.getAcceptedGenerationAttemptId() != null) {
+      assertAcceptedFrontier(runId, workspaceRoot, "BUILD_CONTINUATION");
+      return;
     }
-    WorkspaceGenerationAttempt accepted =
-        attempts
-            .findById(run.getAcceptedGenerationAttemptId())
-            .orElseThrow(
-                () -> new IllegalStateException("WORKSPACE_GENERATION_ACCEPTANCE_MISSING"));
-    WorkspaceGenerationAcceptanceProof.assertExact(runId, currentGeneration, run, accepted);
+    WorkspaceGenerationInitialRetryProof.require(
+        run,
+        workspaces.captureGeneration(workspaceRoot),
+        attempts.findTop20ByRunIdOrderByCreatedAtDesc(runId));
   }
 
   public void assertAcceptedFrontier(String runId, Path workspaceRoot) {

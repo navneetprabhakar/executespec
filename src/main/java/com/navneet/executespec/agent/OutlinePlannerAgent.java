@@ -480,7 +480,7 @@ public class OutlinePlannerAgent {
         if (mode != Mode.SKELETON_ONLY) {
           PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
         }
-        return plan;
+        return OutlinePlannerSchemaRepairPolicy.requireExecutable(plan);
       }
       throw new IllegalStateException(
           "OutlinePlanner did not call submitOutline. Finish reason: "
@@ -494,7 +494,7 @@ public class OutlinePlannerAgent {
     if (mode != Mode.SKELETON_ONLY) {
       PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
     }
-    return plan;
+    return OutlinePlannerSchemaRepairPolicy.requireExecutable(plan);
   }
 
   private ToolCallback buildSubmitOutlineCallback(Mode mode) {

@@ -35,6 +35,6 @@ class ProviderModelCatalogBindingTest {
     assertThat(registry.canonicalize("gemini-3-flash-preview")).isEqualTo("gemini-3.6-flash");
     assertThat(registry.canonicalize("gpt-5.5-mini")).isEqualTo("gpt-5.6-luna");
     assertThat(properties.getProviders().get("fireworks").getLightweight())
-        .isEqualTo("deepseek-v4p1-flash-fw");
+        .isEqualTo("deepseek-v4p1-flash-1017-fw");
   }
 }

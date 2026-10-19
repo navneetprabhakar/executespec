@@ -14,6 +14,35 @@ import org.junit.jupiter.api.Test;
 class AccuracyEvidenceCitationPolicyTest {
 
   @Test
+  void explicitlyRequestedTextArtifactCanSupportSpecButNeverEndpointOrTestExecutionClaims() {
+    FileSystemTool files = mock(FileSystemTool.class);
+    when(files.readFileRange("run", "hello.txt", 1, 1))
+        .thenReturn("[Lines 1-1 of 1]\n   1 | Hello World");
+    var report =
+        AccuracyReport.builder()
+            .specEvidenceLocations(List.of("hello.txt:1"))
+            .endpointEvidenceLocations(List.of("hello.txt:1"))
+            .testEvidenceLocations(List.of("hello.txt:1"))
+            .build();
+    AccuracyEvidenceCitationPolicy.validate(files, "run", report, java.util.Set.of("hello.txt"));
+    assertThat(report.getSpecEvidenceLocations()).containsExactly("hello.txt:1");
+    assertThat(report.getEndpointEvidenceLocations()).isEmpty();
+    assertThat(report.getTestEvidenceLocations()).isEmpty();
+  }
+
+  @Test
+  void unrequestedAndExcludedTextArtifactsCannotBecomeCitations() {
+    FileSystemTool files = mock(FileSystemTool.class);
+    var report =
+        AccuracyReport.builder()
+            .specEvidenceLocations(List.of("hello.txt:1", "logs/result.txt:1", ".env.txt:1"))
+            .build();
+    AccuracyEvidenceCitationPolicy.validate(
+        files, "run", report, java.util.Set.of("logs/result.txt", ".env.txt"));
+    assertThat(report.getSpecEvidenceLocations()).isEmpty();
+  }
+
+  @Test
   void keepsOnlyWorkspaceLocationsThatCanBeDeterministicallyReread() {
     FileSystemTool files = mock(FileSystemTool.class);
     when(files.readFileRange("run-1", "src/App.java", 2, 4))

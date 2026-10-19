@@ -229,7 +229,7 @@ managed-ai:
       # F2 (founder decision 2026-07-18): FREE is native-DeepSeek-Flash only. Every managed
       # platform-key call is forced to this route regardless of the requested provider/model.
       locked-provider: deepseek
-      locked-model: deepseek-v4-flash-native
+      locked-model: deepseek-flash-native
     PRO:
       included-credits: 2000
       raw-cogs-cap-usd: 16.00
@@ -310,38 +310,234 @@ model-matrix:
     # SpecChatService is bumped to WORKHORSE in agent-tier-map so the user-facing spec-build chat
     # stays on the flagship.
     anthropic:
-      # 2026-07-02: Sonnet 5 is the default PLANNING + WORKHORSE route through
-      # 2026-08-31 while Anthropic's introductory Sonnet 5 pricing is active.
-      planning: claude-sonnet-5
-      workhorse: claude-sonnet-5
-      lightweight: claude-haiku-4-5-20251001
+      # Current Sonnet/Haiku routes, verified against the account catalogue 2026-10-18.
+      planning: claude-sonnet-5-5
+      workhorse: claude-sonnet-5-5
+      lightweight: claude-haiku-5-5
     gemini:
-      planning: gemini-3.5-flash
-      workhorse: gemini-3.5-flash
+      planning: gemini-4-argon
+      workhorse: gemini-3.8-flash
       lightweight: gemini-3.5-flash-lite
     openai:
-      planning: gpt-5.4
-      workhorse: gpt-5.4
-      lightweight: gpt-5.4-mini
+      planning: gpt-6.1-sol
+      workhorse: gpt-6.1-sol
+      lightweight: gpt-6-luna
     openrouter:
       # RL-2026-06-053: OpenRouter now defaults to DeepSeek (was Claude). deepseek-v4-pro for
       # planning/workhorse, deepseek-v4-flash for the light tier — all via the OpenRouter gateway.
-      planning: deepseek-v4-pro
-      workhorse: deepseek-v4-pro
-      lightweight: deepseek-v4-flash
+      planning: deepseek-v4.1-flash-1017
+      workhorse: deepseek-v4.1-flash-1017
+      lightweight: deepseek-v4.1-flash-1017
     deepseek:
       # RL-2026-06-053: DeepSeek V4 Pro via the native api.deepseek.com route (~3-4x faster than the
       # OpenRouter hop). Verified live 2026-06-18: Pro works multi-turn with tools on auto, and the
       # reasoning_content echo is NOT required. Flash-native stays for the cheap light tier.
       planning: deepseek-v4-pro-native
-      workhorse: deepseek-v4-pro-native
-      lightweight: deepseek-v4-flash-native
+      workhorse: deepseek-flash-native
+      lightweight: deepseek-flash-native
     fireworks:
       # 2026-10-17: retired serverless routes no longer dispatch; use the current explicit model.
-      planning: deepseek-v4p1-flash-fw
-      workhorse: deepseek-v4p1-flash-fw
-      lightweight: deepseek-v4p1-flash-fw
+      planning: deepseek-v4p1-flash-1017-fw
+      workhorse: deepseek-v4p1-flash-1017-fw
+      lightweight: deepseek-v4p1-flash-1017-fw
   models:
+    # Current coding routes, discovered 2026-10-18. Historical IDs remain for persisted runs.
+    "[claude-sonnet-5-5]":
+      provider: anthropic
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1000000
+      max-output-tokens: 128000
+      display-label: "Claude Sonnet 5.5"
+      pricing:
+        input-per-1m: 2
+        cached-input-per-1m: 0.1
+        output-per-1m: 10
+      notes: "Verified against official documentation and live model discovery 2026-10-18. https://platform.claude.com/docs/en/models/sonnet-5-5/overview New routes remain BYOK until quality qualification."
+    "[claude-haiku-5-5]":
+      provider: anthropic
+      chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: false
+      context-limit: 1000000
+      max-output-tokens: 128000
+      display-label: "Claude Haiku 5.5"
+      pricing:
+        input-per-1m: 0.5
+        cached-input-per-1m: 0.05
+        output-per-1m: 2.5
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Conservative above-100K prompt rates. https://platform.claude.com/docs/en/models/haiku-5-5/overview New routes remain BYOK until quality qualification."
+    "[claude-opus-5-5]":
+      provider: anthropic
+      chain-tier: ARCHITECT
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1000000
+      max-output-tokens: 128000
+      display-label: "Claude Opus 5.5"
+      pricing:
+        input-per-1m: 4
+        cached-input-per-1m: 0.2
+        output-per-1m: 20
+      notes: "Verified against official documentation and live model discovery 2026-10-18. https://platform.claude.com/docs/en/models/opus-5-5/overview New routes remain BYOK until quality qualification."
+    "[claude-fable-5-1]":
+      provider: anthropic
+      chain-tier: ARCHITECT
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1000000
+      max-output-tokens: 128000
+      display-label: "Claude Fable 5.1"
+      pricing:
+        input-per-1m: 10
+        cached-input-per-1m: 0.25
+        output-per-1m: 50
+      notes: "Verified against official documentation and live model discovery 2026-10-18. https://platform.claude.com/docs/en/models/fable-5-1/overview New routes remain BYOK until quality qualification."
+    "[gpt-6.1-sol]":
+      provider: openai
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1050000
+      max-output-tokens: 128000
+      display-label: "GPT-6.1 Sol"
+      pricing:
+        input-per-1m: 4
+        cached-input-per-1m: 0.2
+        output-per-1m: 15
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Responses API required for tools; conservative above-272K prompt rates. https://developers.openai.com/api/docs/models/gpt-6.1-sol New routes remain BYOK until quality qualification."
+    "[gpt-6-luna]":
+      provider: openai
+      chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: false
+      context-limit: 1050000
+      max-output-tokens: 128000
+      display-label: "GPT-6 Luna"
+      pricing:
+        input-per-1m: 0.2
+        cached-input-per-1m: 0.02
+        output-per-1m: 0.75
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Responses API for reasoning with tools; conservative above-272K prompt rates. https://developers.openai.com/api/docs/models/gpt-6-luna New routes remain BYOK until quality qualification."
+    "[gpt-6-astra]":
+      provider: openai
+      chain-tier: ARCHITECT
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1050000
+      max-output-tokens: 128000
+      display-label: "GPT-6 Astra"
+      pricing:
+        input-per-1m: 20
+        cached-input-per-1m: 2
+        output-per-1m: 75
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Responses API required for tools; conservative above-272K prompt rates. https://developers.openai.com/api/docs/models/gpt-6-astra New routes remain BYOK until quality qualification."
+    "[gemini-4-argon]":
+      provider: gemini
+      chain-tier: ARCHITECT
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1048576
+      max-output-tokens: 32768
+      display-label: "Gemini 4 Argon"
+      pricing:
+        input-per-1m: 2
+        cached-input-per-1m: 0.1
+        output-per-1m: 10
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Account-reported output cap; Introductory rates through 2026-11-30; refresh before December pricing. https://ai.google.dev/gemini-api/docs/pricing New routes remain BYOK until quality qualification."
+    "[gemini-3.8-flash]":
+      provider: gemini
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1048576
+      max-output-tokens: 65536
+      display-label: "Gemini 3.8 Flash"
+      pricing:
+        input-per-1m: 0.75
+        cached-input-per-1m: 0.075
+        output-per-1m: 3.75
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Introductory rates through 2026-12-31. https://ai.google.dev/gemini-api/docs/pricing New routes remain BYOK until quality qualification."
+    "[gemini-3.8-flash-or]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1048576
+      max-output-tokens: 65536
+      display-label: "Gemini 3.8 Flash (OpenRouter)"
+      pricing:
+        input-per-1m: 0.825
+        cached-input-per-1m: 0.0825
+        output-per-1m: 4.125
+      notes: "Verified against official documentation and live model discovery 2026-10-18. https://openrouter.ai/google/gemini-3.8-flash New routes remain BYOK until quality qualification."
+    "[deepseek-flash-native]":
+      provider: deepseek
+      chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: true
+      context-limit: 1048576
+      max-output-tokens: 131072
+      display-label: "DeepSeek V4.1 Flash 1017 (Native)"
+      pricing:
+        input-per-1m: 0.3
+        cached-input-per-1m: 0.006
+        output-per-1m: 1.2
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Native deepseek-flash resolves to DeepSeek-V4.1-Flash-1017. Conservative peak rates. https://api-docs.deepseek.com/quick_start/pricing/ Canonical alias retains the existing native Flash managed/free eligibility; retired wire aliases already serve this same version."
+    "[deepseek-v4.1-flash-1017]":
+      provider: openrouter
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1048576
+      max-output-tokens: 32768
+      display-label: "DeepSeek V4.1 Flash 1017 (OpenRouter)"
+      pricing:
+        input-per-1m: 0.3
+        cached-input-per-1m: 0.006
+        output-per-1m: 1.2
+      notes: "Verified against official documentation and live model discovery 2026-10-18. Pinned release; conservative peak rates. https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017 New routes remain BYOK until quality qualification."
+    "[deepseek-v4p1-flash-1017-fw]":
+      provider: fireworks
+      chain-tier: CAPABLE
+      cost-class: BALANCED
+      quality-class: HIGH
+      managed-ai-enabled: false
+      context-limit: 1048576
+      max-output-tokens: 32768
+      display-label: "DeepSeek V4.1 Flash 1017 (Fireworks)"
+      pricing:
+        input-per-1m: 0.3
+        cached-input-per-1m: 0.006
+        output-per-1m: 1.2
+      notes: "Verified against official documentation and live model discovery 2026-10-18. accounts/fireworks/models/deepseek-v4p1-flash-1017. https://fireworks.ai/models New routes remain BYOK until quality qualification."
+    "[glm-5p3-flash-fw]":
+      provider: fireworks
+      chain-tier: UTILITY
+      cost-class: CHEAP
+      quality-class: BASIC
+      managed-ai-enabled: false
+      context-limit: 1048576
+      max-output-tokens: 32768
+      display-label: "GLM 5.3 Flash (Fireworks)"
+      pricing:
+        input-per-1m: 0.15
+        cached-input-per-1m: 0.15
+        output-per-1m: 0.5
+      notes: "Verified against official documentation and live model discovery 2026-10-18. accounts/fireworks/models/glm-5p3-flash. No unverified cache discount is assumed. https://fireworks.ai/models New routes remain BYOK until quality qualification."
     claude-opus-4-6:
       provider: anthropic
       chain-tier: ARCHITECT
@@ -664,12 +860,10 @@ model-matrix:
       max-output-tokens: 131072
       display-label: "DeepSeek V4 Pro (Native)"
       pricing:
-        input-per-1m: 0.435
-        cached-input-per-1m: 0.003625
-        output-per-1m: 0.87
-      notes: |
-        DeepSeek native api.deepseek.com — ENTERPRISE BYOK. Native pricing refreshed 2026-07-02 from DeepSeek docs: $0.435 cache-miss input / $0.003625 cache-hit input / $0.87 output per 1M.
-        TIER-ACTIVE (RL-2026-06-053): the deepseek provider's planning + workhorse tiers. Official maximum output is 384K; ExecuteSpec conservatively exposes 128K. Verified live 2026-06-18 — Pro works multi-turn with tools on auto tool_choice and api.deepseek.com does NOT require the reasoning_content echo (the earlier blocker is resolved; OpenAiNativeToolClient captures + replays it regardless). Caveat: thinking mode rejects tool_choice="required" — the worker salvage already falls back to auto and the planner doesn't force it on the OpenAI-wire path, so it's non-blocking.
+        input-per-1m: 1.32
+        cached-input-per-1m: 0.044
+        output-per-1m: 3.96
+      notes: "Native deepseek-v4-pro serves the current Pro-0813 release. Conservative peak pricing: $1.32 input / $0.044 cached / $3.96 output per 1M. https://api-docs.deepseek.com/quick_start/pricing/ verified 2026-10-18. Official output cap is 384K; this application exposes 128K."
     deepseek-v4-flash-native:
       provider: deepseek
       chain-tier: UTILITY
@@ -681,10 +875,10 @@ model-matrix:
       max-output-tokens: 131072
       display-label: "DeepSeek V4 Flash (Native)"
       pricing:
-        input-per-1m: 0.14
-        cached-input-per-1m: 0.0028
-        output-per-1m: 0.28
-      notes: "DeepSeek native api.deepseek.com (Flash) — ENTERPRISE BYOK. Pricing refreshed 2026-07-02 from DeepSeek docs: $0.14 cache-miss input / $0.0028 cache-hit input / $0.28 output per 1M. Official maximum output is 384K; ExecuteSpec conservatively exposes 128K. Replaces the OpenRouter detour for the cheap chat-style tier. RL-2026-05-052."
+        input-per-1m: 0.30
+        cached-input-per-1m: 0.006
+        output-per-1m: 1.20
+      notes: "Legacy wire alias deepseek-v4-flash now serves V4.1-Flash-1017. Current pricing must apply to persisted pins too: conservative peak $0.30 input / $0.006 cached / $1.20 output per 1M. New selection uses deepseek-flash-native. https://api-docs.deepseek.com/quick_start/pricing/ verified 2026-10-18."
     deepseek-v4-flash:
       provider: openrouter
       chain-tier: UTILITY
@@ -976,11 +1170,11 @@ model-matrix:
 
   free-tier:
     provider: deepseek
-    model: deepseek-v4-flash-native
+    model: deepseek-flash-native
     # Model-level allow-list for the FREE tier (supersedes `provider`): low-price native DeepSeek only.
     # Edit this list to tune exactly which models free users may run.
     models:
-      - deepseek-v4-flash-native
+      - deepseek-flash-native
 
   agent-tier-map:
     OutlinePlannerAgent: PLANNING

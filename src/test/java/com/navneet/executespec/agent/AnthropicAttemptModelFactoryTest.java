@@ -95,6 +95,37 @@ class AnthropicAttemptModelFactoryTest {
     assertWorkspaceHeader("platform-key", "platform-key", "", null);
   }
 
+  @Test
+  void metadataThinkingOptionsAreAppliedOnlyToTheAdmittedMetadataAttempt() throws Exception {
+    AtomicReference<String> received = new AtomicReference<>();
+    String baseUrl =
+        startServer(
+            exchange -> {
+              received.set(
+                  new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+              respond(exchange, 400, "{\"error\":{\"message\":\"fixture rejection\"}}");
+            });
+    var factory = new AnthropicAttemptModelFactory(new AnthropicWorkspaceHeaders("", ""));
+    for (String model : List.of("claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5")) {
+      var metadata = factory.create("test-key", model, 2048, 5, baseUrl, true);
+      assertThatThrownBy(() -> metadata.call(new Prompt(List.of(new UserMessage("classify")))))
+          .isInstanceOf(RuntimeException.class);
+      var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(received.get());
+      assertThat(json.path("thinking").path("type").asText())
+          .isEqualTo(model.contains("sonnet") ? "between_tools" : "disabled");
+      assertThat(json.path("output_config").path("effort").asText()).isEqualTo("low");
+      assertThat(json.path("max_tokens").asInt()).isEqualTo(2048);
+    }
+    var worker = factory.create("test-key", "claude-sonnet-5-5", 8192, 5, baseUrl, false);
+    assertThatThrownBy(() -> worker.call(new Prompt(List.of(new UserMessage("implement")))))
+        .isInstanceOf(RuntimeException.class);
+    assertThat(
+            new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(received.get())
+                .has("thinking"))
+        .isFalse();
+  }
+
   private void assertWorkspaceHeader(
       String selectedKey, String platformKey, String workspaceId, String expected)
       throws Exception {
